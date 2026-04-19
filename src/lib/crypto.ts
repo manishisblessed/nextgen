@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { env } from "./env";
+import { requireEnv } from "./env";
 
 /**
  * AES-256-GCM helpers for encrypting PII (PAN / Aadhaar / bank account) at
@@ -8,8 +8,7 @@ import { env } from "./env";
 const ALGO = "aes-256-gcm";
 
 function key() {
-  // Derive a stable 32-byte key from APP_ENCRYPTION_KEY.
-  return crypto.createHash("sha256").update(env.APP_ENCRYPTION_KEY).digest();
+  return crypto.createHash("sha256").update(requireEnv("APP_ENCRYPTION_KEY")).digest();
 }
 
 export function encrypt(plain: string): string {
@@ -30,7 +29,7 @@ export function decrypt(payload: string): string {
 
 /** Stable HMAC for things you need to lookup but not reverse (e.g. PAN dedupe). */
 export function hmac(value: string): string {
-  return crypto.createHmac("sha256", env.APP_ENCRYPTION_KEY).update(value).digest("hex");
+  return crypto.createHmac("sha256", requireEnv("APP_ENCRYPTION_KEY")).update(value).digest("hex");
 }
 
 /** Hash with sha256 — for API key secrets, OTP codes, etc. */
