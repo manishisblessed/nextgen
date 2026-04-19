@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Input, Select } from "@/components/ui/Input";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { auditEvents, type AuditEvent } from "@/lib/data";
 import { Search, Filter } from "lucide-react";
 
@@ -52,6 +53,23 @@ export default function AdminAuditPage() {
         eyebrow="Admin"
         title="Audit log"
         description="Immutable record of every privileged action across the platform. Exported daily to S3 + WORM storage."
+        actions={
+          <ReportActions
+            filename="audit-log"
+            title="Payprism India · Audit Log"
+            subtitle={`${rows.length} of ${auditEvents.length} events`}
+            columns={[
+              { key: "id", header: "Event ID" },
+              { key: "actor", header: "Actor" },
+              { key: "action", header: "Action" },
+              { key: "target", header: "Target" },
+              { key: "ip", header: "IP" },
+              { key: "severity", header: "Severity" },
+              { key: "ts", header: "When" }
+            ]}
+            rows={rows}
+          />
+        }
       />
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-ink-100 bg-white p-4">
         <div className="relative min-w-[220px] flex-1">

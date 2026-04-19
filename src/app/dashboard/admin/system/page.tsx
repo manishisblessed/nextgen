@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { Badge } from "@/components/ui/Badge";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { systemMetrics, type SystemMetric } from "@/lib/data";
 
 export default function AdminSystemPage() {
@@ -31,6 +32,21 @@ export default function AdminSystemPage() {
         eyebrow="Admin"
         title="System health"
         description="Live SLO board for every payment switch and service. Pages PagerDuty when error budget burns &gt; 2%."
+        actions={
+          <ReportActions
+            filename="system-health"
+            title="Payprism India · System Health"
+            subtitle="Per-service SLO snapshot"
+            columns={[
+              { key: "service", header: "Service" },
+              { key: "uptime", header: "Uptime (24h)" },
+              { key: "p95ms", header: "P95 latency (ms)" },
+              { key: "txnsToday", header: "Txns today" },
+              { key: "errorRate", header: "Error rate" }
+            ]}
+            rows={systemMetrics}
+          />
+        }
       />
 
       <div className="grid gap-4 md:grid-cols-3">

@@ -19,6 +19,8 @@ export default function DashboardLayout({
     const s = getSession();
     if (!s) {
       router.replace("/login");
+    } else if (s.role === "sub-admin" && s.mustChangePassword) {
+      router.replace("/sub-admin/change-password");
     } else {
       setReady(true);
     }

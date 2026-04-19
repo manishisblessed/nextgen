@@ -1,10 +1,10 @@
 "use client";
 
-import { Download } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import { Button } from "@/components/ui/Button";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { TransactionsTable } from "@/components/dashboard/TransactionsTable";
+import { ReportActions } from "@/components/dashboard/ReportActions";
+import { recentTransactions } from "@/lib/data";
 import { formatINR } from "@/lib/utils";
 
 const series = [
@@ -14,18 +14,37 @@ const series = [
   { label: "Bills", color: "#059669", values: [1200, 1400, 1600, 1800, 1900, 2200, 2400, 2600, 2900, 3100, 3400, 3600, 3800, 4100] }
 ];
 
+const serviceTrendRows = series.map((s) => ({
+  service: s.label,
+  total: s.values.reduce((a, b) => a + b, 0),
+  peak: Math.max(...s.values),
+  average: Math.round(s.values.reduce((a, b) => a + b, 0) / s.values.length),
+  trend: s.values.join(" / ")
+}));
+
 export default function ReportsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Reports"
         title="Business reports"
-        description="Service-wise turnover, commissions and trends. Export anything to CSV / PDF."
+        description="Service-wise turnover, commissions and trends. Preview, then export to CSV or PDF."
         actions={
-          <>
-            <Button variant="outline"><Download className="h-4 w-4" /> CSV</Button>
-            <Button><Download className="h-4 w-4" /> PDF report</Button>
-          </>
+          <ReportActions
+            filename="business-report"
+            title="Payprism India · Business Report"
+            subtitle="Service-wise turnover, commissions, transactions"
+            columns={[
+              { key: "id", header: "Txn ID" },
+              { key: "service", header: "Service" },
+              { key: "customer", header: "Customer" },
+              { key: "amount", header: "Amount (INR)" },
+              { key: "commission", header: "Commission (INR)" },
+              { key: "status", header: "Status" },
+              { key: "date", header: "Date" }
+            ]}
+            rows={recentTransactions}
+          />
         }
       />
 
@@ -44,8 +63,23 @@ export default function ReportsPage() {
       </div>
 
       <div className="rounded-2xl border border-ink-100 bg-white p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-display text-base font-semibold text-ink-900">Service trends · last 14 days</h3>
+          <div className="flex flex-wrap gap-2">
+            <ReportActions
+              filename="service-trends-14d"
+              title="Payprism India · Service Trends (14 days)"
+              subtitle="Daily totals per service"
+              columns={[
+                { key: "service", header: "Service" },
+                { key: "total", header: "14-day total" },
+                { key: "peak", header: "Peak day" },
+                { key: "average", header: "Daily average" },
+                { key: "trend", header: "Daily series" }
+              ]}
+              rows={serviceTrendRows}
+            />
+          </div>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {series.map((s) => (

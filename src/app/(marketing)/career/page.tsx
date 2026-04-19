@@ -63,7 +63,6 @@ export default function CareerPage() {
         eyebrow="Careers"
         title={<>Build the future of <span className="gradient-text">Bharat's banking</span></>}
         description="Join a team of doers, dreamers and builders making formal financial services accessible to every Indian. We're hiring across engineering, design, sales and ops."
-        breadcrumbs={[{ label: "Home", href: "/" }, { label: "Career" }]}
       />
 
       <Section className="bg-white">

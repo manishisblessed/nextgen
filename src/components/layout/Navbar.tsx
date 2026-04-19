@@ -45,16 +45,18 @@ export function Navbar() {
                   )}
                 </Link>
                 {item.children && (
-                  <div className="invisible absolute left-1/2 top-full z-40 mt-2 w-64 -translate-x-1/2 rounded-2xl border border-ink-100 bg-white p-2 opacity-0 shadow-soft transition group-hover:visible group-hover:opacity-100">
-                    {item.children.map((child) => (
-                      <Link
-                        key={child.label}
-                        href={child.href}
-                        className="block rounded-xl px-3 py-2 text-sm text-ink-700 transition hover:bg-brand-50 hover:text-brand-700"
-                      >
-                        {child.label}
-                      </Link>
-                    ))}
+                  <div className="invisible absolute left-1/2 top-full z-40 w-64 -translate-x-1/2 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                    <div className="rounded-2xl border border-ink-100 bg-white p-2 shadow-soft">
+                      {item.children.map((child) => (
+                        <Link
+                          key={child.label}
+                          href={child.href}
+                          className="block rounded-xl px-3 py-2 text-sm text-ink-700 transition hover:bg-brand-50 hover:text-brand-700"
+                        >
+                          {child.label}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
                 )}
               </li>

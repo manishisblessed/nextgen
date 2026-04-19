@@ -26,6 +26,7 @@ import {
   HandCoins,
   Boxes,
   Globe,
+  UserCog,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -120,12 +121,27 @@ export const navByRole: Record<Role, NavGroup[]> = {
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/admin/users", label: "Users", icon: Users },
+        { href: "/dashboard/admin/sub-admins", label: "Sub-Admins", icon: UserCog },
         { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/admin/billers", label: "Billers / Routing", icon: Boxes },
         { href: "/dashboard/admin/commissions", label: "Commission Master", icon: CircleDollarSign },
         { href: "/dashboard/admin/settlements", label: "Settlements", icon: Banknote },
         { href: "/dashboard/admin/audit", label: "Audit Log", icon: ScrollText },
         { href: "/dashboard/admin/system", label: "System Health", icon: ServerCog }
+      ]
+    },
+    { heading: "Account", items: account }
+  ],
+
+  "sub-admin": [
+    {
+      heading: "Workspace",
+      items: [
+        { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+        { href: "/dashboard/admin/users", label: "Users", icon: Users },
+        { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
+        { href: "/dashboard/admin/billers", label: "Billers / Routing", icon: Boxes },
+        { href: "/dashboard/admin/settlements", label: "Settlements", icon: Banknote }
       ]
     },
     { heading: "Account", items: account }

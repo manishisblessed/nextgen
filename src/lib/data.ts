@@ -433,7 +433,7 @@ export type NetworkUser = {
 
 export const networkUsers: NetworkUser[] = [
   {
-    id: "MD-1001",
+    id: "PPIM1001",
     name: "Neha Kapoor",
     shop: "Kapoor Capital",
     role: "master-distributor",
@@ -446,11 +446,11 @@ export const networkUsers: NetworkUser[] = [
     retailers: 482
   },
   {
-    id: "DT-2003",
+    id: "PPID2003",
     name: "Rohit Verma",
     shop: "Verma Enterprises",
     role: "distributor",
-    parentId: "MD-1001",
+    parentId: "PPIM1001",
     city: "Lucknow",
     state: "Uttar Pradesh",
     joined: "Mar 04, 2024",
@@ -460,11 +460,11 @@ export const networkUsers: NetworkUser[] = [
     retailers: 86
   },
   {
-    id: "DT-2017",
+    id: "PPID2017",
     name: "Sandeep Kulkarni",
     shop: "SK Distributors",
     role: "distributor",
-    parentId: "MD-1001",
+    parentId: "PPIM1001",
     city: "Pune",
     state: "Maharashtra",
     joined: "Apr 22, 2024",
@@ -474,11 +474,11 @@ export const networkUsers: NetworkUser[] = [
     retailers: 61
   },
   {
-    id: "DT-2024",
+    id: "PPID2024",
     name: "Anita Bose",
     shop: "Bose Tradelink",
     role: "distributor",
-    parentId: "MD-1001",
+    parentId: "PPIM1001",
     city: "Kolkata",
     state: "West Bengal",
     joined: "Jun 17, 2024",
@@ -488,11 +488,11 @@ export const networkUsers: NetworkUser[] = [
     retailers: 4
   },
   {
-    id: "RT-3091",
+    id: "PPIR3091",
     name: "Aman Sharma",
     shop: "Sharma Mobile World",
     role: "retailer",
-    parentId: "DT-2003",
+    parentId: "PPID2003",
     city: "Lucknow",
     state: "Uttar Pradesh",
     joined: "Aug 10, 2024",
@@ -501,11 +501,11 @@ export const networkUsers: NetworkUser[] = [
     monthlyTurnover: 184500
   },
   {
-    id: "RT-3104",
+    id: "PPIR3104",
     name: "Mukesh Kumar",
     shop: "Satkartar Telecom",
     role: "retailer",
-    parentId: "DT-2003",
+    parentId: "PPID2003",
     city: "Kanpur",
     state: "Uttar Pradesh",
     joined: "Sep 02, 2024",
@@ -514,11 +514,11 @@ export const networkUsers: NetworkUser[] = [
     monthlyTurnover: 312700
   },
   {
-    id: "RT-3140",
+    id: "PPIR3140",
     name: "Priya Sharma",
     shop: "Sharma Recharge Hub",
     role: "retailer",
-    parentId: "DT-2003",
+    parentId: "PPID2003",
     city: "Varanasi",
     state: "Uttar Pradesh",
     joined: "Oct 19, 2024",
@@ -527,11 +527,11 @@ export const networkUsers: NetworkUser[] = [
     monthlyTurnover: 145200
   },
   {
-    id: "RT-3201",
+    id: "PPIR3201",
     name: "Kavita Devi",
     shop: "Devi Sewa Kendra",
     role: "retailer",
-    parentId: "DT-2017",
+    parentId: "PPID2017",
     city: "Nashik",
     state: "Maharashtra",
     joined: "Nov 11, 2024",
@@ -540,11 +540,11 @@ export const networkUsers: NetworkUser[] = [
     monthlyTurnover: 8200
   },
   {
-    id: "RT-3217",
+    id: "PPIR3217",
     name: "Sanjay Patil",
     shop: "Patil Enterprises",
     role: "retailer",
-    parentId: "DT-2017",
+    parentId: "PPID2017",
     city: "Solapur",
     state: "Maharashtra",
     joined: "Dec 04, 2024",
@@ -570,9 +570,9 @@ export type FundRequest = {
 export const fundRequests: FundRequest[] = [
   {
     id: "FR-9001",
-    fromId: "RT-3091",
+    fromId: "PPIR3091",
     fromName: "Aman Sharma",
-    toId: "DT-2003",
+    toId: "PPID2003",
     amount: 25000,
     mode: "IMPS",
     reference: "P2A8765",
@@ -581,9 +581,9 @@ export const fundRequests: FundRequest[] = [
   },
   {
     id: "FR-9002",
-    fromId: "RT-3104",
+    fromId: "PPIR3104",
     fromName: "Mukesh Kumar",
-    toId: "DT-2003",
+    toId: "PPID2003",
     amount: 50000,
     mode: "NEFT",
     reference: "N2A65541",
@@ -592,9 +592,9 @@ export const fundRequests: FundRequest[] = [
   },
   {
     id: "FR-9003",
-    fromId: "RT-3140",
+    fromId: "PPIR3140",
     fromName: "Priya Sharma",
-    toId: "DT-2003",
+    toId: "PPID2003",
     amount: 15000,
     mode: "UPI",
     reference: "UPI/9982",
@@ -603,9 +603,9 @@ export const fundRequests: FundRequest[] = [
   },
   {
     id: "FR-9004",
-    fromId: "RT-3201",
+    fromId: "PPIR3201",
     fromName: "Kavita Devi",
-    toId: "DT-2017",
+    toId: "PPID2017",
     amount: 3000,
     mode: "Cash Deposit",
     reference: "CDM-NASIK-78112",
@@ -736,8 +736,8 @@ export type AuditEvent = {
 
 export const auditEvents: AuditEvent[] = [
   { id: "AU-94221", actor: "admin@payprismindia.com", action: "Approved KYC", target: "Vivek Joshi (KYC-004)", ip: "10.18.4.21", ts: "Apr 19, 10:22 AM", severity: "info" },
-  { id: "AU-94220", actor: "neha.k@payprismindia.com", action: "Override commission", target: "DMT IMPS · DT-2017", ip: "49.207.211.4", ts: "Apr 19, 09:51 AM", severity: "warn" },
-  { id: "AU-94219", actor: "admin@payprismindia.com", action: "Suspended retailer", target: "RT-3217 (Patil Enterprises)", ip: "10.18.4.21", ts: "Apr 19, 09:14 AM", severity: "danger" },
+  { id: "AU-94220", actor: "neha.k@payprismindia.com", action: "Override commission", target: "DMT IMPS · PPID2017", ip: "49.207.211.4", ts: "Apr 19, 09:51 AM", severity: "warn" },
+  { id: "AU-94219", actor: "admin@payprismindia.com", action: "Suspended retailer", target: "PPIR3217 (Patil Enterprises)", ip: "10.18.4.21", ts: "Apr 19, 09:14 AM", severity: "danger" },
   { id: "AU-94218", actor: "system", action: "Biller routing failover", target: "DTH · Tata Play → fallback", ip: "n/a", ts: "Apr 19, 08:42 AM", severity: "warn" },
   { id: "AU-94217", actor: "rohit.v@payprismindia.com", action: "Approved fund request", target: "FR-9003 · ₹15,000", ip: "182.65.21.99", ts: "Apr 18, 06:30 PM", severity: "info" },
   { id: "AU-94216", actor: "system", action: "Settlement run", target: "T+1 · ₹8.42 Cr · 12,481 txns", ip: "n/a", ts: "Apr 18, 11:05 PM", severity: "info" }

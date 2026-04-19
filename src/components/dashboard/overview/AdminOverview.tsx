@@ -92,7 +92,7 @@ export function AdminOverview({ session }: { session: Session }) {
             </li>
             <li className="rounded-xl bg-rose-50 p-3 text-rose-900">
               <p className="font-semibold">Velocity rule fired</p>
-              <p className="text-xs text-rose-800">Retailer RT-3217 · 18 AePS in 12 mins</p>
+              <p className="text-xs text-rose-800">Retailer PPIR3217 · 18 AePS in 12 mins</p>
             </li>
             <li className="rounded-xl bg-brand-50 p-3 text-brand-900">
               <p className="font-semibold">Settlement scheduled</p>

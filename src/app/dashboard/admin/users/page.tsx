@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search, Filter, Download, MoreHorizontal, ShieldOff, ShieldCheck } from "lucide-react";
+import { Search, Filter, MoreHorizontal, ShieldOff, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
-import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { networkUsers, type NetworkUser } from "@/lib/data";
 import { formatINR } from "@/lib/utils";
 
@@ -96,9 +96,24 @@ export default function AdminUsersPage() {
         title="Users & shops"
         description="Search, filter and manage every retailer, distributor and master across the platform."
         actions={
-          <Button variant="outline">
-            <Download className="h-4 w-4" /> Export CSV
-          </Button>
+          <ReportActions
+            filename="users"
+            title="Payprism India · Users & Shops"
+            subtitle={`${filtered.length} of ${networkUsers.length} users`}
+            columns={[
+              { key: "id", header: "Code" },
+              { key: "name", header: "Name" },
+              { key: "shop", header: "Shop / Firm" },
+              { key: "role", header: "Role" },
+              { key: "city", header: "City" },
+              { key: "state", header: "State" },
+              { key: "joined", header: "Joined" },
+              { key: "status", header: "Status" },
+              { key: "walletBalance", header: "Wallet (INR)" },
+              { key: "monthlyTurnover", header: "MTD Turnover (INR)" }
+            ]}
+            rows={filtered}
+          />
         }
       />
 

@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { History, Search, Download, Filter } from "lucide-react";
+import { History, Search, Filter } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { Input, Select } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { TransactionsTable } from "@/components/dashboard/TransactionsTable";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { recentTransactions } from "@/lib/data";
 
 export default function TransactionsPage() {
@@ -91,10 +92,21 @@ export default function TransactionsPage() {
           <Filter className="h-4 w-4" />
           More filters
         </Button>
-        <Button variant="outline" size="md">
-          <Download className="h-4 w-4" />
-          Export CSV
-        </Button>
+        <ReportActions
+          filename="transactions"
+          title="Payprism India · Transactions"
+          subtitle={`Filtered view · ${data.length} of ${recentTransactions.length} records`}
+          columns={[
+            { key: "id", header: "Txn ID" },
+            { key: "service", header: "Service" },
+            { key: "customer", header: "Customer" },
+            { key: "amount", header: "Amount (INR)" },
+            { key: "commission", header: "Commission (INR)" },
+            { key: "status", header: "Status" },
+            { key: "date", header: "Date" }
+          ]}
+          rows={data}
+        />
       </div>
 
       <TransactionsTable data={data} showHeader={false} />

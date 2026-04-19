@@ -8,6 +8,7 @@ import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { networkUsers, type NetworkUser } from "@/lib/data";
 import { getSession } from "@/lib/auth";
 import { formatINR } from "@/lib/utils";
@@ -24,7 +25,7 @@ export default function NetworkPage() {
 
   const childRole: NetworkUser["role"] =
     role === "master-distributor" ? "distributor" : "retailer";
-  const myParentId = role === "master-distributor" ? "MD-1001" : "DT-2003";
+  const myParentId = role === "master-distributor" ? "PPIM1001" : "PPID2003";
 
   const rows = useMemo(() => {
     return networkUsers.filter((u) => {
@@ -83,12 +84,31 @@ export default function NetworkPage() {
           ? "Direct distributors. Override commissions, top-up wallets, freeze or graduate accounts."
           : "Retailers in your network. Approve fund requests, set commissions, and watch turnover."}
         actions={
-          <Link href="/dashboard/network/onboard">
-            <Button>
-              <PackagePlus className="h-4 w-4" />
-              {role === "master-distributor" ? "Onboard distributor" : "Onboard retailer"}
-            </Button>
-          </Link>
+          <>
+            <ReportActions
+              filename={`my-${childRole === "distributor" ? "distributors" : "retailers"}`}
+              title={`Payprism India · My ${childRole === "distributor" ? "Distributors" : "Retailers"}`}
+              subtitle={`${rows.length} record${rows.length === 1 ? "" : "s"}`}
+              columns={[
+                { key: "id", header: "Code" },
+                { key: "name", header: "Name" },
+                { key: "shop", header: "Shop / Firm" },
+                { key: "city", header: "City" },
+                { key: "state", header: "State" },
+                { key: "joined", header: "Joined" },
+                { key: "status", header: "Status" },
+                { key: "walletBalance", header: "Wallet (INR)" },
+                { key: "monthlyTurnover", header: "MTD Turnover (INR)" }
+              ]}
+              rows={rows}
+            />
+            <Link href="/dashboard/network/onboard">
+              <Button>
+                <PackagePlus className="h-4 w-4" />
+                {role === "master-distributor" ? "Onboard distributor" : "Onboard retailer"}
+              </Button>
+            </Link>
+          </>
         }
       />
 

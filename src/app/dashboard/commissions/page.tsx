@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Save, Sparkles } from "lucide-react";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { commissionSlabs, type CommissionSlab } from "@/lib/data";
 import { getSession, type Role } from "@/lib/auth";
 
@@ -45,6 +46,29 @@ export default function CommissionsPage() {
           : "Configure how much each retailer earns per transaction. Capped by master rate-card."}
         actions={
           <>
+            <ReportActions
+              filename="commission-slabs"
+              title={
+                role === "master-distributor"
+                  ? "Payprism India · Commission Master"
+                  : "Payprism India · Commission Slabs"
+              }
+              subtitle="Service-wise rate-card"
+              columns={[
+                { key: "service", header: "Service" },
+                { key: "retailer", header: "Retailer payout" },
+                { key: "distributor", header: "Distributor override" },
+                ...(role === "master-distributor"
+                  ? [
+                      {
+                        key: "master" as const,
+                        header: "Master override"
+                      }
+                    ]
+                  : [])
+              ]}
+              rows={commissionSlabs}
+            />
             <Button variant="outline">
               <Sparkles className="h-4 w-4" /> Apply template
             </Button>

@@ -44,7 +44,6 @@ export default function ContactPage() {
         eyebrow="Contact"
         title={<>We'd love to <span className="gradient-text">hear from you</span></>}
         description="Got a question, want to partner, or need help with a transaction? Pick a channel below and our team will get back to you in record time."
-        breadcrumbs={[{ label: "Home", href: "/" }, { label: "Contact" }]}
       />
 
       <Section className="bg-white">

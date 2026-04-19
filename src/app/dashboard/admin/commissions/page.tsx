@@ -3,6 +3,7 @@
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { commissionSlabs, type CommissionSlab } from "@/lib/data";
 import { Plus, Save } from "lucide-react";
 
@@ -32,6 +33,18 @@ export default function AdminCommissionsPage() {
         description="Master rate-card across services. Distributors can only set rates within these caps."
         actions={
           <>
+            <ReportActions
+              filename="commission-master"
+              title="Payprism India · Commission Master"
+              subtitle="Service-wise rate-card"
+              columns={[
+                { key: "service", header: "Service" },
+                { key: "retailer", header: "Retailer payout" },
+                { key: "distributor", header: "Distributor override" },
+                { key: "master", header: "Master override" }
+              ]}
+              rows={commissionSlabs}
+            />
             <Button variant="outline">
               <Plus className="h-4 w-4" /> New slab
             </Button>

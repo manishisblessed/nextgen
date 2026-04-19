@@ -3,7 +3,12 @@
 const SESSION_KEY = "pp_session";
 const COOKIE_NAME = "pp_logged_in";
 
-export type Role = "admin" | "master-distributor" | "distributor" | "retailer";
+export type Role =
+  | "admin"
+  | "sub-admin"
+  | "master-distributor"
+  | "distributor"
+  | "retailer";
 
 export type Session = {
   name: string;
@@ -14,6 +19,14 @@ export type Session = {
   /** Higher tiers see hierarchy turnover instead of personal commission */
   monthlyTurnover?: number;
   loggedInAt: number;
+  /**
+   * Set true on a freshly-issued sub-admin account. The dashboard layout
+   * will force-redirect such users to /sub-admin/change-password until
+   * they pick their own password.
+   */
+  mustChangePassword?: boolean;
+  /** Network code (PPIR.../PPID.../PPIM.../PPSA...) when applicable. */
+  userCode?: string;
 };
 
 export const demoSessions: Record<Role, Session> = {
@@ -51,6 +64,15 @@ export const demoSessions: Record<Role, Session> = {
     role: "admin",
     walletBalance: 0,
     monthlyTurnover: 184000000,
+    loggedInAt: Date.now()
+  },
+  "sub-admin": {
+    name: "Payprism Sub-Admin",
+    email: "subadmin@payprismindia.com",
+    phone: "+91 90000 00042",
+    role: "sub-admin",
+    walletBalance: 0,
+    monthlyTurnover: 96000000,
     loggedInAt: Date.now()
   }
 };
@@ -107,5 +129,11 @@ export const roleMeta: Record<
     tagline: "KYC, billers, audit, system & risk",
     accent: "from-ink-700 to-brand-600",
     pillar: "platform"
+  },
+  "sub-admin": {
+    label: "Sub-Admin",
+    tagline: "Operations & approvals delegated by Admin",
+    accent: "from-slate-700 to-brand-500",
+    pillar: "operations"
   }
 };

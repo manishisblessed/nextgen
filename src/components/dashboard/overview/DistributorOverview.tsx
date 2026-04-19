@@ -20,7 +20,7 @@ import { formatINR } from "@/lib/utils";
 
 export function DistributorOverview({ session }: { session: Session }) {
   const myRetailers = networkUsers.filter(
-    (u) => u.role === "retailer" && u.parentId === "DT-2003"
+    (u) => u.role === "retailer" && u.parentId === "PPID2003"
   );
   const pending = fundRequests.filter((f) => f.status === "Pending");
 

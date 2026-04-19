@@ -51,7 +51,6 @@ export default function AboutPage() {
         eyebrow="About us"
         title={<>Building a smarter Bharat, <span className="gradient-text">one transaction at a time</span></>}
         description="Payprism (operated by Payprism Technology Pvt. Ltd., CIN U74990DL2022PTC407681) is a digital banking & utility fintech platform on a mission to simplify financial services for every Indian. From village kiranas to urban distributors, our retailers serve millions of customers every day."
-        breadcrumbs={[{ label: "Home", href: "/" }, { label: "About" }]}
       />
 
       <Section className="bg-white">

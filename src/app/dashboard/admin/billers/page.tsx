@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { billers, type Biller } from "@/lib/data";
 import { Settings2 } from "lucide-react";
 
@@ -41,9 +42,24 @@ export default function AdminBillersPage() {
         title="Billers & routing"
         description="Manage 1,200+ billers across BBPS, NPCI, NETC and direct integrations. Configure failover routes, toggle live, and monitor uptime."
         actions={
-          <Button variant="outline">
-            <Settings2 className="h-4 w-4" /> Routing rules
-          </Button>
+          <>
+            <ReportActions
+              filename="billers"
+              title="Payprism India · Billers & Routing"
+              subtitle="Category-level uptime and routing"
+              columns={[
+                { key: "category", header: "Category" },
+                { key: "count", header: "Billers" },
+                { key: "routing", header: "Routing" },
+                { key: "uptime", header: "Uptime (24h)" },
+                { key: "status", header: "Status" }
+              ]}
+              rows={billers}
+            />
+            <Button variant="outline">
+              <Settings2 className="h-4 w-4" /> Routing rules
+            </Button>
+          </>
         }
       />
 

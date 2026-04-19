@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { getSession, type Role } from "@/lib/auth";
-import { generateRefId } from "@/lib/utils";
+import { generateUserCode } from "@/lib/utils";
 
 const STEPS = ["Basic info", "KYC", "Commission slab", "Review"] as const;
 
@@ -78,7 +78,14 @@ export default function OnboardPage() {
         onSubmit={(e) => {
           e.preventDefault();
           if (step < STEPS.length - 1) setStep(step + 1);
-          else { setRefId(generateRefId(role === "master-distributor" ? "DT-" : "RT-")); setDone(true); }
+          else {
+            setRefId(
+              generateUserCode(
+                role === "master-distributor" ? "distributor" : "retailer"
+              )
+            );
+            setDone(true);
+          }
         }}
       >
         {step === 0 && (
@@ -117,7 +124,7 @@ export default function OnboardPage() {
           <div className="grid gap-5 md:grid-cols-2">
             <Field label="Slab template">
               <Select>
-                <option>Standard ({role === "master-distributor" ? "DT-default" : "RT-default"})</option>
+                <option>Standard ({role === "master-distributor" ? "PPID-default" : "PPIR-default"})</option>
                 <option>Growth (1.2x AePS payout)</option>
                 <option>Power (custom)</option>
               </Select>

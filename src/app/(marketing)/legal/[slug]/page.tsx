@@ -35,11 +35,6 @@ export default function LegalPage({
         eyebrow="Legal"
         title={title}
         description="Effective from April 2026. Please read the full document carefully."
-        breadcrumbs={[
-          { label: "Home", href: "/" },
-          { label: "Legal" },
-          { label: title }
-        ]}
       />
       <Section className="bg-white">
         <Container>

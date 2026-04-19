@@ -57,7 +57,6 @@ export default function TeamPage() {
         eyebrow="Team"
         title={<>The people behind <span className="gradient-text">Payprism</span></>}
         description="A small, mission-driven team obsessed with building world-class fintech for retailers and consumers across Bharat."
-        breadcrumbs={[{ label: "Home", href: "/" }, { label: "Team" }]}
       />
 
       <Section className="bg-white">

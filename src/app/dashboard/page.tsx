@@ -18,6 +18,7 @@ export default function DashboardHomePage() {
 
   switch (session.role) {
     case "admin":
+    case "sub-admin":
       return <AdminOverview session={session} />;
     case "master-distributor":
       return <MasterOverview session={session} />;

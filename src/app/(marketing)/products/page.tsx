@@ -44,7 +44,6 @@ export default function ProductsPage() {
         eyebrow="Products"
         title={<>One platform, <span className="gradient-text">four powerful products</span></>}
         description="From a retailer's pocket to an enterprise's API stack — Payprism has the right product for your scale."
-        breadcrumbs={[{ label: "Home", href: "/" }, { label: "Products" }]}
       />
 
       <Section className="bg-white">

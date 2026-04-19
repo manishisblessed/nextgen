@@ -11,30 +11,30 @@ import {
   Store,
   Users,
   Network,
-  Lock,
   ArrowRight
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
-import { saveSession, demoSessions, type Role } from "@/lib/auth";
+import { saveSession, demoSessions } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-const roleOptions: { id: Role; label: string; icon: typeof Store; tagline: string }[] = [
+type PublicRole = "retailer" | "distributor" | "master-distributor";
+
+const roleOptions: { id: PublicRole; label: string; icon: typeof Store; tagline: string }[] = [
   { id: "retailer", label: "Retailer", icon: Store, tagline: "Run a single shop" },
   { id: "distributor", label: "Distributor", icon: Users, tagline: "Manage retailers" },
-  { id: "master-distributor", label: "Master", icon: Network, tagline: "White-label & API" },
-  { id: "admin", label: "Admin", icon: Lock, tagline: "Platform control" }
+  { id: "master-distributor", label: "Master", icon: Network, tagline: "White-label & API" }
 ];
 
 export default function LoginPage() {
   const router = useRouter();
-  const [role, setRole] = useState<Role>("retailer");
+  const [role, setRole] = useState<PublicRole>("retailer");
   const [email, setEmail] = useState(demoSessions.retailer.email);
   const [password, setPassword] = useState("demo1234");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  function pickRole(r: Role) {
+  function pickRole(r: PublicRole) {
     setRole(r);
     setEmail(demoSessions[r].email);
   }
@@ -52,13 +52,13 @@ export default function LoginPage() {
       <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-10 text-white shadow-glow lg:flex">
         <div>
           <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
-            <Sparkles className="h-3.5 w-3.5" /> Unified portal · 4 personas
+            <Sparkles className="h-3.5 w-3.5" /> Unified portal · 3 personas
           </span>
           <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
-            One Payprism. <br /> Four powerful dashboards.
+            One Payprism. <br /> Three powerful dashboards.
           </h2>
           <p className="mt-3 text-white/85">
-            Retailer, distributor, master distributor and admin — each with its own purpose-built workspace, KPIs and controls.
+            Retailer, distributor and master distributor — each with its own purpose-built workspace, KPIs and controls.
           </p>
         </div>
 
@@ -90,7 +90,7 @@ export default function LoginPage() {
           <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">
             Demo · pick a role
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {roleOptions.map((r) => {
               const Icon = r.icon;
               const active = role === r.id;

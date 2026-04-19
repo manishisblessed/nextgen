@@ -32,7 +32,6 @@ export default function ServicesPage() {
         eyebrow="Services"
         title={<>Everything your customers need, <span className="gradient-text">in one place</span></>}
         description="Banking, recharges, bills, travel — Payprism packs 60+ services into a single dashboard with real-time settlement and the best commissions in the industry."
-        breadcrumbs={[{ label: "Home", href: "/" }, { label: "Services" }]}
       />
 
       <Section className="bg-white">

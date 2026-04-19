@@ -267,7 +267,7 @@ function AdminVisual() {
       ))}
       <div className="rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 p-3 text-white">
         <p className="text-xs font-semibold uppercase tracking-widest opacity-80">Velocity rule fired</p>
-        <p className="font-display text-sm font-bold">RT-3217 · 18 AePS in 12 mins · auto-hold</p>
+        <p className="font-display text-sm font-bold">PPIR3217 · 18 AePS in 12 mins · auto-hold</p>
       </div>
     </div>
   );

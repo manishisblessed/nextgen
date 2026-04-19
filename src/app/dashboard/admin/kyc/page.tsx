@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { kycRequests, type KycRequest } from "@/lib/data";
 
 export default function AdminKycPage() {
@@ -76,9 +77,28 @@ export default function AdminKycPage() {
         title="KYC approvals"
         description="Review applicant documents, validate PAN/Aadhaar, and approve or reject."
         actions={
-          <Button variant="outline">
-            <ShieldCheck className="h-4 w-4" /> Auto-verify (DigiLocker)
-          </Button>
+          <>
+            <ReportActions
+              filename="kyc-queue"
+              title="Payprism India · KYC Queue"
+              subtitle={`${rows.length} applicants`}
+              columns={[
+                { key: "id", header: "KYC ID" },
+                { key: "name", header: "Applicant" },
+                { key: "shop", header: "Shop / Firm" },
+                { key: "city", header: "City" },
+                { key: "role", header: "Role" },
+                { key: "pan", header: "PAN" },
+                { key: "aadhaar", header: "Aadhaar" },
+                { key: "submittedOn", header: "Submitted" },
+                { key: "status", header: "Status" }
+              ]}
+              rows={rows}
+            />
+            <Button variant="outline">
+              <ShieldCheck className="h-4 w-4" /> Auto-verify (DigiLocker)
+            </Button>
+          </>
         }
       />
 

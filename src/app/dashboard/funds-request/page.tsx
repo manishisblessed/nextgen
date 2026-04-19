@@ -7,6 +7,7 @@ import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
+import { ReportActions } from "@/components/dashboard/ReportActions";
 import { fundRequests, type FundRequest } from "@/lib/data";
 import { getSession, type Role } from "@/lib/auth";
 import { formatINR, generateRefId } from "@/lib/utils";
@@ -81,11 +82,30 @@ export default function FundsRequestPage() {
           ? "Approve incoming wallet top-up requests with bank reference. Auto-credit on approval."
           : "Submit your bank deposit reference to top up your Payprism wallet within minutes."}
         actions={
-          !isApprover && (
-            <Button onClick={() => setShowNew(true)}>
-              <Plus className="h-4 w-4" /> New request
-            </Button>
-          )
+          <>
+            <ReportActions
+              filename="fund-requests"
+              title="Payprism India · Fund Requests"
+              subtitle={isApprover ? "Incoming approvals" : "My requests"}
+              columns={[
+                { key: "id", header: "Request ID" },
+                { key: "fromName", header: "Requested by" },
+                { key: "fromId", header: "Code" },
+                { key: "toId", header: "To" },
+                { key: "amount", header: "Amount (INR)" },
+                { key: "mode", header: "Mode" },
+                { key: "reference", header: "Reference / UTR" },
+                { key: "status", header: "Status" },
+                { key: "date", header: "When" }
+              ]}
+              rows={rows}
+            />
+            {!isApprover && (
+              <Button onClick={() => setShowNew(true)}>
+                <Plus className="h-4 w-4" /> New request
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -122,9 +142,9 @@ function NewRequestForm({
         e.preventDefault();
         onSubmit({
           id: generateRefId("FR-"),
-          fromId: "RT-3091",
+          fromId: "PPIR3091",
           fromName: "Aman Sharma",
-          toId: "DT-2003",
+          toId: "PPID2003",
           amount: parseInt(amount, 10),
           mode,
           reference: ref || "MANUAL",
