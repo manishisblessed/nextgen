@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" role="img" aria-label="Payprism  Banking, Bills, Travel">
+  <defs>
+    <linearGradient id="llBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2f7bff"/>
+      <stop offset="55%" stop-color="#185df5"/>
+      <stop offset="100%" stop-color="#1448dc"/>
+    </linearGradient>
+    <linearGradient id="llShine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="llRayWarm" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffd388" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ffd388" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="llRayCoral" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff9a7a" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ff9a7a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="llRayCyan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7fe1ff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#7fe1ff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="llGlow" cx="0.3" cy="0.3" r="0.7">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="llAccent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7fe1ff"/>
+      <stop offset="100%" stop-color="#ffd388"/>
+    </linearGradient>
+  </defs>
+
+  <g>
+    <rect width="64" height="64" rx="14" fill="url(#llBg)"/>
+    <rect width="64" height="64" rx="14" fill="url(#llGlow)"/>
+    <rect width="64" height="64" rx="14" fill="url(#llShine)"/>
+    <g>
+      <path d="M42 21 L58 13 L60 17 L43 26 Z" fill="url(#llRayWarm)"/>
+      <path d="M42 28 L62 28 L62 33 L42 33 Z" fill="url(#llRayCoral)"/>
+      <path d="M42 35 L60 44 L58 48 L42 39 Z" fill="url(#llRayCyan)"/>
+    </g>
+    <path d="M 13 13 L 36 13 C 42.6 13, 47 17.4, 47 24 C 47 30.6, 42.6 35, 36 35 L 22 35 L 22 51 L 13 51 Z" fill="#ffffff"/>
+    <path d="M 22 19 L 38 19 L 22 33 Z" fill="url(#llBg)"/>
+    <rect x="11" y="11" width="9" height="2" rx="1" fill="#ffffff" opacity="0.45"/>
+    <circle cx="52" cy="52" r="3.2" fill="#34d399"/>
+    <circle cx="52" cy="52" r="3.2" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1"/>
+  </g>
+
+  <g transform="translate(78, 0)" font-family="Manrope, 'Segoe UI', system-ui, sans-serif">
+    <text x="0" y="34" font-size="28" font-weight="800" letter-spacing="-0.6" fill="#ffffff">
+      Pay<tspan fill="url(#llAccent)">prism</tspan>
+    </text>
+    <text x="2" y="52" font-size="9.5" font-weight="600" letter-spacing="3.6" fill="#a4b3c8">
+      BANKING · BILLS · TRAVEL
+    </text>
+  </g>
+</svg>

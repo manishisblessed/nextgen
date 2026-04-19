@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="fvBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2f7bff"/>
+      <stop offset="100%" stop-color="#1448dc"/>
+    </linearGradient>
+    <linearGradient id="fvAccent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffd388"/>
+      <stop offset="100%" stop-color="#ff9a7a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="url(#fvBg)"/>
+
+  <!-- Single bold refraction beam -->
+  <path d="M40 26 L60 20 L60 30 L40 36 Z" fill="url(#fvAccent)" opacity="0.85"/>
+
+  <!-- Bold "P" -->
+  <path d="M 13 13 L 36 13 C 43 13, 47.5 17.6, 47.5 24 C 47.5 30.4, 43 35, 36 35 L 22 35 L 22 51 L 13 51 Z" fill="#ffffff"/>
+
+  <!-- Triangular prism counter -->
+  <path d="M 22 20 L 39 20 L 22 33 Z" fill="url(#fvBg)"/>
+</svg>

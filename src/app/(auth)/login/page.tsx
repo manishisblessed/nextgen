@@ -1,0 +1,194 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Sparkles,
+  Store,
+  Users,
+  Network,
+  Lock,
+  ArrowRight
+} from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Input, Label } from "@/components/ui/Input";
+import { saveSession, demoSessions, type Role } from "@/lib/auth";
+import { cn } from "@/lib/utils";
+
+const roleOptions: { id: Role; label: string; icon: typeof Store; tagline: string }[] = [
+  { id: "retailer", label: "Retailer", icon: Store, tagline: "Run a single shop" },
+  { id: "distributor", label: "Distributor", icon: Users, tagline: "Manage retailers" },
+  { id: "master-distributor", label: "Master", icon: Network, tagline: "White-label & API" },
+  { id: "admin", label: "Admin", icon: Lock, tagline: "Platform control" }
+];
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [role, setRole] = useState<Role>("retailer");
+  const [email, setEmail] = useState(demoSessions.retailer.email);
+  const [password, setPassword] = useState("demo1234");
+  const [showPwd, setShowPwd] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  function pickRole(r: Role) {
+    setRole(r);
+    setEmail(demoSessions[r].email);
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    await new Promise((r) => setTimeout(r, 600));
+    saveSession({ ...demoSessions[role], email });
+    router.push("/dashboard");
+  }
+
+  return (
+    <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
+      <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-10 text-white shadow-glow lg:flex">
+        <div>
+          <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
+            <Sparkles className="h-3.5 w-3.5" /> Unified portal · 4 personas
+          </span>
+          <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
+            One Payprism. <br /> Four powerful dashboards.
+          </h2>
+          <p className="mt-3 text-white/85">
+            Retailer, distributor, master distributor and admin — each with its own purpose-built workspace, KPIs and controls.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {[
+            "60+ services in one dashboard",
+            "Instant IMPS settlement 24×7",
+            "Highest commissions in the industry",
+            "API + white-label for partners"
+          ].map((t) => (
+            <div key={t} className="flex items-center gap-2 text-sm">
+              <ShieldCheck className="h-4 w-4 text-emerald-300" />
+              {t}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
+        <h1 className="heading-md">Sign in</h1>
+        <p className="mt-2 text-sm text-ink-500">
+          New to Payprism?{" "}
+          <Link href="/register" className="font-semibold text-brand-700">
+            Create an account
+          </Link>
+        </p>
+
+        <div className="mt-6">
+          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">
+            Demo · pick a role
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {roleOptions.map((r) => {
+              const Icon = r.icon;
+              const active = role === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => pickRole(r.id)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border p-3 text-left transition",
+                    active
+                      ? "border-brand-500 bg-brand-50 shadow-soft"
+                      : "border-ink-100 hover:border-brand-300"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "grid h-9 w-9 place-items-center rounded-lg",
+                      active
+                        ? "bg-brand-600 text-white"
+                        : "bg-ink-100 text-ink-700"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-ink-900">{r.label}</p>
+                    <p className="truncate text-xs text-ink-500">{r.tagline}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <form className="mt-6 space-y-5" onSubmit={onSubmit}>
+          <div>
+            <Label htmlFor="email">Email or mobile</Label>
+            <Input
+              id="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Password</Label>
+              <Link
+                href="#"
+                className="text-xs font-medium text-brand-700 hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPwd ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPwd((s) => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-500 hover:text-ink-900"
+                aria-label={showPwd ? "Hide password" : "Show password"}
+              >
+                {showPwd ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-ink-700">
+            <input
+              type="checkbox"
+              defaultChecked
+              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            Keep me signed in for 30 days
+          </label>
+
+          <Button type="submit" size="lg" className="w-full" disabled={loading}>
+            {loading ? "Signing in..." : <>Sign in as {role} <ArrowRight className="h-4 w-4" /></>}
+          </Button>
+
+          <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50 p-3 text-xs text-ink-600">
+            <span className="font-semibold text-ink-900">Demo password:</span>{" "}
+            <span className="font-mono">demo1234</span> · works for every role.
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

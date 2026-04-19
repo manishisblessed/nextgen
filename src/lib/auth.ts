@@ -1,0 +1,111 @@
+"use client";
+
+const SESSION_KEY = "pp_session";
+const COOKIE_NAME = "pp_logged_in";
+
+export type Role = "admin" | "master-distributor" | "distributor" | "retailer";
+
+export type Session = {
+  name: string;
+  email: string;
+  phone: string;
+  role: Role;
+  walletBalance: number;
+  /** Higher tiers see hierarchy turnover instead of personal commission */
+  monthlyTurnover?: number;
+  loggedInAt: number;
+};
+
+export const demoSessions: Record<Role, Session> = {
+  retailer: {
+    name: "Aman Sharma",
+    email: "retailer@payprismindia.com",
+    phone: "+91 82850 82121",
+    role: "retailer",
+    walletBalance: 28450,
+    monthlyTurnover: 184500,
+    loggedInAt: Date.now()
+  },
+  distributor: {
+    name: "Rohit Verma",
+    email: "distributor@payprismindia.com",
+    phone: "+91 90000 00021",
+    role: "distributor",
+    walletBalance: 482300,
+    monthlyTurnover: 7250000,
+    loggedInAt: Date.now()
+  },
+  "master-distributor": {
+    name: "Neha Kapoor",
+    email: "master@payprismindia.com",
+    phone: "+91 90000 00031",
+    role: "master-distributor",
+    walletBalance: 2148000,
+    monthlyTurnover: 38400000,
+    loggedInAt: Date.now()
+  },
+  admin: {
+    name: "Payprism Admin",
+    email: "admin@payprismindia.com",
+    phone: "+91 90000 00041",
+    role: "admin",
+    walletBalance: 0,
+    monthlyTurnover: 184000000,
+    loggedInAt: Date.now()
+  }
+};
+
+export const demoSession: Session = demoSessions.retailer;
+
+export function saveSession(session: Session) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  document.cookie = `${COOKIE_NAME}=1; path=/; max-age=${60 * 60 * 24 * 7}`;
+}
+
+export function getSession(): Session | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Session;
+  } catch {
+    return null;
+  }
+}
+
+export function clearSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(SESSION_KEY);
+  document.cookie = `${COOKIE_NAME}=; path=/; max-age=0`;
+}
+
+export const roleMeta: Record<
+  Role,
+  { label: string; tagline: string; accent: string; pillar: string }
+> = {
+  retailer: {
+    label: "Retailer",
+    tagline: "Run all 16 services from your shop",
+    accent: "from-emerald-500 to-brand-500",
+    pillar: "store"
+  },
+  distributor: {
+    label: "Distributor",
+    tagline: "Manage retailers, slabs and fund requests",
+    accent: "from-brand-500 to-violet-500",
+    pillar: "network"
+  },
+  "master-distributor": {
+    label: "Master Distributor",
+    tagline: "White-label, API access & override commissions",
+    accent: "from-accent-500 to-rose-500",
+    pillar: "wholesale"
+  },
+  admin: {
+    label: "Admin",
+    tagline: "KYC, billers, audit, system & risk",
+    accent: "from-ink-700 to-brand-600",
+    pillar: "platform"
+  }
+};

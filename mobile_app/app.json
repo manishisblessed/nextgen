@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Payprism Retailer",
+    "slug": "payprism-retailer",
+    "scheme": "payprism",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0e2358"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.payprismindia.retailer",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Use Face ID to sign in to your Payprism account."
+      }
+    },
+    "android": {
+      "package": "com.payprismindia.retailer",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#185df5"
+      },
+      "permissions": ["USE_FINGERPRINT", "USE_BIOMETRIC"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use Face ID to sign in to your Payprism account."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
