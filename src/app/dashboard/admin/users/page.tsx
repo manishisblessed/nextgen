@@ -98,7 +98,7 @@ export default function AdminUsersPage() {
         actions={
           <ReportActions
             filename="users"
-            title="Payprism India · Users & Shops"
+            title="JMP NextGenPay · Users & Shops"
             subtitle={`${filtered.length} of ${networkUsers.length} users`}
             columns={[
               { key: "id", header: "Code" },

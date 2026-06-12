@@ -9,7 +9,7 @@ export function Testimonials() {
         <SectionHeading
           eyebrow="Trusted by professionals"
           title="Loved by retailers across India"
-          description="Real stories from agents and distributors who grew their business with Payprism."
+          description="Real stories from agents and distributors who grew their business with NextGenPay."
         />
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">

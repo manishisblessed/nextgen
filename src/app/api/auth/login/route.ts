@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const { email = "demo@payprismindia.com" } = body;
+  const { email = "demo@jmpnextgenpay.com" } = body;
 
   await new Promise((r) => setTimeout(r, 400));
 

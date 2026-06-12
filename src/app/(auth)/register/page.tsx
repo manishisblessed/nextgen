@@ -72,7 +72,7 @@ export default function RegisterPage() {
       </div>
 
       <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
-        <h1 className="heading-md">Create your Payprism account</h1>
+        <h1 className="heading-md">Create your NextGenPay account</h1>
         <p className="mt-2 text-sm text-ink-500">
           Already a member?{" "}
           <Link href="/login" className="font-semibold text-brand-700">
@@ -175,7 +175,7 @@ export default function RegisterPage() {
                 required
                 className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
               />
-              I agree to Payprism's{" "}
+              I agree to NextGenPay's{" "}
               <Link href="/legal/terms" className="font-semibold text-brand-700">
                 Terms
               </Link>{" "}

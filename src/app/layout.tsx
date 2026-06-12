@@ -16,14 +16,18 @@ const manrope = Manrope({
 
 export const metadata: Metadata = {
   title: {
-    default: "Payprism — Banking, Bills & Travel for Bharat",
-    template: "%s · Payprism"
+    default: "NextGenPay — Payment Gateway, POS & QR Payments",
+    template: "%s · NextGenPay"
   },
   description:
-    "Payprism (Payprism Technology Pvt. Ltd.) is a digital fintech platform offering 60+ services — AePS, money transfer, recharges, bill payments and travel bookings — for retailers and consumers across India.",
+    "NextGenPay (JMP NEXTGENPAY PRIVATE LIMITED, Surat) is a fintech distribution platform offering payment gateway, POS machines, QR collections, AePS, money transfer, recharges and bill payments for retailers and merchants across India.",
   keywords: [
-    "Payprism",
-    "payprismindia",
+    "NextGenPay",
+    "jmpnextgenpay",
+    "payment gateway",
+    "POS machine",
+    "QR payments",
+    "UPI",
     "AePS",
     "money transfer",
     "DMT",
@@ -32,13 +36,13 @@ export const metadata: Metadata = {
     "fintech India",
     "agent banking"
   ],
-  metadataBase: new URL("https://payprismindia.com"),
+  metadataBase: new URL("https://jmpnextgenpay.com"),
   openGraph: {
-    title: "Payprism — Banking, Bills & Travel for Bharat",
+    title: "NextGenPay — Payment Gateway, POS & QR Payments",
     description:
-      "60+ digital services for retailers and consumers — AePS, money transfer, recharges, bill payments, travel.",
-    url: "https://payprismindia.com",
-    siteName: "Payprism",
+      "Payment gateway, POS machines, QR collections and 60+ digital services for retailers, distributors and merchants.",
+    url: "https://jmpnextgenpay.com",
+    siteName: "NextGenPay",
     type: "website"
   }
 };

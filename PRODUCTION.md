@@ -1,6 +1,6 @@
-# Payprism — Going to Production
+# NextGenPay — Going to Production
 
-This document covers everything you need to take Payprism from the current
+This document covers everything you need to take NextGenPay from the current
 prototype state to a live, money-moving, RBI-friendly product.
 
 ---
@@ -27,10 +27,10 @@ helpers, NextAuth-ready models) is the foundation for everything below.
 
 ### 1.1 Create the project
 1. Sign up at [console.neon.tech](https://console.neon.tech).
-2. Click **New Project** → name it `payprism-prod`.
+2. Click **New Project** → name it `nextgenpay-prod`.
    - Region: `aws-ap-south-1` (Mumbai) — lowest latency from India.
    - Postgres version: 16.
-3. Inside the project create a database named `payprism`.
+3. Inside the project create a database named `nextgenpay`.
 4. Create **two branches**:
    - `main`  → production
    - `dev`   → development / staging (cheap, branched off main)
@@ -38,7 +38,7 @@ helpers, NextAuth-ready models) is the foundation for everything below.
 ### 1.2 Get the connection strings
 On the **Connection Details** panel toggle:
 - **Pooled connection** → copy as `DATABASE_URL`
-  (`...-pooler.aws.neon.tech/payprism?sslmode=require`)
+  (`...-pooler.aws.neon.tech/nextgenpay?sslmode=require`)
 - **Direct connection** → copy as `DIRECT_URL`
   Used only by `prisma migrate`.
 
@@ -83,12 +83,12 @@ inside Vercel Edge / serverless functions without exhausting connections.
 ### 2.1 Create the account
 1. Sign up at [cloudinary.com](https://cloudinary.com).
 2. Settings → **Upload presets** → Add:
-   - `payprism_kyc_signed` — Signed, type `private`, max 8 MB, allowed
+   - `nextgenpay_kyc_signed` — Signed, type `private`, max 8 MB, allowed
      formats `jpg,jpeg,png,pdf,webp`, auto moderation off.
 3. Settings → **Security**:
    - Restricted media types: `pdf`.
    - **Strict transformations**: ON.
-   - **Allowed fetch domains**: `app.payprismindia.com`, `payprismindia.com`.
+   - **Allowed fetch domains**: `app.jmpnextgenpay.com`, `jmpnextgenpay.com`.
 4. Settings → **API Keys** → copy `cloud_name`, `api_key`, `api_secret` into
    `.env.local`.
 
@@ -224,7 +224,7 @@ vercel env pull .env.local           # pulls non-secrets
 vercel deploy --prod
 ```
 - Region: `bom1` (Mumbai).
-- Add custom domain `app.payprismindia.com`.
+- Add custom domain `app.jmpnextgenpay.com`.
 - Enable **Vercel Firewall** + **Bot Protection** + **WAF rules**.
 
 Alternative: AWS Amplify, Render, or self-hosted on AWS ECS Fargate

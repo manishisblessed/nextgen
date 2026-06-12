@@ -32,7 +32,7 @@ const channels = [
   {
     icon: Headphones,
     label: "Agent helpdesk",
-    value: "agent@payprismindia.com",
+    value: "agent@jmpnextgenpay.com",
     sub: "For onboarded agents only"
   }
 ];
@@ -115,7 +115,7 @@ export default function ContactPage() {
                   Visit our HQ
                 </h2>
                 <p className="mt-2 text-sm text-ink-700">
-                  In the heart of Old Delhi's Bhagirath Palace — a stone's throw from Chandni Chowk metro.
+                  At Devi Arcade on Ashwini Kumar Road — in the heart of Surat's bustling commercial district.
                 </p>
                 <div className="mt-6 space-y-4 text-sm text-ink-700">
                   <div className="flex items-start gap-3">
@@ -144,8 +144,8 @@ export default function ContactPage() {
                 </div>
                 <div className="mt-6 aspect-video w-full overflow-hidden rounded-2xl border border-white/60 bg-white">
                   <iframe
-                    title="Payprism HQ — Bhagirath Palace, Chandni Chowk"
-                    src="https://www.google.com/maps?q=Bhagirath+Palace+Chandni+Chowk+Delhi+110006&output=embed"
+                    title="JMP NextGenPay HQ — Devi Arcade, Ashwini Kumar Road, Surat"
+                    src="https://www.google.com/maps?q=Devi+Arcade+Ashwini+Kumar+Road+Surat+Gujarat+395008&output=embed"
                     className="h-full w-full"
                     loading="lazy"
                   />

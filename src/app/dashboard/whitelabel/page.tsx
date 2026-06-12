@@ -11,7 +11,7 @@ export default function WhitelabelPage() {
       <PageHeader
         eyebrow="Platform"
         title="White-label portal"
-        description="Run Payprism under your own brand, domain and colors. SSL is auto-provisioned."
+        description="Run NextGenPay under your own brand, domain and colors. SSL is auto-provisioned."
         actions={<Button><Save className="h-4 w-4" /> Save & republish</Button>}
       />
 
@@ -59,13 +59,13 @@ export default function WhitelabelPage() {
             <div className="bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-6 text-white">
               <p className="text-xs font-bold uppercase tracking-widest opacity-80">KapoorPay</p>
               <p className="mt-3 font-display text-2xl font-bold">Bharat ka apna fintech</p>
-              <p className="mt-1 text-sm text-white/85">60+ services · Pan-India · Built on Payprism</p>
+              <p className="mt-1 text-sm text-white/85">60+ services · Pan-India · Built on NextGenPay</p>
               <button className="mt-4 rounded-full bg-white text-brand-700 px-4 py-1.5 text-sm font-semibold">Login</button>
             </div>
           </div>
 
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-            <strong>Powered by Payprism.</strong> Footer attribution required on all white-labels.
+            <strong>Powered by NextGenPay.</strong> Footer attribution required on all white-labels.
           </div>
         </div>
       </div>

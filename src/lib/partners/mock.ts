@@ -68,7 +68,7 @@ export const mockUpi: UpiProvider = {
     const orderId = ref("ORDR");
     return ok({
       orderId,
-      upiIntent: `upi://pay?pa=payprism@axisbank&pn=Payprism&am=${input.amount}&tn=${encodeURIComponent(input.note ?? "Payprism")}`,
+      upiIntent: `upi://pay?pa=nextgenpay@axisbank&pn=NextGenPay&am=${input.amount}&tn=${encodeURIComponent(input.note ?? "NextGenPay")}`,
       paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/pay/${orderId}`
     });
   },

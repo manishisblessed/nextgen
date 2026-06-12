@@ -31,7 +31,7 @@ export default function ServicesPage() {
       <PageHero
         eyebrow="Services"
         title={<>Everything your customers need, <span className="gradient-text">in one place</span></>}
-        description="Banking, recharges, bills, travel — Payprism packs 60+ services into a single dashboard with real-time settlement and the best commissions in the industry."
+        description="Banking, recharges, bills, travel — NextGenPay packs 60+ services into a single dashboard with real-time settlement and the best commissions in the industry."
       />
 
       <Section className="bg-white">

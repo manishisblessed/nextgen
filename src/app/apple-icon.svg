@@ -1,34 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
   <defs>
     <linearGradient id="aiBg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#2f7bff"/>
-      <stop offset="55%" stop-color="#185df5"/>
-      <stop offset="100%" stop-color="#1448dc"/>
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="55%" stop-color="#16213e"/>
+      <stop offset="100%" stop-color="#0f3460"/>
+    </linearGradient>
+    <linearGradient id="aiBolt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#d4a843"/>
     </linearGradient>
     <linearGradient id="aiShine" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
       <stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="aiRay" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#ffd388" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#ffd388" stop-opacity="0"/>
     </linearGradient>
   </defs>
 
   <rect width="180" height="180" rx="40" fill="url(#aiBg)"/>
   <rect width="180" height="180" rx="40" fill="url(#aiShine)"/>
 
-  <!-- Refraction beams scaled up -->
-  <g transform="translate(0,8)">
-    <path d="M115 60 L168 36 L172 50 L120 76 Z" fill="url(#aiRay)"/>
-    <path d="M115 80 L176 80 L176 95 L115 95 Z" fill="url(#aiRay)" opacity="0.85"/>
-    <path d="M115 100 L172 130 L168 144 L115 116 Z" fill="url(#aiRay)" opacity="0.75"/>
-  </g>
-
-  <!-- "P" centered in the icon -->
-  <g transform="translate(36,28)">
-    <path d="M 0 0 L 65 0 C 84 0, 96.5 13.5, 96.5 32 C 96.5 50.5, 84 64, 65 64 L 26 64 L 26 110 L 0 110 Z" fill="#ffffff"/>
-    <path d="M 26 17 L 75 17 L 26 56 Z" fill="url(#aiBg)"/>
+  <!-- "N" centered, scaled up -->
+  <g transform="translate(26,26) scale(2)">
+    <rect x="14" y="15" width="8" height="34" rx="2" fill="#ffffff"/>
+    <rect x="42" y="15" width="8" height="34" rx="2" fill="#ffffff"/>
+    <path d="M14 15 L22 15 L50 49 L42 49 Z" fill="url(#aiBolt)"/>
   </g>
 
   <!-- Status dot -->

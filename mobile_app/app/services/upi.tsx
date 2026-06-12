@@ -9,7 +9,7 @@ import { Field } from "@/components/Input";
 import { Button } from "@/components/Button";
 import { colors, radii } from "@/lib/theme";
 
-const VPA = "payprism@axisbank";
+const VPA = "nextgenpay@axisbank";
 
 function makeQrCells(seed: number, size = 21) {
   const cells: boolean[][] = [];
@@ -37,7 +37,7 @@ function makeQrCells(seed: number, size = 21) {
 export default function UPIScreen() {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const link = `upi://pay?pa=${VPA}&pn=Payprism${amount ? `&am=${amount}` : ""}${note ? `&tn=${encodeURIComponent(note)}` : ""}&cu=INR`;
+  const link = `upi://pay?pa=${VPA}&pn=NextGenPay${amount ? `&am=${amount}` : ""}${note ? `&tn=${encodeURIComponent(note)}` : ""}&cu=INR`;
   const cells = makeQrCells(amount.length + note.length + 7);
 
   return (
@@ -63,7 +63,7 @@ export default function UPIScreen() {
           <View style={styles.shareRow}>
             <Pressable
               style={styles.shareBtn}
-              onPress={() => Share.share({ message: `Pay to Payprism: ${link}` })}
+              onPress={() => Share.share({ message: `Pay to NextGenPay: ${link}` })}
             >
               <Ionicons name="share-social-outline" size={18} color={colors.brand[700]} />
               <Text style={styles.shareText}>Share link</Text>

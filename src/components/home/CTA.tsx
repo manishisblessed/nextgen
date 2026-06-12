@@ -18,7 +18,7 @@ export function CTA() {
                 Ready to start?
               </span>
               <h2 className="mt-4 font-display text-3xl font-bold leading-tight md:text-5xl">
-                Become a Payprism agent in under 5 minutes.
+                Become a NextGenPay agent in under 5 minutes.
               </h2>
               <p className="mt-4 max-w-xl text-base text-white/85 md:text-lg">
                 Sign up, complete eKYC and start offering 60+ digital services

@@ -33,10 +33,10 @@ export default function Splash() {
         <View style={styles.logoBadge}>
           <Text style={styles.logoP}>P</Text>
         </View>
-        <Text style={styles.brand}>Payprism</Text>
+        <Text style={styles.brand}>NextGenPay</Text>
         <Text style={styles.tagline}>Banking that builds Bharat</Text>
       </View>
-      <Text style={styles.foot}>Powered by Payprism Technology Pvt. Ltd.</Text>
+      <Text style={styles.foot}>Powered by JMP NextGenPay Pvt. Ltd.</Text>
     </LinearGradient>
   );
 }

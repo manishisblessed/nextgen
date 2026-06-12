@@ -94,7 +94,7 @@ export default function TransactionsPage() {
         </Button>
         <ReportActions
           filename="transactions"
-          title="Payprism India · Transactions"
+          title="JMP NextGenPay · Transactions"
           subtitle={`Filtered view · ${data.length} of ${recentTransactions.length} records`}
           columns={[
             { key: "id", header: "Txn ID" },

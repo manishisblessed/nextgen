@@ -43,7 +43,7 @@ export function PlatformPillars() {
       <div className="container-x">
         <div className="text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-white/80">
-            <Zap className="h-3.5 w-3.5" /> The Payprism difference
+            <Zap className="h-3.5 w-3.5" /> The NextGenPay difference
           </span>
           <h2 className="mt-4 font-display text-3xl font-bold leading-tight md:text-5xl">
             Built like a bank. <br />

@@ -32,7 +32,7 @@ export default function ReportsPage() {
         actions={
           <ReportActions
             filename="business-report"
-            title="Payprism India · Business Report"
+            title="JMP NextGenPay · Business Report"
             subtitle="Service-wise turnover, commissions, transactions"
             columns={[
               { key: "id", header: "Txn ID" },
@@ -68,7 +68,7 @@ export default function ReportsPage() {
           <div className="flex flex-wrap gap-2">
             <ReportActions
               filename="service-trends-14d"
-              title="Payprism India · Service Trends (14 days)"
+              title="JMP NextGenPay · Service Trends (14 days)"
               subtitle="Daily totals per service"
               columns={[
                 { key: "service", header: "Service" },

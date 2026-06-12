@@ -9,7 +9,7 @@ export function Blog() {
       <Container>
         <SectionHeading
           eyebrow="News & insights"
-          title="Latest from Payprism"
+          title="Latest from NextGenPay"
           description="Tips, trends and product updates to help your business grow faster."
         />
 

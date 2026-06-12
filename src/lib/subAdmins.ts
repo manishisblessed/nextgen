@@ -87,10 +87,10 @@ export function findSubAdminByEmail(email: string): SubAdminRecord | undefined {
 function nextId(rows: SubAdminRecord[]): string {
   const used = new Set(rows.map((r) => r.id));
   let n = 1001 + rows.length;
-  let id = `PPSA${n}`;
+  let id = `JNPS${n}`;
   while (used.has(id)) {
     n += 1;
-    id = `PPSA${n}`;
+    id = `JNPS${n}`;
   }
   return id;
 }

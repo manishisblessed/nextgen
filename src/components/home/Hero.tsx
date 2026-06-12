@@ -18,7 +18,7 @@ export function Hero() {
             <span className="gradient-text">Smarter Bharat</span>
           </h1>
           <p className="lead mt-5 max-w-2xl animate-fade-up [animation-delay:160ms]">
-            Become a Payprism agent and offer 60+ digital services —
+            Become a NextGenPay agent and offer 60+ digital services —
             money transfer, AePS, recharges, bill payments, travel bookings —
             from a single dashboard. Earn high commissions, settle instantly.
           </p>
@@ -86,7 +86,7 @@ function HeroVisual() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-widest text-ink-500">
-              Payprism Wallet
+              NextGenPay Wallet
             </p>
             <p className="mt-1 font-display text-2xl font-bold text-ink-900">
               ₹ 28,450.00

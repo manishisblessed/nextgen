@@ -25,7 +25,7 @@ export default function NetworkPage() {
 
   const childRole: NetworkUser["role"] =
     role === "master-distributor" ? "distributor" : "retailer";
-  const myParentId = role === "master-distributor" ? "PPIM1001" : "PPID2003";
+  const myParentId = role === "master-distributor" ? "JNPM1001" : "JNPD2003";
 
   const rows = useMemo(() => {
     return networkUsers.filter((u) => {
@@ -87,7 +87,7 @@ export default function NetworkPage() {
           <>
             <ReportActions
               filename={`my-${childRole === "distributor" ? "distributors" : "retailers"}`}
-              title={`Payprism India · My ${childRole === "distributor" ? "Distributors" : "Retailers"}`}
+              title={`JMP NextGenPay · My ${childRole === "distributor" ? "Distributors" : "Retailers"}`}
               subtitle={`${rows.length} record${rows.length === 1 ? "" : "s"}`}
               columns={[
                 { key: "id", header: "Code" },

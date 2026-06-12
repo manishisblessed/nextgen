@@ -80,12 +80,12 @@ export default function FundsRequestPage() {
         title={isApprover ? "Fund requests from your network" : "Request funds"}
         description={isApprover
           ? "Approve incoming wallet top-up requests with bank reference. Auto-credit on approval."
-          : "Submit your bank deposit reference to top up your Payprism wallet within minutes."}
+          : "Submit your bank deposit reference to top up your NextGenPay wallet within minutes."}
         actions={
           <>
             <ReportActions
               filename="fund-requests"
-              title="Payprism India · Fund Requests"
+              title="JMP NextGenPay · Fund Requests"
               subtitle={isApprover ? "Incoming approvals" : "My requests"}
               columns={[
                 { key: "id", header: "Request ID" },
@@ -142,9 +142,9 @@ function NewRequestForm({
         e.preventDefault();
         onSubmit({
           id: generateRefId("FR-"),
-          fromId: "PPIR3091",
+          fromId: "JNPR3091",
           fromName: "Aman Sharma",
-          toId: "PPID2003",
+          toId: "JNPD2003",
           amount: parseInt(amount, 10),
           mode,
           reference: ref || "MANUAL",

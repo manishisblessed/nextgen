@@ -32,16 +32,15 @@ const values = [
 
 const milestones = [
   {
-    year: "2022",
-    text: "Payprism Technology Pvt. Ltd. incorporated in Delhi (CIN U74990DL2022PTC407681)."
-  },
-  { year: "2023", text: "Launched AePS, DMT & BBPS for our first 5,000 retailers." },
-  { year: "2024", text: "Crossed 50,000 active agents across North India." },
-  {
     year: "2025",
-    text: "Expanded into travel — flights, hotels & bus bookings."
+    text: "JMP NEXTGENPAY PRIVATE LIMITED incorporated in Surat, Gujarat."
   },
-  { year: "2026", text: "Building India-wide distributor network from Bhagirath Palace." }
+  { year: "2025", text: "Launched AePS, DMT & BBPS for our first retailers." },
+  {
+    year: "2026",
+    text: "Rolled out Payment Gateway, POS terminals & QR collections."
+  },
+  { year: "2026", text: "Building an India-wide distributor network from Surat." }
 ];
 
 export default function AboutPage() {
@@ -50,7 +49,7 @@ export default function AboutPage() {
       <PageHero
         eyebrow="About us"
         title={<>Building a smarter Bharat, <span className="gradient-text">one transaction at a time</span></>}
-        description="Payprism (operated by Payprism Technology Pvt. Ltd., CIN U74990DL2022PTC407681) is a digital banking & utility fintech platform on a mission to simplify financial services for every Indian. From village kiranas to urban distributors, our retailers serve millions of customers every day."
+        description="NextGenPay (operated by JMP NextGenPay Pvt. Ltd., CIN U62990GJ2025PTC000000) is a digital banking & utility fintech platform on a mission to simplify financial services for every Indian. From village kiranas to urban distributors, our retailers serve millions of customers every day."
       />
 
       <Section className="bg-white">
@@ -78,7 +77,7 @@ export default function AboutPage() {
         <Container>
           <div className="mb-12 max-w-2xl">
             <span className="eyebrow">Our journey</span>
-            <h2 className="heading-lg mt-4">From a Chandni Chowk office to India's trusted fintech partner</h2>
+            <h2 className="heading-lg mt-4">From a Surat office to India's trusted fintech partner</h2>
           </div>
           <div className="relative space-y-8 border-l-2 border-brand-100 pl-8">
             {milestones.map((m) => (

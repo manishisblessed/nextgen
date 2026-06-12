@@ -37,7 +37,7 @@ export default function AdminSettlementsPage() {
           <>
             <ReportActions
               filename="settlements"
-              title="Payprism India · Settlements"
+              title="JMP NextGenPay · Settlements"
               subtitle="T+1 nodal settlements ledger"
               columns={[
                 { key: "id", header: "Cycle ID" },

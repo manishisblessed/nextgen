@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     const email = getPartner("email");
     const r = await email.send({
       to: parsed.data.target,
-      subject: "Your Payprism OTP",
+      subject: "Your NextGenPay OTP",
       html: `<p>Your OTP is <strong>${otp}</strong>. Valid for 5 minutes.</p>`
     });
     if (!r.ok) return NextResponse.json({ error: r.message }, { status: 502 });

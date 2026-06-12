@@ -45,7 +45,7 @@ export default function AdminBillersPage() {
           <>
             <ReportActions
               filename="billers"
-              title="Payprism India · Billers & Routing"
+              title="JMP NextGenPay · Billers & Routing"
               subtitle="Category-level uptime and routing"
               columns={[
                 { key: "category", header: "Category" },

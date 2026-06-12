@@ -55,7 +55,7 @@ export default function TeamPage() {
     <>
       <PageHero
         eyebrow="Team"
-        title={<>The people behind <span className="gradient-text">Payprism</span></>}
+        title={<>The people behind <span className="gradient-text">NextGenPay</span></>}
         description="A small, mission-driven team obsessed with building world-class fintech for retailers and consumers across Bharat."
       />
 

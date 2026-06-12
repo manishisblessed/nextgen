@@ -1,9 +1,11 @@
-# Payprism — Digital Banking & Utility Fintech Portal
+# NextGenPay — Fintech Distribution Portal
 
-A production-grade Next.js 14 fintech portal for **Payprism Technology Private Limited** (trade name: `payprismindia`, CIN: `U74990DL2022PTC407681`). It includes a polished marketing site, mock authentication, and a fully-featured agent dashboard with 15+ working service modules (AePS, money transfer, recharges, bill payments, travel bookings, wallet, transactions, and more).
+A production-grade Next.js 14 fintech portal for **JMP NEXTGENPAY PRIVATE LIMITED** (trade name: `jmpnextgenpay`). Built per the agreed proposal, it covers all 7 modules — **Payment Gateway (PG), Point of Sale (POS), QR Code Payments, Master Distributor (MDS), Distributor (DS), Retailer Portal and Sub-Admin Panel** — plus a polished marketing site and 15+ additional service modules (AePS, money transfer, recharges, bill payments, travel bookings, wallet, transactions, and more).
 
-> Registered office: 1797/18A, 2nd Floor, Bhagirath Palace, Chandni Chowk, Delhi 110006
-> Phone: +91 8285082121 · Domain: [payprismindia.com](http://payprismindia.com/)
+> Registered office: 2nd Floor, 201, Devi Arcade, Ashwini Kumar Road, Modi Maholla, Surat, Gujarat - 395008
+> Email: contact@jmpnextgenpay.com · Domain: [jmpnextgenpay.com](http://jmpnextgenpay.com/)
+>
+> Note: the CIN and phone number in `src/lib/data.ts` are placeholders — replace them with the client's official details before launch.
 
 ## ✨ Features
 
@@ -16,16 +18,19 @@ A production-grade Next.js 14 fintech portal for **Payprism Technology Private L
 
 ### Auth
 - `/login` and `/register` with split-pane premium UI
-- Mock auth using `localStorage` + cookie (demo creds: `demo@payprismindia.com / demo1234`)
+- Mock auth using `localStorage` + cookie (demo creds: `demo@jmpnextgenpay.com / demo1234`)
 
 ### Dashboard (`/dashboard`)
 - Sidebar + topbar with wallet pill, notifications and profile menu
 - Protected route — redirects to `/login` if no session
 - **Overview**: greeting, stat cards, wallet card, quick services, recent transactions
+- **Payment Gateway (PG)**: payment-link generator, multi-mode order feed, settlement states (`/dashboard/pg`, admin at `/dashboard/admin/pg`)
+- **POS Terminals**: machine fleet, card/UPI/BharatQR transactions, rental invoices (`/dashboard/pos`, admin inventory at `/dashboard/admin/pos`)
+- **QR Payments**: static & dynamic UPI QR generator with live preview, QR register and payment feed (`/dashboard/qr`)
 - **Wallet**: top-up + withdraw with live balance updates
 - **Money Transfer (DMT)**: full IMPS/NEFT/RTGS form with success modal
 - **AePS** (Aadhaar Pay): Withdrawal / balance / mini-statement
-- **UPI Collect**: live QR generator + copyable UPI link (`payprism@axisbank`)
+- **UPI Collect**: live QR generator + copyable UPI link (`nextgenpay@axisbank`)
 - **Recharges**: Mobile / DTH / Broadband
 - **Bill Payments**: Electricity / Water / Gas / Credit Card / Education
 - **Travel**: Flight search, Hotel search, Bus search with mock results
@@ -119,4 +124,4 @@ Never commit `.env` or `.env.local`. Both are gitignored. Copy `.env.example` to
 
 ## 📄 License
 
-© Payprism Technology Private Limited. Brand assets shown for product purposes; replace with finalized logo/imagery before launch.
+© JMP NEXTGENPAY PRIVATE LIMITED. Brand assets shown for product purposes; replace with finalized logo/imagery before launch.

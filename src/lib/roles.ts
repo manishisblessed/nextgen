@@ -27,6 +27,8 @@ import {
   Boxes,
   Globe,
   UserCog,
+  CreditCard,
+  Monitor,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -44,10 +46,13 @@ export type NavGroup = {
 };
 
 const services: NavItem[] = [
+  { href: "/dashboard/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
+  { href: "/dashboard/pos", label: "POS Terminals", icon: Monitor, badge: "New" },
+  { href: "/dashboard/qr", label: "QR Payments", icon: QrCode, badge: "New" },
   { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
   { href: "/dashboard/money-transfer", label: "Money Transfer", icon: Send },
   { href: "/dashboard/aadhaar-pay", label: "AePS / Aadhaar Pay", icon: Fingerprint },
-  { href: "/dashboard/upi", label: "UPI Collect", icon: QrCode },
+  { href: "/dashboard/upi", label: "UPI Collect", icon: Send },
   { href: "/dashboard/recharge/mobile", label: "Recharges", icon: Smartphone },
   { href: "/dashboard/bill-pay/electricity", label: "Bill Payments", icon: Receipt },
   { href: "/dashboard/travel/flight", label: "Travel", icon: Plane },
@@ -122,6 +127,8 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/admin/users", label: "Users", icon: Users },
         { href: "/dashboard/admin/sub-admins", label: "Sub-Admins", icon: UserCog },
+        { href: "/dashboard/admin/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
+        { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor, badge: "New" },
         { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/admin/billers", label: "Billers / Routing", icon: Boxes },
         { href: "/dashboard/admin/commissions", label: "Commission Master", icon: CircleDollarSign },
@@ -139,6 +146,8 @@ export const navByRole: Record<Role, NavGroup[]> = {
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/admin/users", label: "Users", icon: Users },
+        { href: "/dashboard/admin/pg", label: "Payment Gateway", icon: CreditCard },
+        { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor },
         { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/admin/billers", label: "Billers / Routing", icon: Boxes },
         { href: "/dashboard/admin/settlements", label: "Settlements", icon: Banknote }

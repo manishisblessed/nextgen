@@ -19,30 +19,30 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          50: "#eef6ff",
-          100: "#d9eaff",
-          200: "#bcdaff",
-          300: "#8dc1ff",
-          400: "#579dff",
-          500: "#2f7bff",
-          600: "#185df5",
-          700: "#1448dc",
-          800: "#173db1",
-          900: "#193a8c",
-          950: "#0e2358"
+          50: "#eef1fb",
+          100: "#dce3f7",
+          200: "#c0cdf0",
+          300: "#95abe4",
+          400: "#6383d4",
+          500: "#4263c7",
+          600: "#2e49ad",
+          700: "#273b8d",
+          800: "#243373",
+          900: "#1a2350",
+          950: "#10142e"
         },
         accent: {
-          50: "#fff8eb",
-          100: "#ffeac6",
-          200: "#ffd388",
-          300: "#ffb547",
-          400: "#ff981e",
-          500: "#f97606",
-          600: "#dd5602",
-          700: "#b73a06",
-          800: "#942d0c",
-          900: "#7a270d",
-          950: "#461202"
+          50: "#fdf2f4",
+          100: "#fce7eb",
+          200: "#f9d0d9",
+          300: "#f4a9ba",
+          400: "#ed7392",
+          500: "#e94560",
+          600: "#d52a52",
+          700: "#b41d45",
+          800: "#971b40",
+          900: "#811a3c",
+          950: "#48091d"
         },
         ink: {
           50: "#f5f7fa",
@@ -77,13 +77,13 @@ const config: Config = {
       },
       backgroundImage: {
         "hero-radial":
-          "radial-gradient(60% 80% at 50% 0%, rgba(47,123,255,0.18) 0%, rgba(47,123,255,0) 60%), radial-gradient(40% 60% at 100% 100%, rgba(249,118,6,0.12) 0%, rgba(249,118,6,0) 60%)",
+          "radial-gradient(60% 80% at 50% 0%, rgba(66,99,199,0.18) 0%, rgba(66,99,199,0) 60%), radial-gradient(40% 60% at 100% 100%, rgba(233,69,96,0.12) 0%, rgba(233,69,96,0) 60%)",
         "grid-pattern":
           "linear-gradient(to right, rgba(15,23,42,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,23,42,0.06) 1px, transparent 1px)"
       },
       boxShadow: {
         soft: "0 10px 30px -12px rgba(15,23,42,0.18)",
-        glow: "0 20px 50px -12px rgba(47,123,255,0.45)"
+        glow: "0 20px 50px -12px rgba(66,99,199,0.45)"
       },
       keyframes: {
         "fade-up": {

@@ -1,12 +1,4 @@
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { PrismaNeon } from "@prisma/adapter-neon";
 import { PrismaClient } from "@prisma/client";
-import ws from "ws";
-
-if (typeof WebSocket === "undefined") {
-  // Needed in Node.js (dev / Vercel functions). Browser already has it.
-  neonConfig.webSocketConstructor = ws as unknown as typeof WebSocket;
-}
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -17,11 +9,9 @@ function buildClient(): PrismaClient {
       "DATABASE_URL is not set. Add it to your hosting provider's environment variables (or copy .env.example to .env.local for local dev)."
     );
   }
-  const pool = new Pool({ connectionString: databaseUrl });
-  const adapter = new PrismaNeon(pool);
   return new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"]
+    log:
+      process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 }
 
@@ -36,5 +26,5 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
       globalForPrisma.prisma = buildClient();
     }
     return Reflect.get(globalForPrisma.prisma, prop, receiver);
-  }
+  },
 });

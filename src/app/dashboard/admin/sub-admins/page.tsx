@@ -146,7 +146,7 @@ export default function AdminSubAdminsPage() {
           <>
             <ReportActions
               filename="sub-admins"
-              title="Payprism India · Sub-Admins"
+              title="JMP NextGenPay · Sub-Admins"
               columns={[
                 { key: "id", header: "Code" },
                 { key: "name", header: "Name" },
@@ -289,7 +289,7 @@ function NewSubAdminForm({
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="ops.user@payprismindia.com"
+            placeholder="ops.user@jmpnextgenpay.com"
           />
         </div>
         <div>

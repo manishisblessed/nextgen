@@ -50,7 +50,7 @@ export default function WalletPage() {
     <div>
       <ServicePageHeader
         icon={Wallet}
-        title="Payprism Wallet"
+        title="NextGenPay Wallet"
         description="Top-up your wallet, withdraw to your bank or view your balance history."
       />
 

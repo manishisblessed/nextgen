@@ -4,30 +4,30 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("→ Seeding Payprism database…");
+  console.log("→ Seeding NextGenPay database…");
 
   const passwordHash = await bcrypt.hash("Demo@1234", 10);
 
   const admin = await prisma.user.upsert({
-    where: { email: "admin@payprismindia.com" },
+    where: { email: "admin@jmpnextgenpay.com" },
     update: {},
     create: {
-      name: "Payprism Admin",
-      email: "admin@payprismindia.com",
+      name: "NextGenPay Admin",
+      email: "admin@jmpnextgenpay.com",
       phone: "+919000000041",
       passwordHash,
       role: Role.ADMIN,
       status: UserStatus.ACTIVE,
-      shopName: "Payprism HQ"
+      shopName: "NextGenPay HQ"
     }
   });
 
   const master = await prisma.user.upsert({
-    where: { email: "master@payprismindia.com" },
+    where: { email: "master@jmpnextgenpay.com" },
     update: {},
     create: {
       name: "Neha Kapoor",
-      email: "master@payprismindia.com",
+      email: "master@jmpnextgenpay.com",
       phone: "+919000000031",
       passwordHash,
       role: Role.MASTER_DISTRIBUTOR,
@@ -37,11 +37,11 @@ async function main() {
   });
 
   const distributor = await prisma.user.upsert({
-    where: { email: "distributor@payprismindia.com" },
+    where: { email: "distributor@jmpnextgenpay.com" },
     update: {},
     create: {
       name: "Rohit Verma",
-      email: "distributor@payprismindia.com",
+      email: "distributor@jmpnextgenpay.com",
       phone: "+919000000021",
       passwordHash,
       role: Role.DISTRIBUTOR,
@@ -52,12 +52,12 @@ async function main() {
   });
 
   await prisma.user.upsert({
-    where: { email: "retailer@payprismindia.com" },
+    where: { email: "retailer@jmpnextgenpay.com" },
     update: {},
     create: {
       name: "Aman Sharma",
-      email: "retailer@payprismindia.com",
-      phone: "+918285082121",
+      email: "retailer@jmpnextgenpay.com",
+      phone: "+919898000000",
       passwordHash,
       role: Role.RETAILER,
       status: UserStatus.ACTIVE,

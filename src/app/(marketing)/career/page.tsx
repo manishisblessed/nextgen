@@ -68,7 +68,7 @@ export default function CareerPage() {
       <Section className="bg-white">
         <Container>
           <SectionHeading
-            eyebrow="Why Payprism"
+            eyebrow="Why NextGenPay"
             title="Perks that actually matter"
             description="We invest in our people because building Bharat's fintech is a long, joyful marathon."
             align="left"

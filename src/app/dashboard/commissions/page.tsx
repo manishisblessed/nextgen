@@ -50,8 +50,8 @@ export default function CommissionsPage() {
               filename="commission-slabs"
               title={
                 role === "master-distributor"
-                  ? "Payprism India · Commission Master"
-                  : "Payprism India · Commission Slabs"
+                  ? "JMP NextGenPay · Commission Master"
+                  : "JMP NextGenPay · Commission Slabs"
               }
               subtitle="Service-wise rate-card"
               columns={[

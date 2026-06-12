@@ -27,19 +27,19 @@ export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Payprism India network-code prefixes — driven by the role of the user. */
+/** JMP NextGenPay network-code prefixes — driven by the role of the user. */
 export const USER_CODE_PREFIX = {
-  retailer: "PPIR",
-  distributor: "PPID",
-  "master-distributor": "PPIM"
+  retailer: "JNPR",
+  distributor: "JNPD",
+  "master-distributor": "JNPM"
 } as const;
 
 /**
- * Generate a unique Payprism network code for a given role.
+ * Generate a unique NextGenPay network code for a given role.
  *
- *   retailer            → PPIR + 6 chars  (e.g. PPIR8K2X9P)
- *   distributor         → PPID + 6 chars
- *   master-distributor  → PPIM + 6 chars
+ *   retailer            → JNPR + 6 chars  (e.g. JNPR8K2X9P)
+ *   distributor         → JNPD + 6 chars
+ *   master-distributor  → JNPM + 6 chars
  */
 export function generateUserCode(
   role: keyof typeof USER_CODE_PREFIX

@@ -1,8 +1,8 @@
 {
-  "name": "payprism-portal",
+  "name": "nextgenpay-portal",
   "version": "0.1.0",
   "private": true,
-  "description": "Payprism (Payprism Technology Pvt. Ltd.) - Digital banking & utility fintech portal",
+  "description": "NextGenPay (JMP NextGenPay Pvt. Ltd.) - Digital banking & utility fintech portal",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -25,9 +25,6 @@
     "framer-motion": "^11.11.9",
     "class-variance-authority": "^0.7.0",
     "@prisma/client": "^5.22.0",
-    "@neondatabase/serverless": "^0.10.4",
-    "@prisma/adapter-neon": "^5.22.0",
-    "ws": "^8.18.0",
     "next-auth": "^4.24.10",
     "@auth/prisma-adapter": "^2.7.4",
     "bcryptjs": "^2.4.3",
@@ -48,7 +45,6 @@
     "@types/react-dom": "^18.3.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.7",
-    "@types/ws": "^8.5.13",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.15",

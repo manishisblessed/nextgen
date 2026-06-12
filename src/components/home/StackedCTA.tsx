@@ -25,7 +25,7 @@ export function StackedCTA() {
               <h2 className="mt-5 font-display text-3xl font-bold leading-tight md:text-5xl">
                 Build the next great fintech business — <br />
                 <span className="bg-gradient-to-r from-accent-300 to-rose-300 bg-clip-text text-transparent">
-                  on Payprism rails.
+                  on NextGenPay rails.
                 </span>
               </h2>
               <p className="mt-4 max-w-xl text-white/80">

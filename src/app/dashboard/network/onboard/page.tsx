@@ -124,7 +124,7 @@ export default function OnboardPage() {
           <div className="grid gap-5 md:grid-cols-2">
             <Field label="Slab template">
               <Select>
-                <option>Standard ({role === "master-distributor" ? "PPID-default" : "PPIR-default"})</option>
+                <option>Standard ({role === "master-distributor" ? "JNPD-default" : "JNPR-default"})</option>
                 <option>Growth (1.2x AePS payout)</option>
                 <option>Power (custom)</option>
               </Select>

@@ -20,7 +20,7 @@ import { demoSession, saveSession } from "@/lib/auth";
 
 export default function Login() {
   const router = useRouter();
-  const [email, setEmail] = useState("retailer@payprismindia.com");
+  const [email, setEmail] = useState("retailer@jmpnextgenpay.com");
   const [password, setPassword] = useState("demo1234");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -39,7 +39,7 @@ export default function Login() {
       const enrolled = await LocalAuth.isEnrolledAsync();
       if (!has || !enrolled) return signIn();
       const r = await LocalAuth.authenticateAsync({
-        promptMessage: "Sign in to Payprism",
+        promptMessage: "Sign in to NextGenPay",
         cancelLabel: "Use password",
         disableDeviceFallback: false
       });
@@ -114,7 +114,7 @@ export default function Login() {
           <View style={styles.demo}>
             <Text style={styles.demoText}>
               <Text style={{ fontWeight: "800" }}>Demo · </Text>
-              retailer@payprismindia.com / demo1234
+              retailer@jmpnextgenpay.com / demo1234
             </Text>
           </View>
         </View>

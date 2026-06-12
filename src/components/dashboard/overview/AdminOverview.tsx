@@ -26,7 +26,7 @@ export function AdminOverview({ session }: { session: Session }) {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-500">Platform admin · {session.email}</p>
-          <h1 className="heading-md mt-1">Payprism Control Tower</h1>
+          <h1 className="heading-md mt-1">NextGenPay Control Tower</h1>
           <p className="mt-1 text-sm text-ink-600">
             Real-time view of users, switches, settlements and risk.
           </p>
@@ -92,7 +92,7 @@ export function AdminOverview({ session }: { session: Session }) {
             </li>
             <li className="rounded-xl bg-rose-50 p-3 text-rose-900">
               <p className="font-semibold">Velocity rule fired</p>
-              <p className="text-xs text-rose-800">Retailer PPIR3217 · 18 AePS in 12 mins</p>
+              <p className="text-xs text-rose-800">Retailer JNPR3217 · 18 AePS in 12 mins</p>
             </li>
             <li className="rounded-xl bg-brand-50 p-3 text-brand-900">
               <p className="font-semibold">Settlement scheduled</p>

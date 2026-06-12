@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "Payprism — Banking, Bills & Travel for Bharat";
+export const alt = "NextGenPay — Payment Gateway, POS & QR Payments";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -17,7 +17,7 @@ export default async function OpengraphImage() {
           justifyContent: "space-between",
           padding: 80,
           background:
-            "radial-gradient(60% 80% at 20% 20%, rgba(47,123,255,0.55) 0%, rgba(20,72,220,0) 60%), radial-gradient(50% 60% at 100% 100%, rgba(249,118,6,0.35) 0%, rgba(249,118,6,0) 60%), linear-gradient(135deg, #0e1626 0%, #173db1 100%)",
+            "radial-gradient(60% 80% at 20% 20%, rgba(233,69,96,0.4) 0%, rgba(233,69,96,0) 60%), radial-gradient(50% 60% at 100% 100%, rgba(212,168,67,0.3) 0%, rgba(212,168,67,0) 60%), linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
           color: "white",
           fontFamily: "system-ui, sans-serif"
         }}
@@ -29,32 +29,23 @@ export default async function OpengraphImage() {
               width: 92,
               height: 92,
               borderRadius: 22,
-              background: "linear-gradient(135deg, #2f7bff 0%, #1448dc 100%)",
+              background: "linear-gradient(135deg, #16213e 0%, #0f3460 100%)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              boxShadow: "0 20px 60px -10px rgba(47,123,255,0.55)"
+              border: "1px solid rgba(255,255,255,0.15)",
+              boxShadow: "0 20px 60px -10px rgba(233,69,96,0.45)"
             }}
           >
             <svg width="62" height="62" viewBox="0 0 64 64">
-              <path
-                d="M40 26 L60 20 L60 30 L40 36 Z"
-                fill="#ffd388"
-                opacity="0.85"
-              />
-              <path
-                d="M 13 13 L 36 13 C 43 13, 47.5 17.6, 47.5 24 C 47.5 30.4, 43 35, 36 35 L 22 35 L 22 51 L 13 51 Z"
-                fill="#ffffff"
-              />
-              <path
-                d="M 22 20 L 39 20 L 22 33 Z"
-                fill="#185df5"
-              />
+              <rect x="14" y="15" width="8" height="34" rx="2" fill="#ffffff" />
+              <rect x="42" y="15" width="8" height="34" rx="2" fill="#ffffff" />
+              <path d="M14 15 L22 15 L50 49 L42 49 Z" fill="#e94560" />
             </svg>
           </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: -1 }}>
-              Payprism
+              NextGenPay
             </div>
             <div
               style={{
@@ -65,7 +56,7 @@ export default async function OpengraphImage() {
                 textTransform: "uppercase"
               }}
             >
-              Banking · Bills · Travel
+              PG · POS · QR Payments
             </div>
           </div>
         </div>
@@ -80,16 +71,16 @@ export default async function OpengraphImage() {
               letterSpacing: -2
             }}
           >
-            Smart Banking for a{" "}
+            Powering Payments for a{" "}
             <span
               style={{
                 background:
-                  "linear-gradient(90deg, #7fe1ff 0%, #ffd388 100%)",
+                  "linear-gradient(90deg, #e94560 0%, #f0d68a 100%)",
                 backgroundClip: "text",
                 color: "transparent"
               }}
             >
-              Smarter Bharat
+              Digital Bharat
             </span>
           </div>
           <div
@@ -101,8 +92,8 @@ export default async function OpengraphImage() {
               lineHeight: 1.4
             }}
           >
-            60+ digital services in one dashboard — AePS, money transfer,
-            recharges, bill payments and travel bookings.
+            Payment gateway, POS machines, QR collections, AePS, money
+            transfer, recharges and bill payments — in one dashboard.
           </div>
         </div>
 
@@ -119,12 +110,12 @@ export default async function OpengraphImage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontWeight: 600 }}>payprismindia.com</span>
+            <span style={{ fontWeight: 600 }}>jmpnextgenpay.com</span>
             <span>·</span>
-            <span>+91 8285082121</span>
+            <span>contact@jmpnextgenpay.com</span>
           </div>
           <div style={{ display: "flex", gap: 18 }}>
-            {["AePS", "DMT", "BBPS", "UPI", "Travel"].map((tag) => (
+            {["PG", "POS", "QR", "AePS", "DMT", "BBPS"].map((tag) => (
               <span
                 key={tag}
                 style={{

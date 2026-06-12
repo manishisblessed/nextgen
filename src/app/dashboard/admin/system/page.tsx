@@ -35,7 +35,7 @@ export default function AdminSystemPage() {
         actions={
           <ReportActions
             filename="system-health"
-            title="Payprism India · System Health"
+            title="JMP NextGenPay · System Health"
             subtitle="Per-service SLO snapshot"
             columns={[
               { key: "service", header: "Service" },

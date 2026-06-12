@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Payprism Retailer",
-    "slug": "payprism-retailer",
-    "scheme": "payprism",
+    "name": "NextGenPay Retailer",
+    "slug": "nextgenpay-retailer",
+    "scheme": "nextgenpay",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,20 +10,20 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0e2358"
+      "backgroundColor": "#1a1a2e"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.payprismindia.retailer",
+      "bundleIdentifier": "com.jmpnextgenpay.retailer",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID to sign in to your Payprism account."
+        "NSFaceIDUsageDescription": "Use Face ID to sign in to your NextGenPay account."
       }
     },
     "android": {
-      "package": "com.payprismindia.retailer",
+      "package": "com.jmpnextgenpay.retailer",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#185df5"
+        "backgroundColor": "#1a1a2e"
       },
       "permissions": ["USE_FINGERPRINT", "USE_BIOMETRIC"]
     },
@@ -38,7 +38,7 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Use Face ID to sign in to your Payprism account."
+          "faceIDPermission": "Use Face ID to sign in to your NextGenPay account."
         }
       ]
     ],

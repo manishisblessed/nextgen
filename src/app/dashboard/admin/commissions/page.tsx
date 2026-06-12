@@ -35,7 +35,7 @@ export default function AdminCommissionsPage() {
           <>
             <ReportActions
               filename="commission-master"
-              title="Payprism India · Commission Master"
+              title="JMP NextGenPay · Commission Master"
               subtitle="Service-wise rate-card"
               columns={[
                 { key: "service", header: "Service" },

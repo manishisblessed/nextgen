@@ -24,7 +24,7 @@ export function Goals() {
     <Section className="bg-white">
       <Container>
         <SectionHeading
-          eyebrow="Why Payprism"
+          eyebrow="Why NextGenPay"
           title="Financial goals are our priority"
           description="We help retailers grow their business and customers achieve their financial goals through utility fintech that just works."
         />

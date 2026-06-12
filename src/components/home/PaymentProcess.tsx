@@ -47,7 +47,7 @@ export function PaymentProcess() {
           }
           description={
             <span className="text-ink-300">
-              Behind every tap, Payprism runs a battle-tested gateway
+              Behind every tap, NextGenPay runs a battle-tested gateway
               that processes millions of transactions every day with bank-grade
               security.
             </span>

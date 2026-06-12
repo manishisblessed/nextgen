@@ -1,10 +1,9 @@
 // =====================================================================
-// Payprism — production schema (Neon Postgres + Prisma)
+// JMP NextGenPay — production schema (Supabase Postgres + Prisma)
 // =====================================================================
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -153,7 +152,7 @@ model Document {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   type         DocumentType
   // Cloudinary
-  publicId     String       // e.g. "payprism/kyc/abc123"
+  publicId     String       // e.g. "nextgenpay/kyc/abc123"
   url          String       // secure_url
   resourceType String       @default("image") // image | raw | video
   format       String?

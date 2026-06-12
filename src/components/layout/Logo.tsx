@@ -14,49 +14,38 @@ export function LogoMark({
       viewBox="0 0 64 64"
       width={size}
       height={size}
-      className={cn("shrink-0 drop-shadow-[0_8px_20px_rgba(24,93,245,0.35)] transition-transform group-hover:scale-105", className)}
+      className={cn("shrink-0 drop-shadow-[0_8px_20px_rgba(26,26,46,0.35)] transition-transform group-hover:scale-105", className)}
       role="img"
-      aria-label="Payprism logo"
+      aria-label="NextGenPay logo"
     >
       <defs>
-        <linearGradient id="ppmBg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#2f7bff" />
-          <stop offset="55%" stopColor="#185df5" />
-          <stop offset="100%" stopColor="#1448dc" />
+        <linearGradient id="ngpBg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#1a1a2e" />
+          <stop offset="55%" stopColor="#16213e" />
+          <stop offset="100%" stopColor="#0f3460" />
         </linearGradient>
-        <linearGradient id="ppmShine" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+        <linearGradient id="ngpBolt" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#e94560" />
+          <stop offset="100%" stopColor="#d4a843" />
+        </linearGradient>
+        <linearGradient id="ngpShine" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.18" />
           <stop offset="55%" stopColor="#ffffff" stopOpacity="0" />
         </linearGradient>
-        <linearGradient id="ppmRayWarm" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#ffd388" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#ffd388" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id="ppmRayCoral" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#ff9a7a" stopOpacity="0.9" />
-          <stop offset="100%" stopColor="#ff9a7a" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id="ppmRayCyan" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#7fe1ff" stopOpacity="0.9" />
-          <stop offset="100%" stopColor="#7fe1ff" stopOpacity="0" />
-        </linearGradient>
-        <radialGradient id="ppmGlow" cx="0.3" cy="0.3" r="0.7">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
+        <radialGradient id="ngpGlow" cx="0.3" cy="0.3" r="0.7">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.25" />
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </radialGradient>
       </defs>
-      <rect width="64" height="64" rx="14" fill="url(#ppmBg)" />
-      <rect width="64" height="64" rx="14" fill="url(#ppmGlow)" />
-      <rect width="64" height="64" rx="14" fill="url(#ppmShine)" />
-      <path d="M42 21 L58 13 L60 17 L43 26 Z" fill="url(#ppmRayWarm)" />
-      <path d="M42 28 L62 28 L62 33 L42 33 Z" fill="url(#ppmRayCoral)" />
-      <path d="M42 35 L60 44 L58 48 L42 39 Z" fill="url(#ppmRayCyan)" />
-      <path
-        d="M 13 13 L 36 13 C 42.6 13, 47 17.4, 47 24 C 47 30.6, 42.6 35, 36 35 L 22 35 L 22 51 L 13 51 Z"
-        fill="#ffffff"
-      />
-      <path d="M 22 19 L 38 19 L 22 33 Z" fill="url(#ppmBg)" />
-      <rect x="11" y="11" width="9" height="2" rx="1" fill="#ffffff" opacity="0.45" />
+      <rect width="64" height="64" rx="14" fill="url(#ngpBg)" />
+      <rect width="64" height="64" rx="14" fill="url(#ngpGlow)" />
+      <rect width="64" height="64" rx="14" fill="url(#ngpShine)" />
+      {/* N monogram — diagonal as a gradient "next" bolt */}
+      <rect x="14" y="15" width="8" height="34" rx="2" fill="#ffffff" />
+      <rect x="42" y="15" width="8" height="34" rx="2" fill="#ffffff" />
+      <path d="M14 15 L22 15 L50 49 L42 49 Z" fill="url(#ngpBolt)" />
+      {/* forward chevron — momentum */}
+      <path d="M53 20 L58 24.5 L53 29" fill="none" stroke="#d4a843" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx="52" cy="52" r="3.2" fill="#34d399" />
       <circle
         cx="52"
@@ -84,7 +73,7 @@ export function Logo({
     <Link
       href="/"
       className={cn("group inline-flex items-center gap-3", className)}
-      aria-label="Payprism home"
+      aria-label="NextGenPay home"
     >
       <LogoMark size={40} />
       <span className="flex flex-col leading-tight">
@@ -94,16 +83,16 @@ export function Logo({
             variant === "light" ? "text-white" : "text-ink-900"
           )}
         >
-          Pay
+          NextGen
           <span
             className={cn(
               "bg-gradient-to-r bg-clip-text text-transparent",
               variant === "light"
-                ? "from-cyan-200 to-amber-200"
-                : "from-brand-600 to-accent-500"
+                ? "from-rose-300 to-amber-200"
+                : "from-accent-500 to-amber-500"
             )}
           >
-            prism
+            Pay
           </span>
         </span>
         {showTagline ? (
@@ -113,7 +102,7 @@ export function Logo({
               variant === "light" ? "text-white/70" : "text-ink-500"
             )}
           >
-            Banking · Bills · Travel
+            PG · POS · QR Payments
           </span>
         ) : null}
       </span>

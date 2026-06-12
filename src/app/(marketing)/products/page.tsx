@@ -11,28 +11,28 @@ export const metadata: Metadata = {
 
 const products = [
   {
-    name: "Payprism Retailer App",
+    name: "NextGenPay Retailer App",
     icon: Smartphone,
     text: "Android & iOS app for retailers — accept payments, recharge, transfer money & track commissions on the go.",
     badge: "Most popular",
     cta: "Download app"
   },
   {
-    name: "Payprism Web Dashboard",
+    name: "NextGenPay Web Dashboard",
     icon: Laptop2,
     text: "Powerful web dashboard with reports, exports, multi-user roles and real-time analytics.",
     cta: "Open dashboard"
   },
   {
-    name: "Payprism Distributor Suite",
+    name: "NextGenPay Distributor Suite",
     icon: Building2,
     text: "Manage hundreds of retailers, set commission overrides, monitor settlements and more.",
     cta: "Talk to sales"
   },
   {
-    name: "Payprism Developer APIs",
+    name: "NextGenPay Developer APIs",
     icon: Code2,
-    text: "Plug Payprism's payment, AePS, BBPS and travel APIs into your own product with developer-first docs.",
+    text: "Plug NextGenPay's payment, AePS, BBPS and travel APIs into your own product with developer-first docs.",
     cta: "Read docs"
   }
 ];
@@ -43,7 +43,7 @@ export default function ProductsPage() {
       <PageHero
         eyebrow="Products"
         title={<>One platform, <span className="gradient-text">four powerful products</span></>}
-        description="From a retailer's pocket to an enterprise's API stack — Payprism has the right product for your scale."
+        description="From a retailer's pocket to an enterprise's API stack — NextGenPay has the right product for your scale."
       />
 
       <Section className="bg-white">

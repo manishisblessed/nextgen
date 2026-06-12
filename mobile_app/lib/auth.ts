@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-const KEY = "pp_session";
+const KEY = "ngp_session";
 
 export type Session = {
   name: string;
@@ -13,8 +13,8 @@ export type Session = {
 
 export const demoSession: Session = {
   name: "Aman Sharma",
-  email: "retailer@payprismindia.com",
-  phone: "+91 82850 82121",
+  email: "retailer@jmpnextgenpay.com",
+  phone: "+91 98980 00000",
   walletBalance: 28450,
   loggedInAt: Date.now()
 };

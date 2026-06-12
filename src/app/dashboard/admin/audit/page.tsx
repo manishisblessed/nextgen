@@ -56,7 +56,7 @@ export default function AdminAuditPage() {
         actions={
           <ReportActions
             filename="audit-log"
-            title="Payprism India · Audit Log"
+            title="JMP NextGenPay · Audit Log"
             subtitle={`${rows.length} of ${auditEvents.length} events`}
             columns={[
               { key: "id", header: "Event ID" },

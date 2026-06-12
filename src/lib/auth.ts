@@ -1,7 +1,7 @@
 "use client";
 
-const SESSION_KEY = "pp_session";
-const COOKIE_NAME = "pp_logged_in";
+const SESSION_KEY = "ngp_session";
+const COOKIE_NAME = "ngp_logged_in";
 
 export type Role =
   | "admin"
@@ -25,15 +25,15 @@ export type Session = {
    * they pick their own password.
    */
   mustChangePassword?: boolean;
-  /** Network code (PPIR.../PPID.../PPIM.../PPSA...) when applicable. */
+  /** Network code (JNPR.../JNPD.../JNPM.../JNPS...) when applicable. */
   userCode?: string;
 };
 
 export const demoSessions: Record<Role, Session> = {
   retailer: {
     name: "Aman Sharma",
-    email: "retailer@payprismindia.com",
-    phone: "+91 82850 82121",
+    email: "retailer@jmpnextgenpay.com",
+    phone: "+91 98980 00000",
     role: "retailer",
     walletBalance: 28450,
     monthlyTurnover: 184500,
@@ -41,7 +41,7 @@ export const demoSessions: Record<Role, Session> = {
   },
   distributor: {
     name: "Rohit Verma",
-    email: "distributor@payprismindia.com",
+    email: "distributor@jmpnextgenpay.com",
     phone: "+91 90000 00021",
     role: "distributor",
     walletBalance: 482300,
@@ -50,7 +50,7 @@ export const demoSessions: Record<Role, Session> = {
   },
   "master-distributor": {
     name: "Neha Kapoor",
-    email: "master@payprismindia.com",
+    email: "master@jmpnextgenpay.com",
     phone: "+91 90000 00031",
     role: "master-distributor",
     walletBalance: 2148000,
@@ -58,8 +58,8 @@ export const demoSessions: Record<Role, Session> = {
     loggedInAt: Date.now()
   },
   admin: {
-    name: "Payprism Admin",
-    email: "admin@payprismindia.com",
+    name: "NextGenPay Admin",
+    email: "admin@jmpnextgenpay.com",
     phone: "+91 90000 00041",
     role: "admin",
     walletBalance: 0,
@@ -67,8 +67,8 @@ export const demoSessions: Record<Role, Session> = {
     loggedInAt: Date.now()
   },
   "sub-admin": {
-    name: "Payprism Sub-Admin",
-    email: "subadmin@payprismindia.com",
+    name: "NextGenPay Sub-Admin",
+    email: "subadmin@jmpnextgenpay.com",
     phone: "+91 90000 00042",
     role: "sub-admin",
     walletBalance: 0,

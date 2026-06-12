@@ -55,7 +55,7 @@ export default function LoginPage() {
             <Sparkles className="h-3.5 w-3.5" /> Unified portal · 3 personas
           </span>
           <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
-            One Payprism. <br /> Three powerful dashboards.
+            One NextGenPay. <br /> Three powerful dashboards.
           </h2>
           <p className="mt-3 text-white/85">
             Retailer, distributor and master distributor — each with its own purpose-built workspace, KPIs and controls.
@@ -80,7 +80,7 @@ export default function LoginPage() {
       <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
         <h1 className="heading-md">Sign in</h1>
         <p className="mt-2 text-sm text-ink-500">
-          New to Payprism?{" "}
+          New to NextGenPay?{" "}
           <Link href="/register" className="font-semibold text-brand-700">
             Create an account
           </Link>

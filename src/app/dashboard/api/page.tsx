@@ -94,7 +94,7 @@ export default function ApiKeysPage() {
 
       <div className="rounded-2xl border border-ink-100 bg-ink-900 p-6 font-mono text-xs text-ink-100">
         <div className="mb-2 text-ink-300"># Make your first API call</div>
-        <div className="text-emerald-300">curl https://api.payprismindia.com/v1/aeps/balance \</div>
+        <div className="text-emerald-300">curl https://api.jmpnextgenpay.com/v1/aeps/balance \</div>
         <div>  -H &quot;Authorization: Bearer pk_live_8h2sXX...&quot; \</div>
         <div>  -d aadhaar=XXXX-XXXX-1234 -d bank=SBIN \</div>
         <div>  -d biometric=&lt;base64&gt;</div>

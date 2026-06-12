@@ -56,7 +56,7 @@ export default function Home() {
           >
             <View style={styles.walletTop}>
               <View>
-                <Text style={styles.walletLabel}>Payprism Wallet</Text>
+                <Text style={styles.walletLabel}>NextGenPay Wallet</Text>
                 <Text style={styles.walletAmt}>{formatINR(session.walletBalance)}</Text>
               </View>
               <View style={styles.walletBadge}>

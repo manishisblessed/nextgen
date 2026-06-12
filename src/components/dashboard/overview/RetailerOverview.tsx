@@ -183,7 +183,7 @@ function WalletCard({ balance }: { balance: number }) {
           <Wallet className="h-5 w-5" />
         </span>
         <span className="rounded-full bg-white/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-widest">
-          Payprism Wallet
+          NextGenPay Wallet
         </span>
       </div>
       <p className="mt-5 text-xs font-semibold uppercase tracking-widest text-white/80">

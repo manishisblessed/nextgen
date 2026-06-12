@@ -7,11 +7,11 @@ import { Button } from "@/components/Button";
 import { colors, radii } from "@/lib/theme";
 
 const va = {
-  beneficiary: "Payprism Retail · Rohan Sharma",
+  beneficiary: "NextGenPay Retail · Rohan Sharma",
   account: "PRISM00198754321",
   ifsc: "RATN0VAAPIS",
   bank: "RBL Bank · Virtual Account",
-  upi: "rohan.payprism@rbl"
+  upi: "rohan.nextgenpay@rbl"
 };
 
 const transfers = [

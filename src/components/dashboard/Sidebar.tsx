@@ -107,7 +107,7 @@ export function Sidebar({
 
         <div className="m-3 rounded-2xl bg-gradient-to-br from-brand-600 via-brand-700 to-accent-500 p-4 text-white">
           <p className="text-xs font-semibold uppercase tracking-widest opacity-80">
-            Payprism Pro
+            NextGenPay Pro
           </p>
           <p className="mt-1 text-sm font-medium">
             {role === "retailer"

@@ -39,7 +39,7 @@ export default function AdminLoginPage() {
             <Lock className="h-3.5 w-3.5" /> Restricted · Admin console
           </span>
           <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
-            Payprism Admin <br /> Control Centre.
+            NextGenPay Admin <br /> Control Centre.
           </h2>
           <p className="mt-3 text-white/80">
             KYC approvals, biller routing, settlements, audit trail and full

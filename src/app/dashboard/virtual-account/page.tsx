@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 const account = {
   ifsc: "YESB0CMSNOC",
   number: "PPRSMV456789012345",
-  beneficiary: "Payprism - Aman Sharma",
+  beneficiary: "NextGenPay - Aman Sharma",
   branch: "Virtual Branch, Delhi"
 };
 
@@ -79,7 +79,7 @@ export default function VirtualAccountPage() {
           {[
             "Share the above account number & IFSC with your customer.",
             "Customer transfers via UPI / IMPS / NEFT from any bank app.",
-            "Funds auto-credit to your Payprism wallet within 30 seconds.",
+            "Funds auto-credit to your NextGenPay wallet within 30 seconds.",
             "You earn standard collection commission on every credit."
           ].map((s, i) => (
             <li key={s} className="flex gap-3">

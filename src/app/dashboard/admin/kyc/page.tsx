@@ -80,7 +80,7 @@ export default function AdminKycPage() {
           <>
             <ReportActions
               filename="kyc-queue"
-              title="Payprism India · KYC Queue"
+              title="JMP NextGenPay · KYC Queue"
               subtitle={`${rows.length} applicants`}
               columns={[
                 { key: "id", header: "KYC ID" },

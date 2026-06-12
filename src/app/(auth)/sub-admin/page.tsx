@@ -124,7 +124,7 @@ export default function SubAdminLoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="ops.user@payprismindia.com"
+              placeholder="ops.user@jmpnextgenpay.com"
               required
             />
           </div>
