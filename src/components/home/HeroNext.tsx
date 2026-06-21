@@ -15,9 +15,13 @@ import {
   Plane,
   TrendingUp
 } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/Button";
+import { TiltCard } from "@/components/motion";
 import { heroStats } from "@/lib/data";
 import { cn } from "@/lib/utils";
+
+const easeOut = [0.22, 1, 0.36, 1] as const;
 
 export function HeroNext() {
   return (
@@ -146,35 +150,27 @@ function Counter({ value, label }: { value: string; label: string }) {
 }
 
 function Hero3DCard() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [t, setT] = useState({ x: 0, y: 0 });
-
-  function handleMove(e: React.MouseEvent) {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const dx = (e.clientX - rect.left) / rect.width - 0.5;
-    const dy = (e.clientY - rect.top) / rect.height - 0.5;
-    setT({ x: dx, y: dy });
-  }
-  function handleLeave() {
-    setT({ x: 0, y: 0 });
-  }
+  const reduce = useReducedMotion();
 
   return (
-    <div className="relative mx-auto w-full max-w-md perspective-1200">
-      <div className="absolute -inset-10 -z-10 rounded-[44px] bg-gradient-to-br from-brand-300/40 via-violet-200/40 to-accent-300/40 blur-3xl" />
+    <motion.div
+      initial={reduce ? false : { opacity: 0, y: 30, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.9, ease: easeOut, delay: 0.2 }}
+      className="relative mx-auto w-full max-w-md perspective-1200"
+    >
+      <motion.div
+        aria-hidden
+        animate={
+          reduce
+            ? undefined
+            : { scale: [1, 1.06, 1], opacity: [0.55, 0.75, 0.55] }
+        }
+        transition={{ duration: 8, ease: "easeInOut", repeat: Infinity }}
+        className="absolute -inset-10 -z-10 rounded-[44px] bg-gradient-to-br from-brand-300/40 via-violet-200/40 to-accent-300/40 blur-3xl"
+      />
 
-      <div
-        ref={ref}
-        onMouseMove={handleMove}
-        onMouseLeave={handleLeave}
-        className="relative preserve-3d"
-        style={{
-          transform: `rotateY(${-t.x * 14}deg) rotateX(${t.y * 14}deg)`,
-          transition: "transform 0.18s ease-out"
-        }}
-      >
+      <TiltCard intensity="normal" glare={false} className="relative">
         <div
           className="relative rounded-[28px] border border-white/60 bg-white/85 p-5 shadow-glow backdrop-blur"
           style={{ transform: "translateZ(40px)" }}
@@ -233,9 +229,11 @@ function Hero3DCard() {
         </div>
 
         {/* Floating badges */}
-        <div
-          className="absolute -left-10 top-16 hidden rounded-2xl border border-white/70 bg-white px-3 py-2 shadow-soft md:block animate-float"
-          style={{ transform: "translateZ(80px)" }}
+        <FloatBadge
+          className="absolute -left-10 top-16 hidden rounded-2xl border border-white/70 bg-white px-3 py-2 shadow-soft md:block"
+          translateZ={80}
+          delay={0}
+          range={10}
         >
           <div className="flex items-center gap-2">
             <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-100 text-emerald-700">✓</span>
@@ -244,11 +242,13 @@ function Hero3DCard() {
               <p className="text-[10px] text-ink-500">Settled in 1.4s</p>
             </div>
           </div>
-        </div>
+        </FloatBadge>
 
-        <div
-          className="absolute -right-6 bottom-20 hidden rounded-2xl border border-white/70 bg-white px-3 py-2 shadow-soft md:block animate-float [animation-delay:1.2s]"
-          style={{ transform: "translateZ(70px)" }}
+        <FloatBadge
+          className="absolute -right-6 bottom-20 hidden rounded-2xl border border-white/70 bg-white px-3 py-2 shadow-soft md:block"
+          translateZ={70}
+          delay={1.2}
+          range={8}
         >
           <div className="flex items-center gap-2">
             <span className="grid h-7 w-7 place-items-center rounded-full bg-brand-100 text-brand-700">₹</span>
@@ -257,16 +257,49 @@ function Hero3DCard() {
               <p className="text-[10px] text-ink-500">+₹ 2,500.00</p>
             </div>
           </div>
-        </div>
+        </FloatBadge>
 
-        <div
-          className="absolute -left-4 -bottom-4 hidden rounded-2xl border border-white/70 bg-gradient-to-br from-brand-600 to-violet-600 px-3 py-2 text-white shadow-glow md:block animate-float [animation-delay:0.6s]"
-          style={{ transform: "translateZ(90px)" }}
+        <FloatBadge
+          className="absolute -left-4 -bottom-4 hidden rounded-2xl border border-white/70 bg-gradient-to-br from-brand-600 to-violet-600 px-3 py-2 text-white shadow-glow md:block"
+          translateZ={90}
+          delay={0.6}
+          range={12}
         >
           <p className="text-[10px] uppercase tracking-widest opacity-80">Today</p>
           <p className="font-display text-sm font-bold">74 transactions</p>
-        </div>
-      </div>
-    </div>
+        </FloatBadge>
+      </TiltCard>
+    </motion.div>
+  );
+}
+
+function FloatBadge({
+  children,
+  className,
+  translateZ,
+  delay,
+  range
+}: {
+  children: React.ReactNode;
+  className?: string;
+  translateZ: number;
+  delay: number;
+  range: number;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      className={className}
+      style={{ z: translateZ }}
+      animate={reduce ? undefined : { y: [0, -range, 0] }}
+      transition={{
+        duration: 5 + delay,
+        delay,
+        repeat: Infinity,
+        ease: "easeInOut"
+      }}
+    >
+      {children}
+    </motion.div>
   );
 }

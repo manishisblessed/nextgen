@@ -19,10 +19,23 @@
   --input: 226 232 240;
 
   --ring: 47 123 255;
+
+  /* Global motion design tokens */
+  --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 180ms;
+  --dur-base: 260ms;
+  --dur-slow: 420ms;
 }
 
 * {
   border-color: rgb(var(--border));
+}
+
+html {
+  scroll-behavior: smooth;
+  text-rendering: optimizeLegibility;
 }
 
 html,
@@ -32,6 +45,71 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-family: var(--font-sans);
+  /* Anchors offset for sticky navbar */
+  scroll-padding-top: 5rem;
+}
+
+/* Make interactive elements feel responsive by default */
+a,
+button {
+  transition:
+    color var(--dur-fast) var(--ease-out-quart),
+    background-color var(--dur-fast) var(--ease-out-quart),
+    border-color var(--dur-fast) var(--ease-out-quart),
+    box-shadow var(--dur-base) var(--ease-out-quart),
+    transform var(--dur-base) var(--ease-out-quart),
+    opacity var(--dur-fast) var(--ease-out-quart);
+}
+
+/* Subtle, branded selection */
+::selection {
+  background: rgb(66 99 199 / 0.18);
+  color: rgb(14 22 38);
+}
+
+/* Tab focus ring — refined */
+:focus-visible {
+  outline: none;
+}
+
+/* Custom scrollbar */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(66, 99, 199, 0.45),
+    rgba(124, 58, 237, 0.45)
+  );
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(66, 99, 199, 0.75),
+    rgba(124, 58, 237, 0.75)
+  );
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Respect user preference — disable all motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer components {
@@ -69,6 +147,16 @@ body {
 
   .gradient-text {
     @apply bg-gradient-to-r from-brand-700 via-brand-500 to-accent-500 bg-clip-text text-transparent;
+  }
+
+  /* A card surface that lifts smoothly on hover */
+  .lift-card {
+    @apply transition-[transform,box-shadow,border-color] duration-300 ease-out;
+    transition-timing-function: var(--ease-out-quart);
+    will-change: transform;
+  }
+  .lift-card:hover {
+    transform: translateY(-4px);
   }
 }
 
@@ -161,5 +249,63 @@ body {
   }
   .snap-start {
     scroll-snap-align: start;
+  }
+
+  /* Animated underline for nav-link style anchors */
+  .link-underline {
+    position: relative;
+  }
+  .link-underline::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 6px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #2e49ad, #e94560);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 320ms var(--ease-out-quart);
+  }
+  .link-underline:hover::after,
+  .link-underline[data-active="true"]::after {
+    transform: scaleX(1);
+  }
+
+  /* Shine sweep used on primary CTAs */
+  .btn-shine {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .btn-shine::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      110deg,
+      transparent 0%,
+      transparent 40%,
+      rgba(255, 255, 255, 0.35) 50%,
+      transparent 60%,
+      transparent 100%
+    );
+    transform: translateX(-120%);
+    transition: transform 700ms var(--ease-out-quart);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .btn-shine:hover::before {
+    transform: translateX(120%);
+  }
+
+  /* Subtle hover lift utility */
+  .hover-lift {
+    transition: transform 260ms var(--ease-out-quart),
+      box-shadow 260ms var(--ease-out-quart);
+  }
+  .hover-lift:hover {
+    transform: translateY(-3px);
   }
 }

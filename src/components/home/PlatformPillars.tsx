@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef, useState } from "react";
 import {
   ShieldCheck,
   Zap,
@@ -8,6 +7,7 @@ import {
   Globe2,
   type LucideIcon
 } from "lucide-react";
+import { Reveal, Stagger, StaggerItem, TiltCard } from "@/components/motion";
 import { cn } from "@/lib/utils";
 
 const pillars = [
@@ -41,26 +41,33 @@ export function PlatformPillars() {
   return (
     <section className="section bg-ink-950 text-white">
       <div className="container-x">
-        <div className="text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-white/80">
-            <Zap className="h-3.5 w-3.5" /> The NextGenPay difference
-          </span>
-          <h2 className="mt-4 font-display text-3xl font-bold leading-tight md:text-5xl">
-            Built like a bank. <br />
-            <span className="bg-gradient-to-r from-brand-300 via-violet-300 to-accent-400 bg-clip-text text-transparent">
-              Felt like an app.
+        <Reveal>
+          <div className="text-center">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-white/80">
+              <Zap className="h-3.5 w-3.5" /> The NextGenPay difference
             </span>
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-white/70">
-            Four engineering pillars that quietly power every transaction across the network.
-          </p>
-        </div>
+            <h2 className="mt-4 font-display text-3xl font-bold leading-tight md:text-5xl">
+              Built like a bank. <br />
+              <span className="bg-gradient-to-r from-brand-300 via-violet-300 to-accent-400 bg-clip-text text-transparent">
+                Felt like an app.
+              </span>
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-white/70">
+              Four engineering pillars that quietly power every transaction across the network.
+            </p>
+          </div>
+        </Reveal>
 
-        <div className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+        <Stagger
+          stagger={0.08}
+          className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-4"
+        >
           {pillars.map((p) => (
-            <PillarCard key={p.title} {...p} />
+            <StaggerItem key={p.title}>
+              <PillarCard {...p} />
+            </StaggerItem>
           ))}
-        </div>
+        </Stagger>
       </div>
     </section>
   );
@@ -77,39 +84,22 @@ function PillarCard({
   body: string;
   color: string;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [t, setT] = useState({ x: 0, y: 0 });
-
-  function move(e: React.MouseEvent) {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setT({ x: (e.clientX - r.left) / r.width - 0.5, y: (e.clientY - r.top) / r.height - 0.5 });
-  }
-
   return (
-    <div
-      ref={ref}
-      onMouseMove={move}
-      onMouseLeave={() => setT({ x: 0, y: 0 })}
-      className="group relative perspective-1200"
+    <TiltCard
+      intensity="subtle"
+      glare={false}
+      className="group relative h-full perspective-1200"
     >
-      <div
-        className="relative h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur transition-all hover:bg-white/[0.06] preserve-3d"
-        style={{
-          transform: `rotateY(${-t.x * 10}deg) rotateX(${t.y * 10}deg)`,
-          transition: "transform 0.18s ease-out"
-        }}
-      >
+      <div className="relative h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur transition-colors duration-300 hover:bg-white/[0.07] preserve-3d">
         <div
           className={cn(
-            "pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-br opacity-0 blur-xl transition-opacity group-hover:opacity-30",
+            "pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-br opacity-0 blur-xl transition-opacity duration-500 group-hover:opacity-30",
             color
           )}
         />
         <span
           className={cn(
-            "relative inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-glow",
+            "relative inline-flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-glow transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-3",
             color
           )}
           style={{ transform: "translateZ(40px)" }}
@@ -129,6 +119,6 @@ function PillarCard({
           {body}
         </p>
       </div>
-    </div>
+    </TiltCard>
   );
 }
