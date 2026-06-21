@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import {
   Eye,
   EyeOff,
@@ -11,11 +12,11 @@ import {
   Store,
   Users,
   Network,
-  ArrowRight
+  ArrowRight,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
-import { saveSession, demoSessions } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 type PublicRole = "retailer" | "distributor" | "master-distributor";
@@ -26,25 +27,46 @@ const roleOptions: { id: PublicRole; label: string; icon: typeof Store; tagline:
   { id: "master-distributor", label: "Master", icon: Network, tagline: "White-label & API" }
 ];
 
+const demoEmails: Record<PublicRole, string> = {
+  retailer: "retailer@jmpnextgenpay.com",
+  distributor: "distributor@jmpnextgenpay.com",
+  "master-distributor": "master@jmpnextgenpay.com"
+};
+
 export default function LoginPage() {
   const router = useRouter();
   const [role, setRole] = useState<PublicRole>("retailer");
-  const [email, setEmail] = useState(demoSessions.retailer.email);
-  const [password, setPassword] = useState("demo1234");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   function pickRole(r: PublicRole) {
     setRole(r);
-    setEmail(demoSessions[r].email);
+    setIdentifier(demoEmails[r]);
+    setPassword("Demo@1234");
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
-    saveSession({ ...demoSessions[role], email });
+    setError("");
+
+    const result = await signIn("credentials", {
+      identifier: identifier.trim(),
+      password,
+      redirect: false,
+    });
+
+    if (result?.error) {
+      setError("Invalid email/phone or password. Please try again.");
+      setLoading(false);
+      return;
+    }
+
     router.push("/dashboard");
+    router.refresh();
   }
 
   return (
@@ -52,7 +74,7 @@ export default function LoginPage() {
       <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-10 text-white shadow-glow lg:flex">
         <div>
           <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
-            <Sparkles className="h-3.5 w-3.5" /> Unified portal · 3 personas
+            <Sparkles className="h-3.5 w-3.5" /> Unified portal
           </span>
           <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
             One NextGenPay. <br /> Three powerful dashboards.
@@ -65,7 +87,7 @@ export default function LoginPage() {
         <div className="space-y-3">
           {[
             "60+ services in one dashboard",
-            "Instant IMPS settlement 24×7",
+            "Instant IMPS settlement 24x7",
             "Highest commissions in the industry",
             "API + white-label for partners"
           ].map((t) => (
@@ -88,7 +110,7 @@ export default function LoginPage() {
 
         <div className="mt-6">
           <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">
-            Demo · pick a role
+            Quick login
           </p>
           <div className="grid grid-cols-3 gap-2">
             {roleOptions.map((r) => {
@@ -126,13 +148,21 @@ export default function LoginPage() {
           </div>
         </div>
 
+        {error && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
+
         <form className="mt-6 space-y-5" onSubmit={onSubmit}>
           <div>
-            <Label htmlFor="email">Email or mobile</Label>
+            <Label htmlFor="identifier">Email or mobile</Label>
             <Input
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              id="identifier"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="you@example.com or 9898000000"
               required
             />
           </div>
@@ -180,12 +210,12 @@ export default function LoginPage() {
           </label>
 
           <Button type="submit" size="lg" className="w-full" disabled={loading}>
-            {loading ? "Signing in..." : <>Sign in as {role} <ArrowRight className="h-4 w-4" /></>}
+            {loading ? "Signing in..." : <>Sign in <ArrowRight className="h-4 w-4" /></>}
           </Button>
 
           <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50 p-3 text-xs text-ink-600">
-            <span className="font-semibold text-ink-900">Demo password:</span>{" "}
-            <span className="font-mono">demo1234</span> · works for every role.
+            <span className="font-semibold text-ink-900">Demo credentials:</span>{" "}
+            Use the role buttons above, password: <span className="font-mono">Demo@1234</span>
           </div>
         </form>
       </div>

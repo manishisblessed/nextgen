@@ -1,14 +1,23 @@
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Card } from "@/components/Card";
 import { colors, formatINR, radii } from "@/lib/theme";
-import { clearSession, demoSession, getSession, type Session } from "@/lib/auth";
+import { clearSession, getSession, saveSession, type Session } from "@/lib/auth";
+import { api } from "@/lib/api";
 
-const items = [
+const ROLE_LABEL: Record<string, string> = {
+  RETAILER: "Retailer",
+  DISTRIBUTOR: "Distributor",
+  MASTER_DISTRIBUTOR: "Master Distributor",
+  ADMIN: "Admin",
+  SUPPORT: "Support",
+};
+
+const menuItems = [
   { i: "person-circle-outline", l: "Personal info", h: "/services/virtual-account" },
   { i: "shield-checkmark-outline", l: "KYC & documents", h: "/services/virtual-account" },
   { i: "card-outline", l: "Linked bank accounts", h: "/services/virtual-account" },
@@ -23,15 +32,48 @@ const items = [
 
 export default function Profile() {
   const router = useRouter();
-  const [session, setSession] = useState<Session>(demoSession);
+  const [session, setSession] = useState<Session | null>(null);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [monthlyIn, setMonthlyIn] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    getSession().then((s) => s && setSession(s));
+  const load = useCallback(async () => {
+    const s = await getSession();
+    if (s) {
+      setSession(s);
+      setWalletBalance(s.walletBalance);
+    }
+    try {
+      const wallet = await api.getWallet();
+      setWalletBalance(wallet.balance);
+      setMonthlyIn(wallet.monthlyIn);
+      if (s) {
+        const updated = { ...s, walletBalance: wallet.balance };
+        await saveSession(updated);
+        setSession(updated);
+      }
+    } catch {
+      // offline — use cached session
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const name = session?.name ?? "User";
+  const roleLabel = ROLE_LABEL[session?.role ?? ""] ?? session?.role ?? "";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <LinearGradient
           colors={[colors.brand[700], colors.brand[600], colors.accent[500]]}
           start={{ x: 0, y: 0 }}
@@ -40,30 +82,30 @@ export default function Profile() {
         >
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>
-              {session.name
+              {name
                 .split(" ")
                 .map((n) => n[0])
                 .slice(0, 2)
                 .join("")}
             </Text>
           </View>
-          <Text style={styles.name}>{session.name}</Text>
-          <Text style={styles.role}>Retailer · Sharma Mobile World</Text>
+          <Text style={styles.name}>{name}</Text>
+          <Text style={styles.role}>{roleLabel}{session?.email ? ` · ${session.email}` : ""}</Text>
           <View style={styles.heroRow}>
             <View style={{ alignItems: "center", flex: 1 }}>
               <Text style={styles.heroLabel}>Wallet</Text>
-              <Text style={styles.heroValue}>{formatINR(session.walletBalance)}</Text>
+              <Text style={styles.heroValue}>{formatINR(walletBalance)}</Text>
             </View>
             <View style={styles.divider} />
             <View style={{ alignItems: "center", flex: 1 }}>
-              <Text style={styles.heroLabel}>Commission · MTD</Text>
-              <Text style={styles.heroValue}>{formatINR(8642)}</Text>
+              <Text style={styles.heroLabel}>Earned · MTD</Text>
+              <Text style={styles.heroValue}>{formatINR(monthlyIn)}</Text>
             </View>
           </View>
         </LinearGradient>
 
         <Card style={{ padding: 0, marginTop: 16 }}>
-          {items.map((it, i) => (
+          {menuItems.map((it, i) => (
             <Pressable
               key={it.l}
               onPress={() => router.push(it.h as never)}

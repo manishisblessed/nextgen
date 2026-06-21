@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,32 +7,76 @@ import { Card } from "@/components/Card";
 import { Field } from "@/components/Input";
 import { Button } from "@/components/Button";
 import { ResultModal } from "@/components/Result";
-import { colors, generateRefId, radii } from "@/lib/theme";
-import { getSession, saveSession, type Session } from "@/lib/auth";
+import { colors, radii } from "@/lib/theme";
+import { api, ApiError } from "@/lib/api";
 
 const presets = [500, 1000, 2000, 5000];
 
 export default function WalletScreen() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [balance, setBalance] = useState(0);
+  const [monthlyIn, setMonthlyIn] = useState(0);
+  const [monthlyOut, setMonthlyOut] = useState(0);
   const [amount, setAmount] = useState("1000");
   const [loading, setLoading] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [refId, setRefId] = useState("");
+  const [resultStatus, setResultStatus] = useState<"Success" | "Pending" | "Failed">("Success");
+  const [resultMsg, setResultMsg] = useState("");
+  const [fundLoading, setFundLoading] = useState(false);
 
-  useEffect(() => {
-    getSession().then(setSession);
+  const fetchWallet = useCallback(async () => {
+    try {
+      const data = await api.getWallet();
+      setBalance(data.balance);
+      setMonthlyIn(data.monthlyIn);
+      setMonthlyOut(data.monthlyOut);
+    } catch {
+      // use cached values
+    }
   }, []);
 
+  useEffect(() => { fetchWallet(); }, [fetchWallet]);
+
   async function topup() {
-    if (!session) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1100));
-    const updated: Session = { ...session, walletBalance: session.walletBalance + Number(amount || 0) };
-    await saveSession(updated);
-    setSession(updated);
-    setRefId(generateRefId("WALLET"));
-    setLoading(false);
-    setShowResult(true);
+    try {
+      const res = await api.post<{ refId?: string; status?: string }>("/api/services/upi/collect", {
+        payerVpa: "self@upi",
+        amount: Number(amount || 0),
+        note: "Wallet top-up",
+      });
+      setRefId(res.refId ?? "");
+      setResultStatus("Pending");
+      setResultMsg("UPI request sent. Wallet will be credited once payment is confirmed.");
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Top-up failed. Try again.");
+    } finally {
+      setLoading(false);
+      setShowResult(true);
+    }
+  }
+
+  async function raiseFundRequest() {
+    setFundLoading(true);
+    try {
+      await api.post("/api/fund-request", {
+        amount: Number(amount || 0),
+        mode: "ONLINE",
+        reference: "Mobile app fund request",
+      });
+      setRefId("");
+      setResultStatus("Success");
+      setResultMsg(`Fund request of ₹${amount} submitted. Your distributor will approve it shortly.`);
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Fund request failed. Try again.");
+    } finally {
+      setFundLoading(false);
+      setShowResult(true);
+    }
   }
 
   return (
@@ -41,17 +85,15 @@ export default function WalletScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
         <Card style={styles.balanceCard}>
           <Text style={styles.balLabel}>Available wallet balance</Text>
-          <Text style={styles.balAmount}>
-            ₹{(session?.walletBalance ?? 0).toLocaleString("en-IN")}
-          </Text>
+          <Text style={styles.balAmount}>₹{balance.toLocaleString("en-IN")}</Text>
           <View style={styles.metaRow}>
             <View style={styles.meta}>
               <Ionicons name="trending-up" size={14} color="#fff" />
-              <Text style={styles.metaText}>Today ₹{(12450).toLocaleString("en-IN")}</Text>
+              <Text style={styles.metaText}>In ₹{monthlyIn.toLocaleString("en-IN")}</Text>
             </View>
             <View style={styles.meta}>
-              <Ionicons name="calendar-outline" size={14} color="#fff" />
-              <Text style={styles.metaText}>This month ₹3.4 L</Text>
+              <Ionicons name="trending-down" size={14} color="#fff" />
+              <Text style={styles.metaText}>Out ₹{monthlyOut.toLocaleString("en-IN")}</Text>
             </View>
           </View>
         </Card>
@@ -81,18 +123,18 @@ export default function WalletScreen() {
           <Text style={styles.note}>
             Submit a fund request for instant approval. Average TAT: under 4 minutes.
           </Text>
-          <Button label="Raise fund request" iconRight="paper-plane-outline" variant="ghost" />
+          <Button label="Raise fund request" iconRight="paper-plane-outline" variant="ghost" onPress={raiseFundRequest} loading={fundLoading} />
         </Card>
       </ScrollView>
 
       <ResultModal
         visible={showResult}
-        onClose={() => setShowResult(false)}
-        status="Success"
-        title="Wallet topped up"
-        subtitle="Funds available immediately"
+        onClose={() => { setShowResult(false); fetchWallet(); }}
+        status={resultStatus}
+        title={resultStatus === "Success" ? "Request submitted" : resultStatus === "Pending" ? "Payment initiated" : "Failed"}
+        subtitle={resultMsg}
         amount={parseInt(amount, 10)}
-        refId={refId}
+        refId={refId || undefined}
       />
     </SafeAreaView>
   );

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
 import { hmac } from "@/lib/crypto";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   applicantName: z.string().min(2),
@@ -21,7 +22,12 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const userId = "demo-user-id";
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
+
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
@@ -29,16 +35,16 @@ export async function POST(req: Request) {
   const aadhaarRef = hmac(parsed.data.aadhaar);
 
   const result = await runTransaction({
-    userId,
+    userId: user.id,
     service: "PAN_CARD",
-    amount: 107, // government fee
+    amount: 107,
     commission: 30,
     idempotencyKey: parsed.data.idempotencyKey,
     customer: parsed.data.applicantName,
     operator: "NSDL",
     partner: partner.name,
     request: { ...parsed.data, aadhaar: undefined, aadhaarRef },
-    call: () => partner.apply({ userId, ...parsed.data, aadhaarRef })
+    call: () => partner.apply({ userId: user.id, ...parsed.data, aadhaarRef })
   });
 
   return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });

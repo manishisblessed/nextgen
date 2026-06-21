@@ -3,32 +3,47 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import {
   Eye,
   EyeOff,
   ShieldCheck,
   Lock,
   ArrowRight,
-  KeyRound
+  KeyRound,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
-import { saveSession, demoSessions } from "@/lib/auth";
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState(demoSessions.admin.email);
-  const [password, setPassword] = useState("demo1234");
+  const [email, setEmail] = useState("admin@jmpnextgenpay.com");
+  const [password, setPassword] = useState("Demo@1234");
   const [otp, setOtp] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 700));
-    saveSession({ ...demoSessions.admin, email });
+    setError("");
+
+    const result = await signIn("credentials", {
+      identifier: email.trim(),
+      password,
+      redirect: false,
+    });
+
+    if (result?.error) {
+      setError("Invalid credentials or insufficient permissions.");
+      setLoading(false);
+      return;
+    }
+
     router.push("/dashboard");
+    router.refresh();
   }
 
   return (
@@ -74,6 +89,13 @@ export default function AdminLoginPage() {
             </p>
           </div>
         </div>
+
+        {error && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
 
         <form className="mt-6 space-y-5" onSubmit={onSubmit}>
           <div>
@@ -134,7 +156,7 @@ export default function AdminLoginPage() {
               <KeyRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
             </div>
             <p className="mt-1 text-[11px] text-ink-500">
-              Demo build — any 6-digit code works.
+              2FA will be enforced in production.
             </p>
           </div>
 
@@ -153,11 +175,15 @@ export default function AdminLoginPage() {
             <Link href="/sub-admin" className="font-semibold text-brand-700">
               Use the sub-admin login
             </Link>
+            {" · "}
+            <Link href="/master-admin" className="font-semibold text-violet-700">
+              Master Admin
+            </Link>
           </p>
 
           <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50 p-3 text-xs text-ink-600">
-            <span className="font-semibold text-ink-900">Demo password:</span>{" "}
-            <span className="font-mono">demo1234</span>
+            <span className="font-semibold text-ink-900">Credentials:</span>{" "}
+            <span className="font-mono">admin@jmpnextgenpay.com</span> / <span className="font-mono">Demo@1234</span>
           </div>
         </form>
       </div>

@@ -1,86 +1,216 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle2, XCircle, Plus, Send } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  XCircle,
+  Plus,
+  Send,
+  RefreshCw,
+  AlertTriangle,
+  Loader2,
+} from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { fundRequests, type FundRequest } from "@/lib/data";
-import { getSession, type Role } from "@/lib/auth";
-import { formatINR, generateRefId } from "@/lib/utils";
+import { type Role } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
+import { formatINR } from "@/lib/utils";
+
+type FundReq = {
+  id: string;
+  amount: number;
+  mode: string;
+  utr: string | null;
+  bankName: string | null;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  remarks: string | null;
+  createdAt: string;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  requester: { id: string; name: string; email: string; phone: string };
+  approver: { id: string; name: string; email: string } | null;
+};
+
+const STATUS_BADGE: Record<string, "success" | "danger" | "warning"> = {
+  APPROVED: "success",
+  REJECTED: "danger",
+  PENDING: "warning",
+  CANCELLED: "danger",
+};
 
 export default function FundsRequestPage() {
-  const [role, setRole] = useState<Role>("retailer");
-  const [rows, setRows] = useState<FundRequest[]>(fundRequests);
+  const { session } = useAuth();
+  const role: Role = session?.role ?? "retailer";
+  const [rows, setRows] = useState<FundReq[]>([]);
+  const [fetching, setFetching] = useState(true);
   const [showNew, setShowNew] = useState(false);
-
-  useEffect(() => {
-    const s = getSession();
-    if (s) setRole(s.role);
-  }, []);
+  const [error, setError] = useState<string | null>(null);
 
   const isApprover = role !== "retailer";
 
-  const decide = (id: string, status: "Approved" | "Rejected") =>
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, status } : r)));
+  const fetchRequests = useCallback(async () => {
+    try {
+      setFetching(true);
+      setError(null);
+      const res = await fetch("/api/fund-request");
+      if (!res.ok) throw new Error("Failed to fetch");
+      const json = await res.json();
+      setRows(json.requests);
+    } catch {
+      setError("Could not load fund requests.");
+    } finally {
+      setFetching(false);
+    }
+  }, []);
 
-  const cols: Column<FundRequest>[] = [
-    { key: "id", header: "Request", render: (r) => <span className="font-mono text-xs">{r.id}</span> },
+  useEffect(() => {
+    fetchRequests();
+  }, [fetchRequests]);
+
+  const [deciding, setDeciding] = useState<string | null>(null);
+
+  async function decide(id: string, action: "approve" | "reject") {
+    const remarks =
+      action === "reject" ? prompt("Reason for rejection (optional):") : null;
+    setDeciding(id);
+    try {
+      const res = await fetch(`/api/fund-request/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, remarks: remarks ?? undefined }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        alert(json.error ?? "Action failed");
+        return;
+      }
+      await fetchRequests();
+    } finally {
+      setDeciding(null);
+    }
+  }
+
+  const reportRows = rows.map((r) => ({
+    id: r.id,
+    fromName: r.requester.name,
+    fromEmail: r.requester.email,
+    amount: r.amount,
+    mode: r.mode,
+    utr: r.utr ?? "—",
+    status: r.status,
+    date: new Date(r.createdAt).toLocaleString("en-IN"),
+  }));
+
+  const cols: Column<FundReq>[] = [
     {
-      key: "fromName",
-      header: isApprover ? "From retailer" : "Requested by",
+      key: "id",
+      header: "Request",
+      render: (r) => (
+        <span className="font-mono text-xs">{r.id.slice(0, 12)}…</span>
+      ),
+    },
+    {
+      key: "requester",
+      header: isApprover ? "From" : "Requested by",
       render: (r) => (
         <div>
-          <div className="font-semibold text-ink-900">{r.fromName}</div>
-          <div className="text-xs text-ink-500">{r.fromId}</div>
+          <div className="font-semibold text-ink-900">{r.requester.name}</div>
+          <div className="text-xs text-ink-500">{r.requester.email}</div>
         </div>
-      )
+      ),
     },
-    { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      render: (r) => (
+        <span className="font-semibold">{formatINR(r.amount)}</span>
+      ),
+    },
     { key: "mode", header: "Mode" },
-    { key: "reference", header: "Reference", render: (r) => <span className="font-mono text-xs">{r.reference}</span> },
-    { key: "date", header: "When", className: "whitespace-nowrap text-xs text-ink-500" },
+    {
+      key: "utr",
+      header: "UTR / Ref",
+      render: (r) => (
+        <span className="font-mono text-xs">{r.utr ?? "—"}</span>
+      ),
+    },
+    {
+      key: "createdAt",
+      header: "When",
+      render: (r) => (
+        <span className="whitespace-nowrap text-xs text-ink-500">
+          {new Date(r.createdAt).toLocaleString("en-IN", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })}
+        </span>
+      ),
+    },
     {
       key: "status",
       header: "Status",
       render: (r) => (
-        <Badge variant={r.status === "Approved" ? "success" : r.status === "Rejected" ? "danger" : "warning"}>
+        <Badge variant={STATUS_BADGE[r.status] ?? "warning"}>
           {r.status}
         </Badge>
-      )
+      ),
     },
     ...(isApprover
       ? [
           {
-            key: "actions",
+            key: "actions" as keyof FundReq,
             header: "",
             align: "right" as const,
-            render: (r: FundRequest) => (
-              <div className="flex justify-end gap-1">
-                <button onClick={() => decide(r.id, "Approved")} disabled={r.status !== "Pending"} className="grid h-8 w-8 place-items-center rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-30" title="Approve">
-                  <CheckCircle2 className="h-4 w-4" />
-                </button>
-                <button onClick={() => decide(r.id, "Rejected")} disabled={r.status !== "Pending"} className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50 disabled:opacity-30" title="Reject">
-                  <XCircle className="h-4 w-4" />
-                </button>
-              </div>
-            )
-          }
+            render: (r: FundReq) => {
+              if (r.status !== "PENDING") return null;
+              const busy = deciding === r.id;
+              return (
+                <div className="flex justify-end gap-1">
+                  <button
+                    onClick={() => decide(r.id, "approve")}
+                    disabled={busy}
+                    className="grid h-8 w-8 place-items-center rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-30"
+                    title="Approve"
+                  >
+                    {busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => decide(r.id, "reject")}
+                    disabled={busy}
+                    className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50 disabled:opacity-30"
+                    title="Reject"
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            },
+          },
         ]
-      : [])
+      : []),
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow={isApprover ? "Approvals" : "Wallet"}
-        title={isApprover ? "Fund requests from your network" : "Request funds"}
-        description={isApprover
-          ? "Approve incoming wallet top-up requests with bank reference. Auto-credit on approval."
-          : "Submit your bank deposit reference to top up your NextGenPay wallet within minutes."}
+        title={
+          isApprover ? "Fund requests from your network" : "Request funds"
+        }
+        description={
+          isApprover
+            ? "Approve incoming wallet top-up requests with bank reference. Auto-credit on approval."
+            : "Submit your bank deposit reference to top up your NextGenPay wallet within minutes."
+        }
         actions={
           <>
             <ReportActions
@@ -90,16 +220,25 @@ export default function FundsRequestPage() {
               columns={[
                 { key: "id", header: "Request ID" },
                 { key: "fromName", header: "Requested by" },
-                { key: "fromId", header: "Code" },
-                { key: "toId", header: "To" },
+                { key: "fromEmail", header: "Email" },
                 { key: "amount", header: "Amount (INR)" },
                 { key: "mode", header: "Mode" },
-                { key: "reference", header: "Reference / UTR" },
+                { key: "utr", header: "UTR / Reference" },
                 { key: "status", header: "Status" },
-                { key: "date", header: "When" }
+                { key: "date", header: "When" },
               ]}
-              rows={rows}
+              rows={reportRows}
             />
+            <Button
+              variant="outline"
+              onClick={fetchRequests}
+              disabled={fetching}
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${fetching ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
             {!isApprover && (
               <Button onClick={() => setShowNew(true)}>
                 <Plus className="h-4 w-4" /> New request
@@ -109,69 +248,138 @@ export default function FundsRequestPage() {
         }
       />
 
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+
       {showNew && !isApprover && (
         <NewRequestForm
           onCancel={() => setShowNew(false)}
-          onSubmit={(req) => {
-            setRows([req, ...rows]);
+          onSubmitted={() => {
             setShowNew(false);
+            fetchRequests();
           }}
         />
       )}
 
-      <DataTable title={`${rows.length} requests`} columns={cols} data={rows} />
+      <DataTable
+        title={
+          fetching
+            ? "Loading…"
+            : `${rows.length} request${rows.length === 1 ? "" : "s"}`
+        }
+        columns={cols}
+        data={rows}
+        empty={
+          fetching
+            ? "Loading fund requests…"
+            : "No fund requests yet. Click 'New request' to create one."
+        }
+      />
     </div>
   );
 }
 
 function NewRequestForm({
-  onSubmit,
-  onCancel
+  onSubmitted,
+  onCancel,
 }: {
-  onSubmit: (r: FundRequest) => void;
+  onSubmitted: () => void;
   onCancel: () => void;
 }) {
   const [amount, setAmount] = useState("10000");
-  const [mode, setMode] = useState<FundRequest["mode"]>("IMPS");
-  const [ref, setRef] = useState("");
+  const [mode, setMode] = useState("IMPS");
+  const [utr, setUtr] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/fund-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: Number(amount),
+          mode,
+          utr: utr || undefined,
+          bankName: bankName || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error?.toString() ?? "Failed to create request");
+      }
+      onSubmitted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <form
+      onSubmit={handleSubmit}
       className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50/60 to-white p-5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit({
-          id: generateRefId("FR-"),
-          fromId: "JNPR3091",
-          fromName: "Aman Sharma",
-          toId: "JNPD2003",
-          amount: parseInt(amount, 10),
-          mode,
-          reference: ref || "MANUAL",
-          date: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) + " ",
-          status: "Pending"
-        });
-      }}
     >
       <div className="grid gap-4 md:grid-cols-4">
         <div>
-          <Label>Amount</Label>
-          <Input value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Label>Amount (₹)</Label>
+          <Input
+            type="number"
+            required
+            min={1}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
         </div>
         <div>
           <Label>Deposit mode</Label>
-          <Select value={mode} onChange={(e) => setMode(e.target.value as FundRequest["mode"])}>
-            <option>IMPS</option><option>NEFT</option><option>RTGS</option><option>UPI</option><option>Cash Deposit</option>
+          <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option>IMPS</option>
+            <option>NEFT</option>
+            <option>RTGS</option>
+            <option>UPI</option>
+            <option>Cash Deposit</option>
           </Select>
         </div>
-        <div className="md:col-span-2">
-          <Label>Bank reference / UTR</Label>
-          <Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="P2A8765 / NEFT123..." />
+        <div>
+          <Label>Bank name (optional)</Label>
+          <Input
+            value={bankName}
+            onChange={(e) => setBankName(e.target.value)}
+            placeholder="SBI, HDFC…"
+          />
+        </div>
+        <div>
+          <Label>UTR / Reference</Label>
+          <Input
+            value={utr}
+            onChange={(e) => setUtr(e.target.value)}
+            placeholder="P2A8765 / NEFT123…"
+          />
         </div>
       </div>
+      {error && (
+        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {error}
+        </p>
+      )}
       <div className="mt-4 flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="submit"><Send className="h-4 w-4" /> Submit</Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={submitting}>
+          <Send className="h-4 w-4" />
+          {submitting ? "Submitting…" : "Submit request"}
+        </Button>
       </div>
     </form>
   );

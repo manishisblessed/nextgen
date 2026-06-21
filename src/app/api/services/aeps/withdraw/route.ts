@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   aadhaar: z.string().min(12).max(14),
@@ -12,15 +13,18 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  // TODO: replace with real session
-  const userId = "demo-user-id";
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
 
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const aeps = getPartner("aeps");
   const result = await runTransaction({
-    userId,
+    userId: user.id,
     service: "AEPS_WITHDRAW",
     amount: parsed.data.amount,
     fee: 0,
@@ -33,7 +37,7 @@ export async function POST(req: Request) {
     ip: req.headers.get("x-forwarded-for") ?? undefined,
     call: () =>
       aeps.withdraw({
-        userId,
+        userId: user.id,
         idempotencyKey: parsed.data.idempotencyKey,
         aadhaar: parsed.data.aadhaar,
         bankIin: parsed.data.bankIin,

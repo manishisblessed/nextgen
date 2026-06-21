@@ -199,9 +199,13 @@ export default function SubAdminLoginPage() {
           </Button>
 
           <p className="text-center text-xs text-ink-500">
-            Are you the platform owner?{" "}
+            Are you an admin?{" "}
             <Link href="/admin" className="font-semibold text-brand-700">
-              Use the admin login
+              Admin login
+            </Link>
+            {" · "}
+            <Link href="/master-admin" className="font-semibold text-violet-700">
+              Master Admin
             </Link>
           </p>
         </form>

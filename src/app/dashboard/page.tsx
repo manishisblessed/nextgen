@@ -1,31 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getSession, type Session } from "@/lib/auth";
+import { useSession } from "next-auth/react";
+import { toDisplayRole } from "@/lib/auth";
 import { RetailerOverview } from "@/components/dashboard/overview/RetailerOverview";
 import { DistributorOverview } from "@/components/dashboard/overview/DistributorOverview";
 import { MasterOverview } from "@/components/dashboard/overview/MasterOverview";
 import { AdminOverview } from "@/components/dashboard/overview/AdminOverview";
 
 export default function DashboardHomePage() {
-  const [session, setSession] = useState<Session | null>(null);
+  const { data: session } = useSession();
 
-  useEffect(() => {
-    setSession(getSession());
-  }, []);
+  if (!session?.user) return null;
 
-  if (!session) return null;
+  const displayRole = toDisplayRole(session.user.role as any);
 
-  switch (session.role) {
+  const legacySession = {
+    name: session.user.name,
+    email: session.user.email,
+    phone: session.user.phone,
+    role: displayRole,
+    walletBalance: session.user.walletBalance ?? 0,
+    loggedInAt: Date.now(),
+  };
+
+  switch (displayRole) {
+    case "master-admin":
     case "admin":
     case "sub-admin":
-      return <AdminOverview session={session} />;
+      return <AdminOverview session={legacySession as any} />;
     case "master-distributor":
-      return <MasterOverview session={session} />;
+      return <MasterOverview session={legacySession as any} />;
     case "distributor":
-      return <DistributorOverview session={session} />;
+      return <DistributorOverview session={legacySession as any} />;
     case "retailer":
     default:
-      return <RetailerOverview session={session} />;
+      return <RetailerOverview session={legacySession as any} />;
   }
 }

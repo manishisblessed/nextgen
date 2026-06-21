@@ -47,7 +47,9 @@ export async function runTransaction<TIn, TOut>(
   }
 
   // 2. Reserve money up front (DEBIT then refund on failure).
-  const txn = await prisma.$transaction(async (tx) => {
+  let txn;
+  try {
+  txn = await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId } });
     if (Number(user.walletBalance) < input.amount + (input.fee ?? 0)) {
       throw new Error("INSUFFICIENT_BALANCE");
@@ -87,6 +89,12 @@ export async function runTransaction<TIn, TOut>(
     });
     return created;
   });
+  } catch (e) {
+    if (e instanceof Error && e.message === "INSUFFICIENT_BALANCE") {
+      return { status: "FAILED" as const, refId, error: "Insufficient wallet balance" };
+    }
+    throw e;
+  }
 
   // 3. Hit the partner OUTSIDE the DB transaction.
   let result: PartnerResult<TOut>;

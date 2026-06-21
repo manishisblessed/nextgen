@@ -16,21 +16,45 @@ import * as Haptics from "expo-haptics";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Input";
 import { colors, radii } from "@/lib/theme";
-import { demoSession, saveSession } from "@/lib/auth";
+import { saveSession } from "@/lib/auth";
+import { api, ApiError } from "@/lib/api";
 
 export default function Login() {
   const router = useRouter();
   const [email, setEmail] = useState("retailer@jmpnextgenpay.com");
-  const [password, setPassword] = useState("demo1234");
+  const [password, setPassword] = useState("Demo@1234");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function signIn() {
     setLoading(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    await new Promise((r) => setTimeout(r, 600));
-    await saveSession({ ...demoSession, email });
-    router.replace("/(tabs)");
+    setError("");
+    try {
+      const data = await api.login(email, password);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      await saveSession({
+        token: data.token,
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        phone: data.user.phone,
+        role: data.user.role,
+        status: data.user.status,
+        walletBalance: data.user.walletBalance,
+        loggedInAt: Date.now(),
+      });
+      router.replace("/(tabs)");
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      if (e instanceof ApiError) {
+        setError(e.message);
+      } else {
+        setError("Cannot connect to server. Check your internet connection.");
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function biometric() {
@@ -71,6 +95,13 @@ export default function Login() {
         </LinearGradient>
 
         <View style={styles.sheet}>
+          {!!error && (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle" size={16} color={colors.rose[600]} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
           <Field
             label="Email or mobile"
             icon="person-outline"
@@ -114,7 +145,7 @@ export default function Login() {
           <View style={styles.demo}>
             <Text style={styles.demoText}>
               <Text style={{ fontWeight: "800" }}>Demo · </Text>
-              retailer@jmpnextgenpay.com / demo1234
+              retailer@jmpnextgenpay.com / Demo@1234
             </Text>
           </View>
         </View>
@@ -150,6 +181,18 @@ const styles = StyleSheet.create({
     padding: 24,
     flex: 1
   },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.rose[50],
+    borderRadius: radii.md,
+    padding: 12,
+    marginBottom: 12,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.rose[100],
+  },
+  errorText: { color: colors.rose[700], fontSize: 13, flex: 1, fontWeight: "600" },
   eye: {
     position: "absolute",
     right: 14,

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
+import { useSession } from "next-auth/react";
 import { X } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { cn } from "@/lib/utils";
-import { getSession, type Role } from "@/lib/auth";
-import { navByRole } from "@/lib/roles";
+import { toDisplayRole, type Role } from "@/lib/auth";
+import { navByRole, type NavGroup } from "@/lib/roles";
 
 export function Sidebar({
   open,
@@ -17,14 +18,32 @@ export function Sidebar({
   onClose: () => void;
 }) {
   const pathname = usePathname();
-  const [role, setRole] = useState<Role>("retailer");
+  const { data: session } = useSession();
 
-  useEffect(() => {
-    const s = getSession();
-    if (s) setRole(s.role);
-  }, []);
+  const role: Role = useMemo(() => {
+    if (!session?.user?.role) return "retailer";
+    return toDisplayRole(session.user.role as any);
+  }, [session]);
 
-  const groups = navByRole[role];
+  const allowedTabs: string[] = (session?.user as any)?.allowedTabs ?? [];
+
+  const groups: NavGroup[] = useMemo(() => {
+    const base = navByRole[role];
+    if (role !== "admin" && role !== "sub-admin") return base;
+    if (allowedTabs.length === 0) return base;
+
+    const prefix = role === "admin" ? "/dashboard/admin/" : "/dashboard/sub-admin/";
+    return base
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => {
+          if (!item.href.startsWith(prefix)) return true;
+          const slug = item.href.replace(prefix, "");
+          return allowedTabs.includes(slug);
+        }),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [role, allowedTabs]);
 
   return (
     <>
@@ -119,7 +138,7 @@ export function Sidebar({
               : "All systems nominal · 99.97% uptime this month."}
           </p>
           <button className="mt-3 rounded-full bg-white/20 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white hover:text-brand-700">
-            {role === "admin" ? "View status page" : "Upgrade plan"}
+            {role === "master-admin" || role === "admin" || role === "sub-admin" ? "View status page" : "Upgrade plan"}
           </button>
         </div>
       </aside>

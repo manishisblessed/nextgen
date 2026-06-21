@@ -1,20 +1,49 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { settlements, type Settlement } from "@/lib/data";
 import { formatINR } from "@/lib/utils";
-import { Banknote } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+
+type SettlementRow = {
+  id: string;
+  cycle: string;
+  counterparty: string;
+  amount: number;
+  txnCount: number;
+  status: "Settled" | "In Bank" | "Reconciling";
+  date: string;
+};
 
 export default function AdminSettlementsPage() {
-  const cols: Column<Settlement>[] = [
+  const [settlements, setSettlements] = useState<SettlementRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchSettlements = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/settlements");
+      const data = await res.json();
+      if (data.settlements) setSettlements(data.settlements);
+    } catch {
+      // silent
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchSettlements(); }, [fetchSettlements]);
+
+  const cols: Column<SettlementRow>[] = [
     { key: "id", header: "Cycle ID", render: (r) => <span className="font-mono text-xs">{r.id}</span> },
     { key: "cycle", header: "Cycle" },
     { key: "counterparty", header: "Counterparty" },
     { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
+    { key: "txnCount", header: "Txns", align: "right", render: (r) => r.txnCount.toLocaleString("en-IN") },
     {
       key: "status",
       header: "Status",
@@ -22,9 +51,9 @@ export default function AdminSettlementsPage() {
         <Badge variant={r.status === "Settled" ? "success" : r.status === "In Bank" ? "brand" : "warning"}>
           {r.status}
         </Badge>
-      )
+      ),
     },
-    { key: "date", header: "Date" }
+    { key: "date", header: "Date" },
   ];
 
   return (
@@ -32,7 +61,7 @@ export default function AdminSettlementsPage() {
       <PageHeader
         eyebrow="Admin"
         title="Settlements"
-        description="T+1 nodal settlements across ICICI &amp; Yes Bank. Reconcile with NPCI files and bank statements."
+        description="T+1 nodal settlements derived from transaction data. Reconcile with bank statements."
         actions={
           <>
             <ReportActions
@@ -44,18 +73,24 @@ export default function AdminSettlementsPage() {
                 { key: "cycle", header: "Cycle" },
                 { key: "counterparty", header: "Counterparty" },
                 { key: "amount", header: "Amount (INR)" },
+                { key: "txnCount", header: "Transactions" },
                 { key: "status", header: "Status" },
-                { key: "date", header: "Date" }
+                { key: "date", header: "Date" },
               ]}
               rows={settlements}
             />
-            <Button>
-              <Banknote className="h-4 w-4" /> Run cycle
+            <Button variant="outline" onClick={fetchSettlements} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
           </>
         }
       />
-      <DataTable title="Recent cycles" columns={cols} data={settlements} />
+      <DataTable
+        title={loading ? "Loading..." : "Recent cycles"}
+        columns={cols}
+        data={settlements}
+        empty="No settlement data yet."
+      />
     </div>
   );
 }

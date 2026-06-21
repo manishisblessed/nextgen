@@ -8,6 +8,20 @@ async function main() {
 
   const passwordHash = await bcrypt.hash("Demo@1234", 10);
 
+  await prisma.user.upsert({
+    where: { email: "masteradmin@jmpnextgenpay.com" },
+    update: {},
+    create: {
+      name: "JMP Master Admin",
+      email: "masteradmin@jmpnextgenpay.com",
+      phone: "+919000000051",
+      passwordHash,
+      role: Role.MASTER_ADMIN,
+      status: UserStatus.ACTIVE,
+      shopName: "NextGenPay HQ"
+    }
+  });
+
   const admin = await prisma.user.upsert({
     where: { email: "admin@jmpnextgenpay.com" },
     update: {},

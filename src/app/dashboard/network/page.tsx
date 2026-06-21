@@ -1,50 +1,65 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, Filter, PackagePlus } from "lucide-react";
+import { Search, Filter, PackagePlus, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { networkUsers, type NetworkUser } from "@/lib/data";
-import { getSession } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { formatINR } from "@/lib/utils";
 
+type NetworkUser = {
+  id: string;
+  name: string;
+  shop: string;
+  role: "retailer" | "distributor" | "master-distributor";
+  city: string;
+  state: string;
+  joined: string;
+  status: "Active" | "Pending KYC" | "Suspended" | "Closed";
+  walletBalance: number;
+  monthlyTurnover: number;
+  retailers: number;
+};
+
 export default function NetworkPage() {
-  const [role, setRole] = useState<"distributor" | "master-distributor" | "retailer">("retailer");
+  const { session } = useAuth();
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"all" | NetworkUser["status"]>("all");
+  const [status, setStatus] = useState("all");
+  const [users, setUsers] = useState<NetworkUser[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const role =
+    !session ? "retailer" :
+    session.role === "master-distributor" ? "master-distributor" :
+    session.role === "distributor" ? "distributor" : "retailer";
+
+  const childRole = role === "master-distributor" ? "distributor" : "retailer";
+
+  const fetchNetwork = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (status !== "all") params.set("status", status);
+      const res = await fetch(`/api/network?${params}`);
+      const data = await res.json();
+      if (data.users) setUsers(data.users);
+    } catch {
+      // silent
+    } finally {
+      setLoading(false);
+    }
+  }, [q, status]);
 
   useEffect(() => {
-    const s = getSession();
-    if (s) setRole(s.role === "retailer" ? "retailer" : (s.role as typeof role));
-  }, []);
-
-  const childRole: NetworkUser["role"] =
-    role === "master-distributor" ? "distributor" : "retailer";
-  const myParentId = role === "master-distributor" ? "JNPM1001" : "JNPD2003";
-
-  const rows = useMemo(() => {
-    return networkUsers.filter((u) => {
-      if (u.role !== childRole) return false;
-      if (u.parentId !== myParentId) return false;
-      if (status !== "all" && u.status !== status) return false;
-      if (q) {
-        const t = q.toLowerCase();
-        if (
-          !u.name.toLowerCase().includes(t) &&
-          !u.shop.toLowerCase().includes(t) &&
-          !u.id.toLowerCase().includes(t) &&
-          !u.city.toLowerCase().includes(t)
-        )
-          return false;
-      }
-      return true;
-    });
-  }, [childRole, myParentId, status, q]);
+    const t = setTimeout(fetchNetwork, 300);
+    return () => clearTimeout(t);
+  }, [fetchNetwork]);
 
   const cols: Column<NetworkUser>[] = [
     {
@@ -53,13 +68,13 @@ export default function NetworkPage() {
       render: (r) => (
         <div>
           <div className="font-semibold text-ink-900">{r.name}</div>
-          <div className="text-xs text-ink-500">{r.shop} · {r.id}</div>
+          <div className="text-xs text-ink-500">{r.shop} · {r.id.slice(0, 8)}</div>
         </div>
-      )
+      ),
     },
     { key: "city", header: "Location", render: (r) => `${r.city}, ${r.state}` },
     ...(childRole === "distributor"
-      ? [{ key: "retailers", header: "Retailers", align: "right" as const, render: (r: NetworkUser) => r.retailers ?? 0 }]
+      ? [{ key: "retailers" as const, header: "Retailers", align: "right" as const, render: (r: NetworkUser) => r.retailers ?? 0 }]
       : []),
     { key: "joined", header: "Joined" },
     {
@@ -69,10 +84,10 @@ export default function NetworkPage() {
         <Badge variant={r.status === "Active" ? "success" : r.status === "Pending KYC" ? "warning" : "danger"}>
           {r.status}
         </Badge>
-      )
+      ),
     },
     { key: "walletBalance", header: "Wallet", align: "right", render: (r) => formatINR(r.walletBalance) },
-    { key: "monthlyTurnover", header: "MTD", align: "right", render: (r) => formatINR(r.monthlyTurnover) }
+    { key: "monthlyTurnover", header: "MTD", align: "right", render: (r) => formatINR(r.monthlyTurnover) },
   ];
 
   return (
@@ -88,7 +103,7 @@ export default function NetworkPage() {
             <ReportActions
               filename={`my-${childRole === "distributor" ? "distributors" : "retailers"}`}
               title={`JMP NextGenPay · My ${childRole === "distributor" ? "Distributors" : "Retailers"}`}
-              subtitle={`${rows.length} record${rows.length === 1 ? "" : "s"}`}
+              subtitle={`${users.length} record${users.length === 1 ? "" : "s"}`}
               columns={[
                 { key: "id", header: "Code" },
                 { key: "name", header: "Name" },
@@ -98,10 +113,13 @@ export default function NetworkPage() {
                 { key: "joined", header: "Joined" },
                 { key: "status", header: "Status" },
                 { key: "walletBalance", header: "Wallet (INR)" },
-                { key: "monthlyTurnover", header: "MTD Turnover (INR)" }
+                { key: "monthlyTurnover", header: "MTD Turnover (INR)" },
               ]}
-              rows={rows}
+              rows={users}
             />
+            <Button variant="outline" onClick={fetchNetwork} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
             <Link href="/dashboard/network/onboard">
               <Button>
                 <PackagePlus className="h-4 w-4" />
@@ -119,7 +137,7 @@ export default function NetworkPage() {
         </div>
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-ink-400" />
-          <Select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="h-10 w-44">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-10 w-44">
             <option value="all">Any status</option>
             <option value="Active">Active</option>
             <option value="Pending KYC">Pending KYC</option>
@@ -128,7 +146,12 @@ export default function NetworkPage() {
         </div>
       </div>
 
-      <DataTable title={`${rows.length} ${childRole === "distributor" ? "distributors" : "retailers"}`} columns={cols} data={rows} />
+      <DataTable
+        title={loading ? "Loading..." : `${users.length} ${childRole === "distributor" ? "distributors" : "retailers"}`}
+        columns={cols}
+        data={users}
+        empty={`No ${childRole}s in your network yet.`}
+      />
     </div>
   );
 }

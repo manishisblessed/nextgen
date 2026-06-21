@@ -1,33 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { Bell, Menu, Search, Wallet, LogOut } from "lucide-react";
 import { Input } from "@/components/ui/Input";
-import { clearSession, getSession, type Session } from "@/lib/auth";
 import { formatINR } from "@/lib/utils";
+import { toDisplayRole } from "@/lib/auth";
 
 export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const router = useRouter();
-  const [session, setSession] = useState<Session | null>(null);
+  const { data: session } = useSession();
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    setSession(getSession());
-  }, []);
-
-  function logout() {
-    clearSession();
+  async function logout() {
+    await signOut({ redirect: false });
     router.push("/login");
   }
 
-  const initials = session?.name
-    ? session.name
+  const user = session?.user;
+  const initials = user?.name
+    ? user.name
         .split(" ")
         .map((n) => n[0])
         .slice(0, 2)
         .join("")
-    : "AA";
+    : "??";
+
+  const displayRole = user?.role ? toDisplayRole(user.role as any) : "agent";
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-4 border-b border-ink-100 bg-white/80 px-4 backdrop-blur md:h-20 md:px-8">
@@ -57,7 +57,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
               Wallet
             </span>
             <span className="font-display text-sm font-bold text-ink-900">
-              {formatINR(session?.walletBalance ?? 0)}
+              {formatINR(user?.walletBalance ?? 0)}
             </span>
           </div>
         </div>
@@ -82,18 +82,18 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             </span>
             <span className="hidden flex-col text-left leading-tight md:flex">
               <span className="text-sm font-semibold text-ink-900">
-                {session?.name ?? "Guest"}
+                {user?.name ?? "Guest"}
               </span>
               <span className="text-[10px] uppercase tracking-widest text-ink-500">
-                {session?.role ?? "agent"}
+                {displayRole}
               </span>
             </span>
           </button>
           {open && (
             <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-soft">
               <div className="border-b border-ink-100 p-3 text-sm">
-                <p className="font-semibold text-ink-900">{session?.name}</p>
-                <p className="text-xs text-ink-500">{session?.email}</p>
+                <p className="font-semibold text-ink-900">{user?.name}</p>
+                <p className="text-xs text-ink-500">{user?.email}</p>
               </div>
               <div className="p-1">
                 <button

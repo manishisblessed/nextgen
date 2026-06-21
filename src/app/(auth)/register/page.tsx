@@ -3,21 +3,29 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2 } from "lucide-react";
+import { signIn } from "next-auth/react";
+import { CheckCircle2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
-import { saveSession, demoSession, type Role } from "@/lib/auth";
+
+const roleMap = {
+  retailer: "RETAILER",
+  distributor: "DISTRIBUTOR",
+  "master-distributor": "MASTER_DISTRIBUTOR",
+} as const;
 
 export default function RegisterPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "",
     email: "",
     phone: "",
+    password: "",
     shopName: "",
     state: "Delhi",
-    role: "retailer"
+    role: "retailer" as keyof typeof roleMap
   });
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -27,15 +35,46 @@ export default function RegisterPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    saveSession({
-      ...demoSession,
-      name: form.name || demoSession.name,
-      email: form.email || demoSession.email,
-      phone: form.phone || demoSession.phone,
-      role: form.role as Role
-    });
-    router.push("/dashboard");
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          phone: form.phone,
+          password: form.password,
+          role: roleMap[form.role],
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "Registration failed. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      const signInResult = await signIn("credentials", {
+        identifier: form.email,
+        password: form.password,
+        redirect: false,
+      });
+
+      if (signInResult?.error) {
+        router.push("/login");
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -61,7 +100,7 @@ export default function RegisterPage() {
             "Zero joining fee, zero hidden charges",
             "Free RuPay business card on activation",
             "Earn up to 1.2% commission per transaction",
-            "24×7 WhatsApp & phone support"
+            "24x7 WhatsApp & phone support"
           ].map((t) => (
             <li key={t} className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-300" />
@@ -79,6 +118,13 @@ export default function RegisterPage() {
             Login here
           </Link>
         </p>
+
+        {error && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </div>
+        )}
 
         <form className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
           <div className="sm:col-span-2">
@@ -110,6 +156,18 @@ export default function RegisterPage() {
               value={form.email}
               onChange={(e) => update("email", e.target.value)}
               placeholder="you@email.com"
+              required
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={form.password}
+              onChange={(e) => update("password", e.target.value)}
+              placeholder="Minimum 8 characters"
+              minLength={8}
               required
             />
           </div>
@@ -175,7 +233,7 @@ export default function RegisterPage() {
                 required
                 className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
               />
-              I agree to NextGenPay's{" "}
+              I agree to NextGenPay&apos;s{" "}
               <Link href="/legal/terms" className="font-semibold text-brand-700">
                 Terms
               </Link>{" "}

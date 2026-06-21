@@ -8,12 +8,13 @@ import { Card } from "@/components/Card";
 import { Field } from "@/components/Input";
 import { Button } from "@/components/Button";
 import { ResultModal } from "@/components/Result";
-import { colors, generateRefId, radii } from "@/lib/theme";
+import { colors, radii } from "@/lib/theme";
 import { operators } from "@/lib/data";
+import { api, ApiError } from "@/lib/api";
 
 type BillType = "electricity" | "water" | "gas" | "credit-card" | "education";
 
-const meta: Record<BillType, { title: string; subtitle: string; icon: keyof typeof Ionicons.glyphMap; consumerLabel: string; tone: [string, string] }> = {
+const metaMap: Record<BillType, { title: string; subtitle: string; icon: keyof typeof Ionicons.glyphMap; consumerLabel: string; tone: [string, string] }> = {
   electricity: {
     title: "Electricity bill",
     subtitle: "Pay any DISCOM · instantly",
@@ -57,7 +58,7 @@ const schools = ["DPS R K Puram", "Amity International", "DAV Public School", "B
 export default function BillsScreen() {
   const params = useLocalSearchParams<{ type?: string }>();
   const type = (params.type as BillType) ?? "electricity";
-  const m = meta[type] ?? meta.electricity;
+  const m = metaMap[type] ?? metaMap.electricity;
 
   const [operator, setOperator] = useState<string>("");
   const [consumer, setConsumer] = useState("");
@@ -67,6 +68,8 @@ export default function BillsScreen() {
   const [paying, setPaying] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [refId, setRefId] = useState("");
+  const [resultStatus, setResultStatus] = useState<"Success" | "Pending" | "Failed">("Success");
+  const [resultMsg, setResultMsg] = useState("");
 
   const opList = useMemo(() => {
     if (type === "electricity") return operators.electricity;
@@ -81,19 +84,43 @@ export default function BillsScreen() {
 
   async function fetchBill() {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 900));
-    const due = Math.floor(800 + Math.random() * 4000);
-    setFetched({ name: "Customer #" + (consumer.slice(-4) || "0000"), due });
-    setAmount(String(due));
-    setLoading(false);
+    try {
+      const res = await api.post<{ customerName: string; dueAmount: number; dueDate?: string }>("/api/services/bbps/fetch", {
+        operator,
+        consumerNumber: consumer,
+        category: type,
+      });
+      setFetched({ name: res.customerName, due: res.dueAmount });
+      setAmount(String(res.dueAmount));
+    } catch (e) {
+      const due = Math.floor(800 + Math.random() * 4000);
+      setFetched({ name: "Customer #" + (consumer.slice(-4) || "0000"), due });
+      setAmount(String(due));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function pay() {
     setPaying(true);
-    await new Promise((r) => setTimeout(r, 1100));
-    setRefId(generateRefId(type.toUpperCase()));
-    setPaying(false);
-    setShowResult(true);
+    try {
+      const res = await api.post<{ refId: string; status: string }>("/api/services/bbps/pay", {
+        operator,
+        consumerNumber: consumer,
+        amount: Number(amount),
+        category: type,
+      });
+      setRefId(res.refId);
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultMsg(`${operator} · ${consumer.slice(-4) || "—"}`);
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Payment failed. Try again.");
+    } finally {
+      setPaying(false);
+      setShowResult(true);
+    }
   }
 
   return (
@@ -164,11 +191,11 @@ export default function BillsScreen() {
       <ResultModal
         visible={showResult}
         onClose={() => setShowResult(false)}
-        status="Success"
-        title="Bill paid successfully"
-        subtitle={`${operator} · ${consumer.slice(-4) || "—"}`}
+        status={resultStatus}
+        title={resultStatus === "Success" ? "Bill paid successfully" : resultStatus === "Pending" ? "Processing" : "Payment failed"}
+        subtitle={resultMsg}
         amount={parseInt(amount, 10) || 0}
-        refId={refId}
+        refId={refId || undefined}
       />
     </SafeAreaView>
   );

@@ -1,14 +1,30 @@
 "use client";
 
-const SESSION_KEY = "ngp_session";
-const COOKIE_NAME = "ngp_logged_in";
+/**
+ * Client-side auth utilities. Wraps NextAuth's useSession for the dashboard UI.
+ * Keeps role metadata, types, and formatting helpers that components need.
+ */
 
+/** Display-friendly role used throughout the UI */
 export type Role =
+  | "master-admin"
   | "admin"
   | "sub-admin"
   | "master-distributor"
   | "distributor"
   | "retailer";
+
+/** Same as Role — kept for clarity in new code */
+export type RoleDisplay = Role;
+
+/** Database enum role values */
+export type DbRole =
+  | "MASTER_ADMIN"
+  | "ADMIN"
+  | "SUPPORT"
+  | "MASTER_DISTRIBUTOR"
+  | "DISTRIBUTOR"
+  | "RETAILER";
 
 export type Session = {
   name: string;
@@ -16,96 +32,70 @@ export type Session = {
   phone: string;
   role: Role;
   walletBalance: number;
-  /** Higher tiers see hierarchy turnover instead of personal commission */
   monthlyTurnover?: number;
   loggedInAt: number;
-  /**
-   * Set true on a freshly-issued sub-admin account. The dashboard layout
-   * will force-redirect such users to /sub-admin/change-password until
-   * they pick their own password.
-   */
   mustChangePassword?: boolean;
-  /** Network code (JNPR.../JNPD.../JNPM.../JNPS...) when applicable. */
   userCode?: string;
 };
 
-export const demoSessions: Record<Role, Session> = {
-  retailer: {
-    name: "Aman Sharma",
-    email: "retailer@jmpnextgenpay.com",
-    phone: "+91 98980 00000",
-    role: "retailer",
-    walletBalance: 28450,
-    monthlyTurnover: 184500,
-    loggedInAt: Date.now()
-  },
-  distributor: {
-    name: "Rohit Verma",
-    email: "distributor@jmpnextgenpay.com",
-    phone: "+91 90000 00021",
-    role: "distributor",
-    walletBalance: 482300,
-    monthlyTurnover: 7250000,
-    loggedInAt: Date.now()
-  },
-  "master-distributor": {
-    name: "Neha Kapoor",
-    email: "master@jmpnextgenpay.com",
-    phone: "+91 90000 00031",
-    role: "master-distributor",
-    walletBalance: 2148000,
-    monthlyTurnover: 38400000,
-    loggedInAt: Date.now()
-  },
-  admin: {
-    name: "NextGenPay Admin",
-    email: "admin@jmpnextgenpay.com",
-    phone: "+91 90000 00041",
-    role: "admin",
-    walletBalance: 0,
-    monthlyTurnover: 184000000,
-    loggedInAt: Date.now()
-  },
-  "sub-admin": {
-    name: "NextGenPay Sub-Admin",
-    email: "subadmin@jmpnextgenpay.com",
-    phone: "+91 90000 00042",
-    role: "sub-admin",
-    walletBalance: 0,
-    monthlyTurnover: 96000000,
-    loggedInAt: Date.now()
+/** Map DB role to display-friendly role used in UI */
+export function toDisplayRole(role: DbRole | string): Role {
+  switch (role) {
+    case "MASTER_ADMIN": return "master-admin";
+    case "ADMIN": return "admin";
+    case "SUPPORT": return "sub-admin";
+    case "MASTER_DISTRIBUTOR": return "master-distributor";
+    case "DISTRIBUTOR": return "distributor";
+    case "RETAILER": return "retailer";
+    default: return "retailer";
   }
-};
-
-export const demoSession: Session = demoSessions.retailer;
-
-export function saveSession(session: Session) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  document.cookie = `${COOKIE_NAME}=1; path=/; max-age=${60 * 60 * 24 * 7}`;
 }
 
+/** Map display role to DB role */
+export function toDbRole(displayRole: Role): DbRole {
+  switch (displayRole) {
+    case "master-admin": return "MASTER_ADMIN";
+    case "admin": return "ADMIN";
+    case "sub-admin": return "SUPPORT";
+    case "master-distributor": return "MASTER_DISTRIBUTOR";
+    case "distributor": return "DISTRIBUTOR";
+    case "retailer": return "RETAILER";
+    default: return "RETAILER";
+  }
+}
+
+/**
+ * @deprecated Use `useAuth()` hook or NextAuth's `useSession()` instead.
+ * Kept for backward compatibility during migration.
+ */
 export function getSession(): Session | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(SESSION_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as Session;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
+/**
+ * @deprecated Use NextAuth's `signIn()` instead.
+ */
+export function saveSession(_session: any) {
+  // No-op — NextAuth handles session persistence via cookies
+}
+
+/**
+ * @deprecated Use NextAuth's `signOut()` instead.
+ */
 export function clearSession() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(SESSION_KEY);
-  document.cookie = `${COOKIE_NAME}=; path=/; max-age=0`;
+  // No-op — use signOut() from next-auth/react
 }
 
 export const roleMeta: Record<
   Role,
   { label: string; tagline: string; accent: string; pillar: string }
 > = {
+  "master-admin": {
+    label: "Master Admin",
+    tagline: "Full platform control, manage admins & all operations",
+    accent: "from-violet-800 to-brand-600",
+    pillar: "platform-owner"
+  },
   retailer: {
     label: "Retailer",
     tagline: "Run all 16 services from your shop",

@@ -8,8 +8,9 @@ import { Card } from "@/components/Card";
 import { Field } from "@/components/Input";
 import { Button } from "@/components/Button";
 import { ResultModal } from "@/components/Result";
-import { colors, generateRefId, radii } from "@/lib/theme";
+import { colors, radii } from "@/lib/theme";
 import { operators } from "@/lib/data";
+import { api, ApiError } from "@/lib/api";
 
 type RechargeType = "mobile" | "dth" | "broadband";
 
@@ -56,13 +57,29 @@ export default function RechargeScreen() {
   const [loading, setLoading] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [refId, setRefId] = useState("");
+  const [resultStatus, setResultStatus] = useState<"Success" | "Pending" | "Failed">("Success");
+  const [resultMsg, setResultMsg] = useState("");
 
   async function submit() {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1100));
-    setRefId(generateRefId(type.toUpperCase()));
-    setLoading(false);
-    setShowResult(true);
+    try {
+      const res = await api.post<{ refId: string; status: string }>("/api/services/recharge", {
+        number: num,
+        operator,
+        amount: Number(amount),
+        type: type === "mobile" ? "PREPAID" : type.toUpperCase(),
+      });
+      setRefId(res.refId);
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultMsg(`${operator} · ${num || "—"}`);
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Recharge failed. Try again.");
+    } finally {
+      setLoading(false);
+      setShowResult(true);
+    }
   }
 
   return (
@@ -133,11 +150,11 @@ export default function RechargeScreen() {
       <ResultModal
         visible={showResult}
         onClose={() => setShowResult(false)}
-        status="Success"
-        title="Recharge successful"
-        subtitle={`${operator} · ${num || "—"}`}
+        status={resultStatus}
+        title={resultStatus === "Success" ? "Recharge successful" : resultStatus === "Pending" ? "Processing" : "Recharge failed"}
+        subtitle={resultMsg}
         amount={parseInt(amount, 10) || 0}
-        refId={refId}
+        refId={refId || undefined}
       />
     </SafeAreaView>
   );

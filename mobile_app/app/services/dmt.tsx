@@ -6,7 +6,8 @@ import { Card } from "@/components/Card";
 import { Field } from "@/components/Input";
 import { Button } from "@/components/Button";
 import { ResultModal } from "@/components/Result";
-import { colors, generateRefId, radii } from "@/lib/theme";
+import { colors, radii } from "@/lib/theme";
+import { api, ApiError } from "@/lib/api";
 
 const modes = ["IMPS", "NEFT", "RTGS"] as const;
 
@@ -20,13 +21,31 @@ export default function DMTScreen() {
   const [loading, setLoading] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [refId, setRefId] = useState("");
+  const [resultStatus, setResultStatus] = useState<"Success" | "Pending" | "Failed">("Success");
+  const [resultMsg, setResultMsg] = useState("");
 
   async function submit() {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1400));
-    setRefId(generateRefId(mode));
-    setLoading(false);
-    setShowResult(true);
+    try {
+      const res = await api.post<{ refId: string; status: string }>("/api/services/dmt/transfer", {
+        beneficiaryName: name,
+        accountNumber: acct,
+        ifsc: ifsc.toUpperCase(),
+        beneficiaryPhone: phone || undefined,
+        amount: Number(amount),
+        mode,
+      });
+      setRefId(res.refId);
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultMsg(`To ${name || "Beneficiary"} · A/C ${acct.slice(-4) || "XXXX"} · ${ifsc || "IFSC"}`);
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Transfer failed. Try again.");
+    } finally {
+      setLoading(false);
+      setShowResult(true);
+    }
   }
 
   return (
@@ -71,11 +90,11 @@ export default function DMTScreen() {
       <ResultModal
         visible={showResult}
         onClose={() => setShowResult(false)}
-        status="Success"
-        title="Transfer initiated"
-        subtitle={`To ${name || "Beneficiary"} · A/C ${acct.slice(-4) || "XXXX"} · ${ifsc || "IFSC"}`}
+        status={resultStatus}
+        title={resultStatus === "Success" ? "Transfer initiated" : resultStatus === "Pending" ? "Processing" : "Transfer failed"}
+        subtitle={resultMsg}
         amount={parseInt(amount, 10)}
-        refId={refId}
+        refId={refId || undefined}
       />
     </SafeAreaView>
   );

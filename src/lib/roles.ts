@@ -66,7 +66,53 @@ const account: NavItem[] = [
   { href: "/contact", label: "Help & Support", icon: LifeBuoy }
 ];
 
+/** Canonical tab slugs (without role prefix) used for permission assignment */
+export const ASSIGNABLE_ADMIN_TABS = [
+  { href: "invites", label: "Onboarding Invites" },
+  { href: "users", label: "Users" },
+  { href: "sub-admins", label: "Sub-Admins" },
+  { href: "pg", label: "Payment Gateway" },
+  { href: "pos", label: "POS Fleet" },
+  { href: "kyc", label: "KYC Approvals" },
+  { href: "billers", label: "Billers / Routing" },
+  { href: "commissions", label: "Commission Master" },
+  { href: "settlements", label: "Settlements" },
+  { href: "audit", label: "Audit Log" },
+  { href: "system", label: "System Health" },
+] as const;
+
+/** Returns the dashboard prefix for admin-type roles */
+export function adminPrefix(role: Role): string {
+  switch (role) {
+    case "master-admin": return "/dashboard/master-admin";
+    case "admin": return "/dashboard/admin";
+    case "sub-admin": return "/dashboard/sub-admin";
+    default: return "/dashboard/admin";
+  }
+}
+
 export const navByRole: Record<Role, NavGroup[]> = {
+  "master-admin": [
+    {
+      heading: "Workspace",
+      items: [
+        { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+        { href: "/dashboard/master-admin/admins", label: "Manage Admins", icon: ShieldCheck, badge: "New" },
+        { href: "/dashboard/master-admin/invites", label: "Onboarding Invites", icon: PackagePlus, badge: "New" },
+        { href: "/dashboard/master-admin/users", label: "Users", icon: Users },
+        { href: "/dashboard/master-admin/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
+        { href: "/dashboard/master-admin/pos", label: "POS Fleet", icon: Monitor, badge: "New" },
+        { href: "/dashboard/master-admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
+        { href: "/dashboard/master-admin/billers", label: "Billers / Routing", icon: Boxes },
+        { href: "/dashboard/master-admin/commissions", label: "Commission Master", icon: CircleDollarSign },
+        { href: "/dashboard/master-admin/settlements", label: "Settlements", icon: Banknote },
+        { href: "/dashboard/master-admin/audit", label: "Audit Log", icon: ScrollText },
+        { href: "/dashboard/master-admin/system", label: "System Health", icon: ServerCog }
+      ]
+    },
+    { heading: "Account", items: account }
+  ],
+
   retailer: [
     {
       heading: "Workspace",
@@ -125,6 +171,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
       heading: "Workspace",
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+        { href: "/dashboard/admin/invites", label: "Onboarding Invites", icon: PackagePlus, badge: "New" },
         { href: "/dashboard/admin/users", label: "Users", icon: Users },
         { href: "/dashboard/admin/sub-admins", label: "Sub-Admins", icon: UserCog },
         { href: "/dashboard/admin/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
@@ -145,12 +192,12 @@ export const navByRole: Record<Role, NavGroup[]> = {
       heading: "Workspace",
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-        { href: "/dashboard/admin/users", label: "Users", icon: Users },
-        { href: "/dashboard/admin/pg", label: "Payment Gateway", icon: CreditCard },
-        { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor },
-        { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
-        { href: "/dashboard/admin/billers", label: "Billers / Routing", icon: Boxes },
-        { href: "/dashboard/admin/settlements", label: "Settlements", icon: Banknote }
+        { href: "/dashboard/sub-admin/users", label: "Users", icon: Users },
+        { href: "/dashboard/sub-admin/pg", label: "Payment Gateway", icon: CreditCard },
+        { href: "/dashboard/sub-admin/pos", label: "POS Fleet", icon: Monitor },
+        { href: "/dashboard/sub-admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
+        { href: "/dashboard/sub-admin/billers", label: "Billers / Routing", icon: Boxes },
+        { href: "/dashboard/sub-admin/settlements", label: "Settlements", icon: Banknote }
       ]
     },
     { heading: "Account", items: account }

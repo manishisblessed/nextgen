@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { getSession } from "@/lib/auth";
+import { getSession, clearSession } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { colors } from "@/lib/theme";
 
 export default function Splash() {
@@ -12,10 +13,21 @@ export default function Splash() {
     let cancelled = false;
     (async () => {
       const s = await getSession();
-      // small delay so splash is felt
       await new Promise((r) => setTimeout(r, 700));
       if (cancelled) return;
-      router.replace(s ? "/(tabs)" : "/login");
+
+      if (!s?.token) {
+        router.replace("/login");
+        return;
+      }
+
+      try {
+        await api.getWallet();
+        router.replace("/(tabs)");
+      } catch {
+        await clearSession();
+        router.replace("/login");
+      }
     })();
     return () => {
       cancelled = true;

@@ -7,7 +7,9 @@ import { Header } from "@/components/Header";
 import { Card } from "@/components/Card";
 import { Field } from "@/components/Input";
 import { Button } from "@/components/Button";
+import { ResultModal } from "@/components/Result";
 import { colors, radii } from "@/lib/theme";
+import { api, ApiError } from "@/lib/api";
 
 const VPA = "nextgenpay@axisbank";
 
@@ -21,7 +23,6 @@ function makeQrCells(seed: number, size = 21) {
       cells[r][c] = s / 233280 > 0.5;
     }
   }
-  // finder squares (corners)
   const finder = (rr: number, cc: number) => {
     for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
       const e = r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4);
@@ -37,8 +38,36 @@ function makeQrCells(seed: number, size = 21) {
 export default function UPIScreen() {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showResult, setShowResult] = useState(false);
+  const [refId, setRefId] = useState("");
+  const [resultStatus, setResultStatus] = useState<"Success" | "Pending" | "Failed">("Success");
+  const [resultMsg, setResultMsg] = useState("");
+
   const link = `upi://pay?pa=${VPA}&pn=NextGenPay${amount ? `&am=${amount}` : ""}${note ? `&tn=${encodeURIComponent(note)}` : ""}&cu=INR`;
   const cells = makeQrCells(amount.length + note.length + 7);
+
+  async function generateRequest() {
+    if (!amount) return;
+    setLoading(true);
+    try {
+      const res = await api.post<{ refId: string; status: string }>("/api/services/upi/collect", {
+        payerVpa: VPA,
+        amount: Number(amount),
+        note: note || "Payment request",
+      });
+      setRefId(res.refId);
+      setResultStatus(res.status === "FAILED" ? "Failed" : "Pending");
+      setResultMsg(`UPI collect request for ₹${amount} sent`);
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Request failed. Try again.");
+    } finally {
+      setLoading(false);
+      setShowResult(true);
+    }
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
@@ -78,10 +107,19 @@ export default function UPIScreen() {
         <Card style={{ marginTop: 12 }}>
           <Field label="Amount (optional)" icon="cash-outline" value={amount} onChangeText={setAmount} keyboardType="number-pad" placeholder="0" />
           <Field label="Note (optional)" icon="chatbubble-outline" value={note} onChangeText={setNote} placeholder="What's it for?" />
-
-          <Button label="Generate request" icon="qr-code-outline" onPress={() => {}} style={{ marginTop: 6 }} />
+          <Button label="Generate request" icon="qr-code-outline" onPress={generateRequest} loading={loading} style={{ marginTop: 6 }} />
         </Card>
       </ScrollView>
+
+      <ResultModal
+        visible={showResult}
+        onClose={() => setShowResult(false)}
+        status={resultStatus}
+        title={resultStatus === "Pending" ? "Request sent" : "Request failed"}
+        subtitle={resultMsg}
+        amount={amount ? parseInt(amount, 10) : undefined}
+        refId={refId || undefined}
+      />
     </SafeAreaView>
   );
 }

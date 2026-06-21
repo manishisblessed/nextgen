@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSignedUploadParams } from "@/lib/cloudinary";
 import { z } from "zod";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   type: z.string().min(2),
@@ -8,11 +9,12 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  // TODO: replace with real session check (NextAuth getServerSession)
-  // const session = await auth();
-  // if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
 
-  const userId = "demo-user"; // session.user.id
   const json = await req.json();
   const parsed = Body.safeParse(json);
   if (!parsed.success) {
@@ -20,7 +22,7 @@ export async function POST(req: Request) {
   }
 
   const params = getSignedUploadParams({
-    userId,
+    userId: user.id,
     type: parsed.data.type,
     isSensitive: parsed.data.isSensitive ?? true
   });

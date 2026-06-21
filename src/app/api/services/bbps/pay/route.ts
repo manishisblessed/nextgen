@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -22,13 +23,18 @@ const SERVICE = {
 } as const;
 
 export async function POST(req: Request) {
-  const userId = "demo-user-id";
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
+
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const bbps = getPartner("bbps");
   const result = await runTransaction({
-    userId,
+    userId: user.id,
     service: SERVICE[parsed.data.category],
     amount: parsed.data.amount,
     fee: 0,
@@ -38,7 +44,7 @@ export async function POST(req: Request) {
     operator: parsed.data.billerCode,
     partner: bbps.name,
     request: parsed.data,
-    call: () => bbps.pay({ userId, ...parsed.data })
+    call: () => bbps.pay({ userId: user.id, ...parsed.data })
   });
 
   return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });

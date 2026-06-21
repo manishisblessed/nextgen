@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Eye, Download, FileText, FileSpreadsheet, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { getSession, type Session } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import {
   downloadCSV,
   downloadPDF,
@@ -37,12 +37,8 @@ export function ReportActions<T>({
   rows,
   subtitle
 }: Props<T>) {
-  const [session, setSession] = useState<Session | null>(null);
+  const { session } = useAuth();
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    setSession(getSession());
-  }, []);
 
   const generatedFor = session
     ? `${session.name} (${session.role}${session.userCode ? " · " + session.userCode : ""})`

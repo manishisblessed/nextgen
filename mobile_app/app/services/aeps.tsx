@@ -7,7 +7,8 @@ import { Card } from "@/components/Card";
 import { Field } from "@/components/Input";
 import { Header } from "@/components/Header";
 import { ResultModal } from "@/components/Result";
-import { colors, generateRefId, radii } from "@/lib/theme";
+import { colors, radii } from "@/lib/theme";
+import { api, ApiError } from "@/lib/api";
 
 const modes = [
   { id: "withdrawal", label: "Withdrawal", icon: "cash-outline" },
@@ -25,13 +26,29 @@ export default function AePSScreen() {
   const [showResult, setShowResult] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refId, setRefId] = useState("");
+  const [resultStatus, setResultStatus] = useState<"Success" | "Pending" | "Failed">("Success");
+  const [resultMsg, setResultMsg] = useState("");
 
   async function submit() {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    setRefId(generateRefId("AEPS"));
-    setLoading(false);
-    setShowResult(true);
+    try {
+      const res = await api.post<{ refId: string; status: string }>("/api/services/aeps/withdraw", {
+        aadhaarNumber: aadhaar.replace(/\s/g, ""),
+        bankCode: bank,
+        amount: mode === "withdrawal" ? Number(amount) : 0,
+        type: mode,
+      });
+      setRefId(res.refId);
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultMsg(mode === "withdrawal" ? `Cash dispensed for ${aadhaar.slice(-4) || "XXXX"}` : "Request processed");
+    } catch (e) {
+      setRefId("");
+      setResultStatus("Failed");
+      setResultMsg(e instanceof ApiError ? e.message : "Transaction failed. Try again.");
+    } finally {
+      setLoading(false);
+      setShowResult(true);
+    }
   }
 
   return (
@@ -113,11 +130,11 @@ export default function AePSScreen() {
       <ResultModal
         visible={showResult}
         onClose={() => setShowResult(false)}
-        status="Success"
-        title="Withdrawal authorized"
-        subtitle={`Cash dispensed for ${aadhaar.slice(-4) || "XXXX"}`}
+        status={resultStatus}
+        title={resultStatus === "Success" ? "Withdrawal authorized" : resultStatus === "Pending" ? "Processing" : "Transaction failed"}
+        subtitle={resultMsg}
         amount={mode === "withdrawal" ? parseInt(amount, 10) || 0 : undefined}
-        refId={refId}
+        refId={refId || undefined}
       />
     </SafeAreaView>
   );

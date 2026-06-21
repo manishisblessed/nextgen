@@ -4,19 +4,15 @@ import { Platform } from "react-native";
 const KEY = "ngp_session";
 
 export type Session = {
+  token: string;
+  id: string;
   name: string;
   email: string;
   phone: string;
+  role: string;
+  status: string;
   walletBalance: number;
   loggedInAt: number;
-};
-
-export const demoSession: Session = {
-  name: "Aman Sharma",
-  email: "retailer@jmpnextgenpay.com",
-  phone: "+91 98980 00000",
-  walletBalance: 28450,
-  loggedInAt: Date.now()
 };
 
 export async function saveSession(session: Session) {

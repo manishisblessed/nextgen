@@ -11,6 +11,7 @@ import { paysprintAeps, paysprintConfigured, paysprintDmt } from "./paysprint";
 import { razorpayPayout, razorpayPayoutConfigured, razorpayUpi, razorpayUpiConfigured } from "./razorpay";
 import { msg91Configured, msg91Sms } from "./msg91";
 import { resendConfigured, resendEmail } from "./resend";
+import { ekychubConfigured, ekychubVerification } from "./ekychub";
 import type {
   AepsProvider,
   BbpsProvider,
@@ -34,7 +35,8 @@ export type Vertical =
   | "travel"
   | "pan"
   | "sms"
-  | "email";
+  | "email"
+  | "verification";
 
 export type ProviderMap = {
   aeps: AepsProvider;
@@ -47,6 +49,7 @@ export type ProviderMap = {
   pan: PanProvider;
   sms: SmsProvider;
   email: EmailProvider;
+  verification: typeof ekychubVerification;
 };
 
 export function getPartner<V extends Vertical>(v: V): ProviderMap[V] {
@@ -71,6 +74,11 @@ export function getPartner<V extends Vertical>(v: V): ProviderMap[V] {
       return (flags.sms && msg91Configured() ? msg91Sms : mock.mockSms) as ProviderMap[V];
     case "email":
       return (flags.email && resendConfigured() ? resendEmail : mock.mockEmail) as ProviderMap[V];
+    case "verification":
+      if (!flags.verification || !ekychubConfigured()) {
+        throw new Error("Verification partner (eKYC Hub) is not configured. Set PARTNER_VERIFICATION_ENABLED=true and add EKYCHUB_USERNAME/EKYCHUB_API_TOKEN.");
+      }
+      return ekychubVerification as ProviderMap[V];
   }
   throw new Error(`Unknown vertical: ${v as string}`);
 }
@@ -87,7 +95,8 @@ export function partnerStatus() {
     travel:   { live: false, provider: "MOCK" },
     pan:      { live: false, provider: "MOCK" },
     sms:      { live: flags.sms && msg91Configured(), provider: flags.sms && msg91Configured() ? "MSG91" : "MOCK" },
-    email:    { live: flags.email && resendConfigured(), provider: flags.email && resendConfigured() ? "RESEND" : "MOCK" }
+    email:    { live: flags.email && resendConfigured(), provider: flags.email && resendConfigured() ? "RESEND" : "MOCK" },
+    verification: { live: flags.verification && ekychubConfigured(), provider: flags.verification && ekychubConfigured() ? "EKYCHUB" : "NONE" }
   };
 }
 

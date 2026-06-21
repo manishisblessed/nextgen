@@ -1,22 +1,75 @@
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { ServiceTileGrid } from "@/components/ServiceTile";
 import { Card } from "@/components/Card";
-import { services, transactions } from "@/lib/data";
+import { services } from "@/lib/data";
 import { colors, formatINR, radii, shadows } from "@/lib/theme";
-import { demoSession, getSession, type Session } from "@/lib/auth";
+import { getSession, type Session } from "@/lib/auth";
+import { api } from "@/lib/api";
+
+type WalletData = {
+  balance: number;
+  monthlyIn: number;
+  monthlyOut: number;
+  recentTxns: Array<{
+    id: string;
+    direction: string;
+    reason: string;
+    amount: number;
+    balanceAfter: number;
+    note: string | null;
+    createdAt: string;
+  }>;
+};
+
+const TXN_ICON_MAP: Record<string, { icon: string; color: string }> = {
+  CREDIT: { icon: "arrow-down-circle-outline", color: "#10b981" },
+  DEBIT: { icon: "arrow-up-circle-outline", color: "#f97606" },
+  SERVICE_DEBIT: { icon: "send-outline", color: "#185df5" },
+  COMMISSION: { icon: "trending-up-outline", color: "#10b981" },
+  FUND_CREDIT: { icon: "wallet-outline", color: "#7c3aed" },
+  FUND_DEBIT: { icon: "wallet-outline", color: "#f59e0b" },
+  TOPUP: { icon: "add-circle-outline", color: "#0ea5e9" },
+};
+
+function txnVisual(direction: string, reason: string) {
+  return TXN_ICON_MAP[reason] ?? TXN_ICON_MAP[direction] ?? { icon: "swap-horizontal-outline", color: "#6b7280" };
+}
 
 export default function Home() {
   const router = useRouter();
-  const [session, setSession] = useState<Session>(demoSession);
+  const [session, setSession] = useState<Session | null>(null);
+  const [wallet, setWallet] = useState<WalletData | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchWallet = useCallback(async () => {
+    try {
+      const data = await api.getWallet();
+      setWallet(data);
+    } catch {
+      // silently ignore — user may be offline
+    }
+  }, []);
 
   useEffect(() => {
-    getSession().then((s) => s && setSession(s));
-  }, []);
+    getSession().then((s) => {
+      if (s) setSession(s);
+    });
+    fetchWallet();
+  }, [fetchWallet]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchWallet();
+    setRefreshing(false);
+  }, [fetchWallet]);
+
+  const balance = wallet?.balance ?? session?.walletBalance ?? 0;
+  const name = session?.name ?? "User";
 
   const greeting = (() => {
     const h = new Date().getHours();
@@ -25,16 +78,25 @@ export default function Home() {
     return "Good evening";
   })();
 
+  function formatDate(iso: string) {
+    const d = new Date(iso);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    return isToday ? `Today · ${time}` : `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · ${time}`;
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 32 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={styles.topRow}>
           <View>
             <Text style={styles.greet}>{greeting},</Text>
-            <Text style={styles.name}>{session.name.split(" ")[0]} 👋</Text>
+            <Text style={styles.name}>{name.split(" ")[0]} 👋</Text>
           </View>
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable style={styles.iconBtn}>
@@ -57,7 +119,7 @@ export default function Home() {
             <View style={styles.walletTop}>
               <View>
                 <Text style={styles.walletLabel}>NextGenPay Wallet</Text>
-                <Text style={styles.walletAmt}>{formatINR(session.walletBalance)}</Text>
+                <Text style={styles.walletAmt}>{formatINR(balance)}</Text>
               </View>
               <View style={styles.walletBadge}>
                 <View style={styles.live} />
@@ -86,9 +148,8 @@ export default function Home() {
 
         <View style={[styles.statsRow, { paddingHorizontal: 16, marginTop: 14 }]}>
           {[
-            { l: "Earnings · Today", v: formatINR(2184), c: colors.emerald[600] },
-            { l: "Txns · Today", v: "74", c: colors.brand[600] },
-            { l: "Customers", v: "1,248", c: colors.accent[600] }
+            { l: "In · this month", v: formatINR(wallet?.monthlyIn ?? 0), c: colors.emerald[600] },
+            { l: "Out · this month", v: formatINR(wallet?.monthlyOut ?? 0), c: colors.brand[600] },
           ].map((s) => (
             <View key={s.l} style={styles.statTile}>
               <Text style={styles.statLabel}>{s.l}</Text>
@@ -115,43 +176,49 @@ export default function Home() {
             </Pressable>
           </View>
           <Card style={{ padding: 0 }}>
-            {transactions.slice(0, 4).map((t, i) => (
-              <View
-                key={t.id}
-                style={[
-                  styles.txnRow,
-                  i !== 0 && { borderTopWidth: 1, borderTopColor: colors.border }
-                ]}
-              >
-                <View style={[styles.txnIcon, { backgroundColor: t.color + "22" }]}>
-                  <Ionicons name={t.icon as keyof typeof Ionicons.glyphMap} size={18} color={t.color} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.txnTitle}>{t.service}</Text>
-                  <Text style={styles.txnSub}>
-                    {t.customer} · {t.date}
-                  </Text>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={styles.txnAmt}>{formatINR(t.amount)}</Text>
-                  <Text
-                    style={[
-                      styles.txnStatus,
-                      {
-                        color:
-                          t.status === "Success"
-                            ? colors.emerald[700]
-                            : t.status === "Pending"
-                            ? colors.amber[700]
-                            : colors.rose[700]
-                      }
-                    ]}
-                  >
-                    {t.status}
-                  </Text>
-                </View>
+            {(wallet?.recentTxns ?? []).length === 0 && (
+              <View style={{ padding: 24, alignItems: "center" }}>
+                <Ionicons name="receipt-outline" size={28} color={colors.ink[300]} />
+                <Text style={{ color: colors.ink[400], marginTop: 8, fontSize: 13 }}>
+                  No transactions yet
+                </Text>
               </View>
-            ))}
+            )}
+            {(wallet?.recentTxns ?? []).slice(0, 5).map((t, i) => {
+              const vis = txnVisual(t.direction, t.reason);
+              return (
+                <View
+                  key={t.id}
+                  style={[
+                    styles.txnRow,
+                    i !== 0 && { borderTopWidth: 1, borderTopColor: colors.border }
+                  ]}
+                >
+                  <View style={[styles.txnIcon, { backgroundColor: vis.color + "22" }]}>
+                    <Ionicons name={vis.icon as keyof typeof Ionicons.glyphMap} size={18} color={vis.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.txnTitle}>{t.reason.replace(/_/g, " ")}</Text>
+                    <Text style={styles.txnSub}>
+                      {t.note ?? t.reason} · {formatDate(t.createdAt)}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={styles.txnAmt}>
+                      {t.direction === "CREDIT" ? "+" : "-"}{formatINR(Number(t.amount))}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.txnStatus,
+                        { color: t.direction === "CREDIT" ? colors.emerald[700] : colors.ink[500] }
+                      ]}
+                    >
+                      Bal: {formatINR(Number(t.balanceAfter))}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
           </Card>
         </View>
 
@@ -247,7 +314,7 @@ const styles = StyleSheet.create({
 
   txnRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
   txnIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  txnTitle: { fontWeight: "700", color: colors.ink[900], fontSize: 14 },
+  txnTitle: { fontWeight: "700", color: colors.ink[900], fontSize: 14, textTransform: "capitalize" },
   txnSub: { color: colors.ink[500], fontSize: 11, marginTop: 2 },
   txnAmt: { fontWeight: "800", color: colors.ink[900] },
   txnStatus: { marginTop: 2, fontSize: 11, fontWeight: "700" },

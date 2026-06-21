@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   type: z.enum([
@@ -23,13 +24,44 @@ const Body = z.object({
   height: z.number().int().optional()
 });
 
+export async function GET() {
+  let user;
+  try {
+    user = await requireAuth();
+  } catch (e) {
+    if (e instanceof AuthError)
+      return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
+
+  const docs = await prisma.document.findMany({
+    where: { userId: user.id },
+    orderBy: { uploadedAt: "desc" },
+  });
+
+  return NextResponse.json({
+    documents: docs.map((d) => ({
+      id: d.id,
+      type: d.type,
+      publicId: d.publicId,
+      url: d.url,
+      format: d.format,
+      bytes: d.bytes,
+      uploadedAt: d.uploadedAt.toISOString(),
+    })),
+  });
+}
+
 /**
  * Persist a document AFTER the client has uploaded it directly to Cloudinary
  * using the credentials from /api/uploads/sign.
  */
 export async function POST(req: Request) {
-  // TODO: replace with real session check
-  const userId = "demo-user";
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
 
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
@@ -38,7 +70,7 @@ export async function POST(req: Request) {
 
   const doc = await prisma.document.create({
     data: {
-      userId,
+      userId: user.id,
       ...parsed.data,
       isSensitive: true
     }
@@ -46,7 +78,7 @@ export async function POST(req: Request) {
 
   await prisma.auditLog.create({
     data: {
-      userId,
+      userId: user.id,
       action: "document.upload",
       entity: "Document",
       entityId: doc.id,

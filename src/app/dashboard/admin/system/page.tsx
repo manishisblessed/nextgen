@@ -1,29 +1,58 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
-import { Sparkline } from "@/components/dashboard/Sparkline";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { systemMetrics, type SystemMetric } from "@/lib/data";
+import { RefreshCw } from "lucide-react";
+
+type ServiceRow = {
+  service: string;
+  live: boolean;
+  provider: string;
+};
 
 export default function AdminSystemPage() {
-  const cols: Column<SystemMetric>[] = [
-    { key: "service", header: "Service", render: (r) => <span className="font-semibold text-ink-900">{r.service}</span> },
-    { key: "uptime", header: "Uptime (24h)", align: "right" },
-    { key: "p95ms", header: "P95 latency", align: "right", render: (r) => `${r.p95ms} ms` },
-    { key: "txnsToday", header: "Txns today", align: "right", render: (r) => r.txnsToday.toLocaleString("en-IN") },
-    {
-      key: "errorRate",
-      header: "Error rate",
-      align: "right",
-      render: (r) => {
-        const n = parseFloat(r.errorRate);
-        return (
-          <Badge variant={n > 0.2 ? "danger" : n > 0.1 ? "warning" : "success"}>{r.errorRate}</Badge>
+  const [services, setServices] = useState<ServiceRow[]>([]);
+  const [dbStatus, setDbStatus] = useState("—");
+  const [loading, setLoading] = useState(true);
+
+  const fetchHealth = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/healthz");
+      const data = await res.json();
+      setDbStatus(data.db ?? "unknown");
+      if (data.partners) {
+        setServices(
+          Object.entries(data.partners as Record<string, { live: boolean; provider: string }>).map(
+            ([key, val]) => ({ service: key.toUpperCase(), live: val.live, provider: val.provider })
+          )
         );
       }
+    } catch {
+      setDbStatus("unreachable");
+    } finally {
+      setLoading(false);
     }
+  }, []);
+
+  useEffect(() => { fetchHealth(); }, [fetchHealth]);
+
+  const cols: Column<ServiceRow>[] = [
+    { key: "service", header: "Service", render: (r) => <span className="font-semibold text-ink-900">{r.service}</span> },
+    { key: "provider", header: "Provider" },
+    {
+      key: "live",
+      header: "Status",
+      render: (r) => (
+        <Badge variant={r.live ? "success" : "warning"}>
+          {r.live ? "Live" : "Mock"}
+        </Badge>
+      ),
+    },
   ];
 
   return (
@@ -31,57 +60,60 @@ export default function AdminSystemPage() {
       <PageHeader
         eyebrow="Admin"
         title="System health"
-        description="Live SLO board for every payment switch and service. Pages PagerDuty when error budget burns &gt; 2%."
+        description="Live status of database, partner integrations, and all payment switches."
         actions={
-          <ReportActions
-            filename="system-health"
-            title="JMP NextGenPay · System Health"
-            subtitle="Per-service SLO snapshot"
-            columns={[
-              { key: "service", header: "Service" },
-              { key: "uptime", header: "Uptime (24h)" },
-              { key: "p95ms", header: "P95 latency (ms)" },
-              { key: "txnsToday", header: "Txns today" },
-              { key: "errorRate", header: "Error rate" }
-            ]}
-            rows={systemMetrics}
-          />
+          <Button variant="outline" onClick={fetchHealth} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
         }
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card title="GMV / hour" delta="+9.4%" tone="emerald" values={[820, 880, 920, 1020, 980, 1100, 1180, 1240, 1320, 1410, 1480, 1520, 1580, 1640, 1720, 1810]} />
-        <Card title="Errors / hour" delta="-12%" tone="rose" values={[42, 38, 41, 36, 33, 30, 28, 31, 28, 24, 22, 20, 18, 17, 16, 15]} />
-        <Card title="P95 latency" delta="+3 ms" tone="brand" values={[420, 430, 425, 440, 432, 421, 418, 412, 405, 401, 399, 410, 415, 420, 412, 410]} />
+        <StatusCard
+          title="Database"
+          status={dbStatus === "up" ? "Healthy" : "Down"}
+          variant={dbStatus === "up" ? "success" : "danger"}
+        />
+        <StatusCard
+          title="Live Partners"
+          status={`${services.filter((s) => s.live).length} of ${services.length}`}
+          variant={services.some((s) => s.live) ? "success" : "warning"}
+        />
+        <StatusCard
+          title="Mock Partners"
+          status={`${services.filter((s) => !s.live).length}`}
+          variant="default"
+        />
       </div>
 
-      <DataTable title="Service SLOs" columns={cols} data={systemMetrics} />
+      <DataTable
+        title={loading ? "Loading..." : "Partner integrations"}
+        columns={cols}
+        data={services}
+      />
     </div>
   );
 }
 
-function Card({
-  title,
-  delta,
-  values,
-  tone
-}: {
-  title: string;
-  delta: string;
-  values: number[];
-  tone: "emerald" | "rose" | "brand";
-}) {
-  const colors = { emerald: "#059669", rose: "#e11d48", brand: "#185df5" };
-  const badge = { emerald: "bg-emerald-50 text-emerald-700", rose: "bg-rose-50 text-rose-700", brand: "bg-brand-50 text-brand-700" };
+function StatusCard({ title, status, variant }: { title: string; status: string; variant: string }) {
+  const colors: Record<string, string> = {
+    success: "border-emerald-200 bg-emerald-50",
+    danger: "border-rose-200 bg-rose-50",
+    warning: "border-amber-200 bg-amber-50",
+    default: "border-ink-100 bg-white",
+  };
+  const textColors: Record<string, string> = {
+    success: "text-emerald-700",
+    danger: "text-rose-700",
+    warning: "text-amber-700",
+    default: "text-ink-700",
+  };
   return (
-    <div className="rounded-2xl border border-ink-100 bg-white p-5">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-bold uppercase tracking-widest text-ink-500">{title}</p>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge[tone]}`}>{delta}</span>
-      </div>
-      <div className="mt-3">
-        <Sparkline values={values} color={colors[tone]} height={60} />
-      </div>
+    <div className={`rounded-2xl border p-5 ${colors[variant] ?? colors.default}`}>
+      <p className="text-xs font-bold uppercase tracking-widest text-ink-500">{title}</p>
+      <p className={`mt-1 font-display text-xl font-bold ${textColors[variant] ?? textColors.default}`}>
+        {status}
+      </p>
     </div>
   );
 }

@@ -1,32 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useState } from "react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Topbar } from "@/components/dashboard/Topbar";
-import { getSession } from "@/lib/auth";
 
 export default function DashboardLayout({
   children
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
+  const { status } = useSession({ required: true });
   const [open, setOpen] = useState(false);
-  const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    const s = getSession();
-    if (!s) {
-      router.replace("/login");
-    } else if (s.role === "sub-admin" && s.mustChangePassword) {
-      router.replace("/sub-admin/change-password");
-    } else {
-      setReady(true);
-    }
-  }, [router]);
-
-  if (!ready) {
+  if (status === "loading") {
     return (
       <div className="grid min-h-screen place-items-center bg-ink-50/50">
         <div className="flex items-center gap-3 text-ink-500">

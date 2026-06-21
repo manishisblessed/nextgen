@@ -40,7 +40,13 @@ const schema = z.object({
   PARTNER_TRAVEL_ENABLED: z.string().default("false"),
   PARTNER_PAN_ENABLED: z.string().default("false"),
   PARTNER_SMS_ENABLED: z.string().default("false"),
-  PARTNER_EMAIL_ENABLED: z.string().default("false")
+  PARTNER_EMAIL_ENABLED: z.string().default("false"),
+  PARTNER_VERIFICATION_ENABLED: z.string().default("false"),
+
+  // eKYC Hub
+  EKYCHUB_USERNAME: z.string().min(1).optional(),
+  EKYCHUB_API_TOKEN: z.string().min(1).optional(),
+  EKYCHUB_BASE_URL: z.string().url().default("https://connect.ekychub.in/v3")
 });
 
 const parsed = schema.safeParse(process.env);
@@ -81,7 +87,8 @@ export const flags = {
   travel: env.PARTNER_TRAVEL_ENABLED === "true",
   pan: env.PARTNER_PAN_ENABLED === "true",
   sms: env.PARTNER_SMS_ENABLED === "true",
-  email: env.PARTNER_EMAIL_ENABLED === "true"
+  email: env.PARTNER_EMAIL_ENABLED === "true",
+  verification: env.PARTNER_VERIFICATION_ENABLED === "true"
 } as const;
 
 export const isProd = env.NODE_ENV === "production";

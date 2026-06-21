@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   mode: z.enum(["IMPS", "NEFT", "RTGS"]),
@@ -18,7 +19,12 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const userId = "demo-user-id"; // TODO: real session
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
+  const userId = user.id;
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 

@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { getSession } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 import { generateRandomPassword } from "@/lib/utils";
 import {
   createSubAdmin,
@@ -222,6 +222,7 @@ function NewSubAdminForm({
   onCancel: () => void;
   onCreated: (r: SubAdminRecord, password: string) => void;
 }) {
+  const { session } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("+91 ");
@@ -233,7 +234,6 @@ function NewSubAdminForm({
     setError(null);
     setSubmitting(true);
     try {
-      const session = getSession();
       const password = generateRandomPassword(10);
       const record = await createSubAdmin({
         name,

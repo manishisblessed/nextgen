@@ -1,27 +1,81 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, CheckCircle2, ShieldCheck, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
-import { getSession, type Role } from "@/lib/auth";
-import { generateUserCode } from "@/lib/utils";
+import { type Role } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
 
 const STEPS = ["Basic info", "KYC", "Commission slab", "Review"] as const;
 
 export default function OnboardPage() {
-  const [role, setRole] = useState<Role>("retailer");
+  const { session } = useAuth();
+  const role: Role = session?.role ?? "retailer";
   const [step, setStep] = useState(0);
   const [done, setDone] = useState(false);
   const [refId, setRefId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    const s = getSession();
-    if (s) setRole(s.role);
-  }, []);
+  // Form state
+  const [form, setForm] = useState({
+    name: "",
+    shopName: "",
+    phone: "",
+    email: "",
+    pincode: "",
+    state: "Uttar Pradesh",
+    city: "",
+    panNumber: "",
+  });
 
   const childLabel = role === "master-distributor" ? "distributor" : "retailer";
+
+  function updateForm(key: string, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (step < STEPS.length - 1) {
+      setStep(step + 1);
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/network/onboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          phone: form.phone.replace(/\s/g, ""),
+          shopName: form.shopName,
+          pincode: form.pincode,
+          state: form.state,
+          city: form.city,
+          panNumber: form.panNumber || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Onboarding failed");
+        return;
+      }
+
+      setRefId(data.user.id);
+      setDone(true);
+    } catch {
+      setError("Network error — please try again");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   if (done) {
     return (
@@ -30,16 +84,16 @@ export default function OnboardPage() {
           <CheckCircle2 className="h-8 w-8" />
         </div>
         <h2 className="mt-5 font-display text-2xl font-bold text-ink-900">
-          Onboarding submitted
+          Onboarding complete
         </h2>
         <p className="mt-2 text-sm text-ink-600">
-          A welcome email + activation link has been sent to the new {childLabel}. KYC will auto-verify with DigiLocker once they upload Aadhaar.
+          A welcome email with login credentials has been sent to the new {childLabel}. They&apos;ll need to complete KYC verification before transacting.
         </p>
         <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-mono shadow-sm">
-          Ref: <strong>{refId}</strong>
+          ID: <strong>{refId.slice(0, 12)}</strong>
         </div>
         <div className="mt-6">
-          <Button onClick={() => { setDone(false); setStep(0); }}>
+          <Button onClick={() => { setDone(false); setStep(0); setForm({ name: "", shopName: "", phone: "", email: "", pincode: "", state: "Uttar Pradesh", city: "", panNumber: "" }); }}>
             Onboard another <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -73,50 +127,47 @@ export default function OnboardPage() {
         ))}
       </ol>
 
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+
       <form
         className="rounded-2xl border border-ink-100 bg-white p-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (step < STEPS.length - 1) setStep(step + 1);
-          else {
-            setRefId(
-              generateUserCode(
-                role === "master-distributor" ? "distributor" : "retailer"
-              )
-            );
-            setDone(true);
-          }
-        }}
+        onSubmit={handleSubmit}
       >
         {step === 0 && (
           <div className="grid gap-5 md:grid-cols-2">
-            <Field label="Owner full name"><Input required defaultValue="" placeholder="As per PAN" /></Field>
-            <Field label="Shop / firm name"><Input required placeholder="Sharma Mobile World" /></Field>
-            <Field label="Mobile (verified)"><Input required defaultValue="+91 " /></Field>
-            <Field label="Email"><Input required type="email" placeholder="owner@example.com" /></Field>
-            <Field label="Pin code"><Input required maxLength={6} /></Field>
+            <Field label="Owner full name"><Input required value={form.name} onChange={(e) => updateForm("name", e.target.value)} placeholder="As per PAN" /></Field>
+            <Field label="Shop / firm name"><Input required value={form.shopName} onChange={(e) => updateForm("shopName", e.target.value)} placeholder="Sharma Mobile World" /></Field>
+            <Field label="Mobile"><Input required value={form.phone} onChange={(e) => updateForm("phone", e.target.value)} placeholder="+91 98765 43210" /></Field>
+            <Field label="Email"><Input required type="email" value={form.email} onChange={(e) => updateForm("email", e.target.value)} placeholder="owner@example.com" /></Field>
+            <Field label="City"><Input value={form.city} onChange={(e) => updateForm("city", e.target.value)} placeholder="Lucknow" /></Field>
+            <Field label="Pin code"><Input required maxLength={6} value={form.pincode} onChange={(e) => updateForm("pincode", e.target.value)} /></Field>
             <Field label="State">
-              <Select required>
+              <Select value={form.state} onChange={(e) => updateForm("state", e.target.value)}>
                 <option>Uttar Pradesh</option><option>Maharashtra</option><option>Karnataka</option>
                 <option>Delhi</option><option>West Bengal</option><option>Tamil Nadu</option>
+                <option>Gujarat</option><option>Rajasthan</option><option>Bihar</option>
               </Select>
             </Field>
           </div>
         )}
         {step === 1 && (
           <div className="grid gap-5 md:grid-cols-2">
-            <Field label="PAN number"><Input required maxLength={10} className="uppercase" placeholder="ABCDE1234F" /></Field>
-            <Field label="Aadhaar number"><Input required maxLength={14} placeholder="XXXX XXXX XXXX" /></Field>
+            <Field label="PAN number"><Input maxLength={10} className="uppercase" placeholder="ABCDE1234F" value={form.panNumber} onChange={(e) => updateForm("panNumber", e.target.value)} /></Field>
+            <Field label="Aadhaar number"><Input maxLength={14} placeholder="XXXX XXXX XXXX" /></Field>
             <Field label="GSTIN (optional)"><Input maxLength={15} className="uppercase" /></Field>
             <Field label="Bank account">
               <div className="grid grid-cols-3 gap-2">
-                <Input required placeholder="Account number" className="col-span-2" />
-                <Input required placeholder="IFSC" className="uppercase" />
+                <Input placeholder="Account number" className="col-span-2" />
+                <Input placeholder="IFSC" className="uppercase" />
               </div>
             </Field>
             <div className="md:col-span-2 rounded-xl border border-dashed border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
               <ShieldCheck className="mr-2 inline h-4 w-4" />
-              KYC will auto-verify against DigiLocker · NSDL PAN · Penny-drop. No manual review needed in 92% of cases.
+              KYC will be verified after the {childLabel} uploads documents from their profile page.
             </div>
           </div>
         )}
@@ -138,11 +189,11 @@ export default function OnboardPage() {
         )}
         {step === 3 && (
           <div className="grid gap-5 md:grid-cols-2">
-            <Summary heading="Profile" rows={[["Owner", "—"], ["Shop", "—"], ["State", "Uttar Pradesh"]]} />
-            <Summary heading="KYC" rows={[["PAN", "ABCDE••••F"], ["Aadhaar", "XXXX-XXXX-•••0"], ["Bank", "ICICI ••1234"]]} />
-            <Summary heading="Commission" rows={[["AePS", "0.40%"], ["DMT", "₹6 / txn"], ["Recharge", "3.00%"]]} />
+            <Summary heading="Profile" rows={[["Owner", form.name || "—"], ["Shop", form.shopName || "—"], ["State", form.state]]} />
+            <Summary heading="Contact" rows={[["Phone", form.phone || "—"], ["Email", form.email || "—"], ["City", form.city || "—"]]} />
+            <Summary heading="KYC" rows={[["PAN", form.panNumber ? `${form.panNumber.slice(0, 5)}••••${form.panNumber.slice(-1)}` : "—"], ["Status", "Pending KYC"]]} />
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              <strong>Ready to onboard.</strong> Activation link will be sent on submit.
+              <strong>Ready to onboard.</strong> A welcome email with temporary login credentials will be sent.
             </div>
           </div>
         )}
@@ -156,9 +207,10 @@ export default function OnboardPage() {
           >
             Back
           </Button>
-          <Button type="submit">
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
             {step === STEPS.length - 1 ? "Submit onboarding" : "Continue"}
-            <ArrowRight className="h-4 w-4" />
+            {!submitting && <ArrowRight className="h-4 w-4" />}
           </Button>
         </div>
       </form>

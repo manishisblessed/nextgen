@@ -20,6 +20,7 @@ enum Role {
   MASTER_DISTRIBUTOR
   ADMIN
   SUPPORT
+  MASTER_ADMIN
 }
 
 enum UserStatus {
@@ -40,6 +41,9 @@ model User {
   emailVerifiedAt DateTime?
   phoneVerifiedAt DateTime?
   twoFactorEnabled Boolean   @default(false)
+
+  // tabs/features assigned by a higher-level admin (empty = full access for that role)
+  allowedTabs     String[]   @default([])
 
   // hierarchy
   parentId        String?
@@ -374,6 +378,64 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, readAt])
+}
+
+// ---------- Onboarding Invites ----------
+
+enum InviteStatus {
+  PENDING
+  REGISTERED
+  VERIFIED
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model Invite {
+  id             String       @id @default(cuid())
+  token          String       @unique @default(cuid())
+  phone          String
+  email          String
+  role           Role
+  parentId       String?
+  invitedById    String
+  status         InviteStatus @default(PENDING)
+
+  userId         String?      @unique
+  name           String?
+
+  expiresAt      DateTime
+  registeredAt   DateTime?
+  verifiedAt     DateTime?
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+  rejectedReason String?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([token])
+  @@index([invitedById, status])
+  @@index([phone])
+  @@index([email])
+}
+
+// ---------- Verification Results (eKYC Hub) ----------
+
+model VerificationResult {
+  id              String   @id @default(cuid())
+  userId          String?
+  inviteId        String?
+  type            String   // PAN_360 | BANK_PENNY_DROP | AADHAAR_DIGILOCKER | GST | CIN | BANK_ADVANCE
+  orderid         String   @unique
+  status          String   // Success | Failure
+  verifiedName    String?
+  requestPayload  Json?
+  responsePayload Json?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, type])
+  @@index([inviteId, type])
 }
 
 // ---------- Master data ----------

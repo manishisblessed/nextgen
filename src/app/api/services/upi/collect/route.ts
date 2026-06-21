@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
+import { requireAuth, AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   amount: z.number().positive().max(100000),
@@ -12,13 +13,18 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const userId = "demo-user-id";
+  let user;
+  try { user = await requireAuth(); } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    throw e;
+  }
+
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const upi = getPartner("upi");
   const r = await upi.collect({
-    userId,
+    userId: user.id,
     idempotencyKey: parsed.data.idempotencyKey,
     amount: parsed.data.amount,
     vpa: parsed.data.vpa,

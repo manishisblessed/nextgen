@@ -1,39 +1,56 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
-import { Save, Sparkles } from "lucide-react";
+import { RefreshCw, Sparkles } from "lucide-react";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { commissionSlabs, type CommissionSlab } from "@/lib/data";
-import { getSession, type Role } from "@/lib/auth";
+import { type Role } from "@/lib/auth";
+import { useAuth } from "@/lib/useAuth";
+
+type SlabRow = {
+  id: string;
+  service: string;
+  userName: string;
+  userRole: string;
+  minAmount: number;
+  maxAmount: number;
+  flat: number | null;
+  percent: number | null;
+};
 
 export default function CommissionsPage() {
-  const [role, setRole] = useState<Role>("distributor");
+  const { session } = useAuth();
+  const role: Role = session?.role ?? "distributor";
+  const [slabs, setSlabs] = useState<SlabRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const s = getSession();
-    if (s) setRole(s.role);
+  const fetchSlabs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/commissions");
+      const data = await res.json();
+      if (data.slabs) setSlabs(data.slabs);
+    } catch {
+      // silent — user may not have admin access, show empty
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const cols: Column<CommissionSlab>[] = [
-    { key: "service", header: "Service", render: (r) => <span className="font-semibold text-ink-900">{r.service}</span> },
-    {
-      key: "retailer",
-      header: "Retailer payout",
-      align: "right",
-      render: (r) => (
-        <input
-          defaultValue={r.retailer}
-          className="w-28 rounded-lg border border-ink-200 px-2 py-1 text-right text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
-        />
-      )
-    },
-    { key: "distributor", header: "Your override", align: "right" },
-    ...(role === "master-distributor"
-      ? [{ key: "master" as const, header: "Master override", align: "right" as const }]
-      : [])
+  useEffect(() => { fetchSlabs(); }, [fetchSlabs]);
+
+  const formatPayout = (slab: SlabRow) => {
+    if (slab.flat) return `₹${slab.flat} / txn`;
+    if (slab.percent) return `${(slab.percent * 100).toFixed(2)}%`;
+    return "—";
+  };
+
+  const cols: Column<SlabRow>[] = [
+    { key: "service", header: "Service", render: (r) => <span className="font-semibold text-ink-900">{r.service.replace(/_/g, " ")}</span> },
+    { key: "flat", header: "Payout", align: "right", render: formatPayout },
+    { key: "minAmount", header: "Range", align: "right", render: (r) => `₹${r.minAmount} – ₹${r.maxAmount}` },
   ];
 
   return (
@@ -43,7 +60,7 @@ export default function CommissionsPage() {
         title={role === "master-distributor" ? "Commission master" : "Commission slabs"}
         description={role === "master-distributor"
           ? "Set rate-cards for your distributors. They can only set retailer payouts within these caps."
-          : "Configure how much each retailer earns per transaction. Capped by master rate-card."}
+          : "View your commission rates per transaction type."}
         actions={
           <>
             <ReportActions
@@ -56,30 +73,26 @@ export default function CommissionsPage() {
               subtitle="Service-wise rate-card"
               columns={[
                 { key: "service", header: "Service" },
-                { key: "retailer", header: "Retailer payout" },
-                { key: "distributor", header: "Distributor override" },
-                ...(role === "master-distributor"
-                  ? [
-                      {
-                        key: "master" as const,
-                        header: "Master override"
-                      }
-                    ]
-                  : [])
+                { key: "flat", header: "Flat (₹)" },
+                { key: "percent", header: "Percent (%)" },
+                { key: "minAmount", header: "Min Amount" },
+                { key: "maxAmount", header: "Max Amount" },
               ]}
-              rows={commissionSlabs}
+              rows={slabs}
             />
-            <Button variant="outline">
-              <Sparkles className="h-4 w-4" /> Apply template
-            </Button>
-            <Button>
-              <Save className="h-4 w-4" /> Publish v9
+            <Button variant="outline" onClick={fetchSlabs} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
           </>
         }
       />
 
-      <DataTable title="Service rate-card" columns={cols} data={commissionSlabs} />
+      <DataTable
+        title={loading ? "Loading..." : "Service rate-card"}
+        columns={cols}
+        data={slabs}
+        empty="No commission slabs found."
+      />
     </div>
   );
 }
