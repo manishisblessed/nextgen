@@ -14,7 +14,7 @@ const Body = z.object({
   state: z.string().min(2),
   city: z.string().optional(),
   panNumber: z.string().length(10).optional(),
-  role: z.enum(["RETAILER", "DISTRIBUTOR"]).optional(),
+  role: z.enum(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -22,9 +22,9 @@ export async function POST(req: Request) {
     const currentUser = await requireAuth();
     const userRole = currentUser.role;
 
-    if (!["MASTER_DISTRIBUTOR", "DISTRIBUTOR", "ADMIN"].includes(userRole))
+    if (!["MASTER_ADMIN", "MASTER_DISTRIBUTOR", "DISTRIBUTOR", "ADMIN"].includes(userRole))
       return NextResponse.json(
-        { error: "Only distributors, master distributors, or admins can onboard users" },
+        { error: "Only admins, distributors, or master distributors can onboard users" },
         { status: 403 }
       );
 
@@ -43,9 +43,20 @@ export async function POST(req: Request) {
         { status: 409 }
       );
 
-    const childRole =
-      data.role ??
-      (userRole === "MASTER_DISTRIBUTOR" ? "DISTRIBUTOR" : "RETAILER");
+    let childRole = data.role;
+    if (!childRole) {
+      if (userRole === "MASTER_ADMIN" || userRole === "ADMIN") childRole = "RETAILER";
+      else if (userRole === "MASTER_DISTRIBUTOR") childRole = "DISTRIBUTOR";
+      else childRole = "RETAILER";
+    }
+
+    // Only MASTER_ADMIN / ADMIN can create MASTER_DISTRIBUTOR
+    if (childRole === "MASTER_DISTRIBUTOR" && !["MASTER_ADMIN", "ADMIN"].includes(userRole)) {
+      return NextResponse.json(
+        { error: "Only admins can create master distributors" },
+        { status: 403 }
+      );
+    }
 
     const tempPassword = `Welcome@${Math.floor(1000 + Math.random() * 9000)}`;
     const passwordHash = await bcrypt.hash(tempPassword, 12);

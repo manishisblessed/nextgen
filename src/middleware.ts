@@ -6,6 +6,11 @@ export default withAuth(
     const token = req.nextauth.token;
     const path = req.nextUrl.pathname;
     const role = token?.role as string;
+    const twoFactorEnabled = token?.twoFactorEnabled as boolean;
+
+    // 2FA enforcement is handled client-side via the TwoFactorSetupModal overlay
+    // in the dashboard layout — no redirect needed. The modal blocks all interaction
+    // until setup is complete. API routes for 2FA setup still work normally.
 
     if (path.startsWith("/dashboard/master-admin") && role !== "MASTER_ADMIN") {
       return NextResponse.redirect(new URL("/dashboard", req.url));

@@ -6,8 +6,41 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("→ Seeding NextGenPay database…");
 
-  const passwordHash = await bcrypt.hash("Demo@1234", 10);
+  const demoHash = await bcrypt.hash("Demo@1234", 10);
 
+  // ── Master Admin (primary platform owner) ──
+  const masterAdminHash = await bcrypt.hash("9090702707", 12);
+  await prisma.user.upsert({
+    where: { email: "manish@shahworks.com" },
+    update: { passwordHash: masterAdminHash, status: UserStatus.ACTIVE },
+    create: {
+      name: "Manish Shah",
+      email: "manish@shahworks.com",
+      phone: "+919090702707",
+      passwordHash: masterAdminHash,
+      role: Role.MASTER_ADMIN,
+      status: UserStatus.ACTIVE,
+      shopName: "ShahWorks HQ"
+    }
+  });
+
+  // ── Admin ──
+  const adminHash = await bcrypt.hash("9090702705", 12);
+  const admin = await prisma.user.upsert({
+    where: { email: "support@grandhr.in" },
+    update: { passwordHash: adminHash, status: UserStatus.ACTIVE },
+    create: {
+      name: "GrandHR Admin",
+      email: "support@grandhr.in",
+      phone: "+919090702705",
+      passwordHash: adminHash,
+      role: Role.ADMIN,
+      status: UserStatus.ACTIVE,
+      shopName: "NextGenPay HQ"
+    }
+  });
+
+  // ── Legacy demo accounts (kept for testing) ──
   await prisma.user.upsert({
     where: { email: "masteradmin@jmpnextgenpay.com" },
     update: {},
@@ -15,22 +48,8 @@ async function main() {
       name: "JMP Master Admin",
       email: "masteradmin@jmpnextgenpay.com",
       phone: "+919000000051",
-      passwordHash,
+      passwordHash: demoHash,
       role: Role.MASTER_ADMIN,
-      status: UserStatus.ACTIVE,
-      shopName: "NextGenPay HQ"
-    }
-  });
-
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@jmpnextgenpay.com" },
-    update: {},
-    create: {
-      name: "NextGenPay Admin",
-      email: "admin@jmpnextgenpay.com",
-      phone: "+919000000041",
-      passwordHash,
-      role: Role.ADMIN,
       status: UserStatus.ACTIVE,
       shopName: "NextGenPay HQ"
     }
@@ -43,7 +62,7 @@ async function main() {
       name: "Neha Kapoor",
       email: "master@jmpnextgenpay.com",
       phone: "+919000000031",
-      passwordHash,
+      passwordHash: demoHash,
       role: Role.MASTER_DISTRIBUTOR,
       status: UserStatus.ACTIVE,
       walletBalance: 2148000
@@ -57,7 +76,7 @@ async function main() {
       name: "Rohit Verma",
       email: "distributor@jmpnextgenpay.com",
       phone: "+919000000021",
-      passwordHash,
+      passwordHash: demoHash,
       role: Role.DISTRIBUTOR,
       status: UserStatus.ACTIVE,
       walletBalance: 482300,
@@ -72,7 +91,7 @@ async function main() {
       name: "Aman Sharma",
       email: "retailer@jmpnextgenpay.com",
       phone: "+919898000000",
-      passwordHash,
+      passwordHash: demoHash,
       role: Role.RETAILER,
       status: UserStatus.ACTIVE,
       shopName: "Sharma Mobile World",
@@ -105,7 +124,10 @@ async function main() {
     });
   }
 
-  console.log("✓ Seed complete. Demo password for all users: Demo@1234");
+  console.log("✓ Seed complete.");
+  console.log("  Master Admin: manish@shahworks.com / 9090702707");
+  console.log("  Admin:        support@grandhr.in / 9090702705");
+  console.log("  Demo users:   Demo@1234");
 }
 
 main()

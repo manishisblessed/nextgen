@@ -15,6 +15,7 @@ export type SessionUser = {
   status: string;
   walletBalance: number;
   allowedTabs: string[];
+  twoFactorEnabled: boolean;
 };
 
 declare module "next-auth" {
@@ -36,6 +37,51 @@ export const authOptions: NextAuthOptions = {
   },
   providers: [
     CredentialsProvider({
+      id: "token-login",
+      name: "token-login",
+      credentials: {
+        grant: { label: "Session Grant", type: "text" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.grant) return null;
+
+        // Verify the HMAC-signed session grant
+        const parts = credentials.grant.split(".");
+        if (parts.length !== 2) return null;
+
+        const [payloadB64, sig] = parts;
+        const secret = process.env.NEXTAUTH_SECRET ?? "";
+        const payload = Buffer.from(payloadB64, "base64").toString();
+        const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+
+        // Constant-time comparison
+        if (sig.length !== expectedSig.length) return null;
+        if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
+
+        const [userId, expStr] = payload.split(":");
+        const exp = parseInt(expStr, 10);
+        if (isNaN(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+        });
+        if (!user || user.status === "CLOSED") return null;
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          status: user.status,
+          walletBalance: Number(user.walletBalance),
+          allowedTabs: (user as any).allowedTabs ?? [],
+          twoFactorEnabled: user.twoFactorEnabled,
+        };
+      },
+    }),
+    CredentialsProvider({
+      id: "credentials",
       name: "credentials",
       credentials: {
         identifier: { label: "Email or Phone", type: "text" },
@@ -63,6 +109,10 @@ export const authOptions: NextAuthOptions = {
 
         if (user.status === "CLOSED") return null;
 
+        // If 2FA is enabled, block NextAuth session creation.
+        // The frontend must use /api/auth/login → /api/auth/2fa/verify flow instead.
+        if (user.twoFactorEnabled) return null;
+
         return {
           id: user.id,
           name: user.name,
@@ -72,12 +122,13 @@ export const authOptions: NextAuthOptions = {
           status: user.status,
           walletBalance: Number(user.walletBalance),
           allowedTabs: (user as any).allowedTabs ?? [],
+          twoFactorEnabled: user.twoFactorEnabled,
         };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
         token.name = user.name;
@@ -87,7 +138,27 @@ export const authOptions: NextAuthOptions = {
         token.status = user.status;
         token.walletBalance = user.walletBalance;
         token.allowedTabs = (user as any).allowedTabs ?? [];
+        token.twoFactorEnabled = (user as any).twoFactorEnabled ?? false;
       }
+
+      if (trigger === "update" && token.id) {
+        const freshUser = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: {
+            twoFactorEnabled: true,
+            walletBalance: true,
+            status: true,
+            role: true,
+          },
+        });
+        if (freshUser) {
+          token.twoFactorEnabled = freshUser.twoFactorEnabled;
+          token.walletBalance = Number(freshUser.walletBalance);
+          token.status = freshUser.status;
+          token.role = freshUser.role;
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
@@ -100,6 +171,7 @@ export const authOptions: NextAuthOptions = {
         status: token.status as string,
         walletBalance: token.walletBalance as number,
         allowedTabs: (token.allowedTabs as string[]) ?? [],
+        twoFactorEnabled: (token.twoFactorEnabled as boolean) ?? false,
       };
       return session;
     },
@@ -167,6 +239,7 @@ export function verifyMobileToken(token: string): SessionUser | null {
       status: data.status,
       walletBalance: 0,
       allowedTabs: data.allowedTabs ?? [],
+      twoFactorEnabled: data.twoFactorEnabled ?? false,
     };
   } catch {
     return null;

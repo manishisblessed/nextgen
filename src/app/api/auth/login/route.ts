@@ -3,6 +3,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { createMobileToken } from "@/lib/auth-server";
+import { createTempToken } from "@/lib/two-factor";
 
 const Body = z.object({
   identifier: z.string().min(3),
@@ -10,9 +11,12 @@ const Body = z.object({
 });
 
 /**
- * Direct login endpoint (for mobile app / API consumers).
- * Web UI should use NextAuth's signIn() which hits /api/auth/[...nextauth].
- * Returns a JWT token for mobile clients alongside user data.
+ * POST /api/auth/login
+ * Step 1 of login — validates email/phone + password.
+ *
+ * If 2FA is enabled: returns { needs2FA: true, tempToken } — no session issued.
+ * If 2FA is NOT enabled: returns { needs2FA: false, needsSetup: true } for mandatory setup.
+ * Legacy (2FA not required): returns full token + user. (removed — 2FA is now mandatory)
  */
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
@@ -43,6 +47,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Account has been closed" }, { status: 403 });
   }
 
+  // 2FA is mandatory for all users
+  if (user.twoFactorEnabled && user.twoFactorSecret) {
+    // User has 2FA configured — issue temp token for step 2
+    const tempToken = createTempToken(user.id);
+    return NextResponse.json({
+      ok: true,
+      needs2FA: true,
+      needsSetup: false,
+      tempToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  }
+
+  // 2FA NOT configured — issue a limited session for setup only
+  // The frontend must redirect to 2FA setup before granting full access
   const sessionUser = {
     id: user.id,
     name: user.name,
@@ -52,12 +76,15 @@ export async function POST(req: Request) {
     status: user.status,
     walletBalance: Number(user.walletBalance),
     allowedTabs: user.allowedTabs ?? [],
+    twoFactorEnabled: user.twoFactorEnabled,
   };
 
   const token = createMobileToken(sessionUser);
 
   return NextResponse.json({
     ok: true,
+    needs2FA: false,
+    needsSetup: true,
     token,
     user: sessionUser,
   });

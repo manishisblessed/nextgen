@@ -4,14 +4,17 @@ import { useSession } from "next-auth/react";
 import { useState } from "react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Topbar } from "@/components/dashboard/Topbar";
+import { TwoFactorSetupModal } from "@/components/dashboard/TwoFactorSetupModal";
 
 export default function DashboardLayout({
   children
 }: {
   children: React.ReactNode;
 }) {
-  const { status } = useSession({ required: true });
+  const { data: session, status } = useSession({ required: true });
   const [open, setOpen] = useState(false);
+
+  const needs2FASetup = status === "authenticated" && !session?.user?.twoFactorEnabled;
 
   if (status === "loading") {
     return (
@@ -31,6 +34,8 @@ export default function DashboardLayout({
         <Topbar onOpenSidebar={() => setOpen(true)} />
         <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
       </div>
+
+      {needs2FASetup && <TwoFactorSetupModal />}
     </div>
   );
 }

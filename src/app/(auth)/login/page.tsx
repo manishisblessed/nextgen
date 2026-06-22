@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
+import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
 import { cn } from "@/lib/utils";
 
 type PublicRole = "retailer" | "distributor" | "master-distributor";
@@ -27,12 +28,6 @@ const roleOptions: { id: PublicRole; label: string; icon: typeof Store; tagline:
   { id: "master-distributor", label: "Master", icon: Network, tagline: "White-label & API" }
 ];
 
-const demoEmails: Record<PublicRole, string> = {
-  retailer: "retailer@jmpnextgenpay.com",
-  distributor: "distributor@jmpnextgenpay.com",
-  "master-distributor": "master@jmpnextgenpay.com"
-};
-
 export default function LoginPage() {
   const router = useRouter();
   const [role, setRole] = useState<PublicRole>("retailer");
@@ -42,10 +37,13 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // 2FA state
+  const [step, setStep] = useState<"credentials" | "2fa">("credentials");
+  const [tempToken, setTempToken] = useState("");
+  const [userName, setUserName] = useState("");
+
   function pickRole(r: PublicRole) {
     setRole(r);
-    setIdentifier(demoEmails[r]);
-    setPassword("Demo@1234");
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -53,20 +51,95 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const result = await signIn("credentials", {
-      identifier: identifier.trim(),
-      password,
-      redirect: false,
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: identifier.trim(), password }),
+      });
 
-    if (result?.error) {
-      setError("Invalid email/phone or password. Please try again.");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Invalid email/phone or password.");
+        setLoading(false);
+        return;
+      }
+
+      if (data.needs2FA) {
+        setTempToken(data.tempToken);
+        setUserName(data.user?.name || "");
+        setStep("2fa");
+        setLoading(false);
+        return;
+      }
+
+      if (data.needsSetup) {
+        const result = await signIn("credentials", {
+          identifier: identifier.trim(),
+          password,
+          redirect: false,
+        });
+        if (result?.error) {
+          setError("Login failed.");
+          setLoading(false);
+          return;
+        }
+        router.push("/dashboard/settings/security");
+        router.refresh();
+        return;
+      }
+    } catch {
+      setError("Network error. Please try again.");
       setLoading(false);
-      return;
     }
+  }
 
-    router.push("/dashboard");
-    router.refresh();
+  if (step === "2fa") {
+    return (
+      <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
+        <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-10 text-white shadow-glow lg:flex">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
+              <Sparkles className="h-3.5 w-3.5" /> Secure login
+            </span>
+            <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
+              Two-factor <br /> verification.
+            </h2>
+            <p className="mt-3 text-white/85">
+              Enter the code from your authenticator app to complete sign-in.
+            </p>
+          </div>
+          <div className="space-y-3">
+            {[
+              "Google Authenticator / Authy / Microsoft",
+              "Code refreshes every 30 seconds",
+              "Backup codes available",
+              "Your account stays protected"
+            ].map((t) => (
+              <div key={t} className="flex items-center gap-2 text-sm">
+                <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                {t}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
+          <TwoFactorStep
+            tempToken={tempToken}
+            userName={userName}
+            userEmail={identifier}
+            onBack={() => {
+              setStep("credentials");
+              setTempToken("");
+              setPassword("");
+              setError("");
+            }}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -89,7 +162,7 @@ export default function LoginPage() {
             "60+ services in one dashboard",
             "Instant IMPS settlement 24x7",
             "Highest commissions in the industry",
-            "API + white-label for partners"
+            "Two-factor authentication for all users"
           ].map((t) => (
             <div key={t} className="flex items-center gap-2 text-sm">
               <ShieldCheck className="h-4 w-4 text-emerald-300" />
@@ -110,7 +183,7 @@ export default function LoginPage() {
 
         <div className="mt-6">
           <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">
-            Quick login
+            I am a
           </p>
           <div className="grid grid-cols-3 gap-2">
             {roleOptions.map((r) => {
@@ -210,13 +283,8 @@ export default function LoginPage() {
           </label>
 
           <Button type="submit" size="lg" className="w-full" disabled={loading}>
-            {loading ? "Signing in..." : <>Sign in <ArrowRight className="h-4 w-4" /></>}
+            {loading ? "Verifying..." : <>Continue <ArrowRight className="h-4 w-4" /></>}
           </Button>
-
-          <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50 p-3 text-xs text-ink-600">
-            <span className="font-semibold text-ink-900">Demo credentials:</span>{" "}
-            Use the role buttons above, password: <span className="font-mono">Demo@1234</span>
-          </div>
         </form>
       </div>
     </div>

@@ -10,40 +10,122 @@ import {
   ShieldCheck,
   Crown,
   ArrowRight,
-  KeyRound,
   AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
+import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
 
 export default function MasterAdminLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("masteradmin@jmpnextgenpay.com");
-  const [password, setPassword] = useState("Demo@1234");
-  const [otp, setOtp] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // 2FA state
+  const [step, setStep] = useState<"credentials" | "2fa">("credentials");
+  const [tempToken, setTempToken] = useState("");
+  const [userName, setUserName] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
 
-    const result = await signIn("credentials", {
-      identifier: email.trim(),
-      password,
-      redirect: false,
-    });
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: email.trim(), password }),
+      });
 
-    if (result?.error) {
-      setError("Invalid credentials or insufficient permissions.");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Invalid credentials.");
+        setLoading(false);
+        return;
+      }
+
+      if (data.needs2FA) {
+        // Step 2: show 2FA input
+        setTempToken(data.tempToken);
+        setUserName(data.user?.name || "");
+        setStep("2fa");
+        setLoading(false);
+        return;
+      }
+
+      if (data.needsSetup) {
+        // User needs to set up 2FA — create session and redirect to setup
+        const result = await signIn("credentials", {
+          identifier: email.trim(),
+          password,
+          redirect: false,
+        });
+        if (result?.error) {
+          setError("Login failed.");
+          setLoading(false);
+          return;
+        }
+        router.push("/dashboard/settings/security");
+        router.refresh();
+        return;
+      }
+    } catch {
+      setError("Network error. Please try again.");
       setLoading(false);
-      return;
     }
+  }
 
-    router.push("/dashboard");
-    router.refresh();
+  if (step === "2fa") {
+    return (
+      <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
+        <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-violet-900 via-violet-800 to-brand-700 p-10 text-white shadow-glow lg:flex">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
+              <Crown className="h-3.5 w-3.5" /> Master Admin · Platform Owner
+            </span>
+            <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
+              NextGenPay Master <br /> Control Centre.
+            </h2>
+            <p className="mt-3 text-white/80">
+              Two-factor authentication protects your platform from
+              unauthorized access.
+            </p>
+          </div>
+          <div className="space-y-3">
+            {[
+              "TOTP authenticator app required",
+              "3-minute session timeout",
+              "Max 3 verification attempts",
+              "All attempts logged to audit trail"
+            ].map((t) => (
+              <div key={t} className="flex items-center gap-2 text-sm">
+                <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                {t}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
+          <TwoFactorStep
+            tempToken={tempToken}
+            userName={userName}
+            userEmail={email}
+            onBack={() => {
+              setStep("credentials");
+              setTempToken("");
+              setPassword("");
+              setError("");
+            }}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -67,7 +149,7 @@ export default function MasterAdminLoginPage() {
             "Create & manage Admin accounts",
             "Assign tabs & permissions to each Admin",
             "Full access to all platform features",
-            "Hardware-key + OTP enforced"
+            "Two-factor authentication enforced"
           ].map((t) => (
             <div key={t} className="flex items-center gap-2 text-sm">
               <ShieldCheck className="h-4 w-4 text-emerald-300" />
@@ -105,6 +187,7 @@ export default function MasterAdminLoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="master@yourcompany.com"
               required
             />
           </div>
@@ -142,45 +225,15 @@ export default function MasterAdminLoginPage() {
             </div>
           </div>
 
-          <div>
-            <Label htmlFor="otp">2FA code</Label>
-            <div className="relative">
-              <Input
-                id="otp"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="6-digit code from authenticator"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-              />
-              <KeyRound className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-            </div>
-            <p className="mt-1 text-[11px] text-ink-500">
-              2FA will be enforced in production.
-            </p>
-          </div>
-
           <Button type="submit" size="lg" className="w-full" disabled={loading}>
             {loading ? (
               "Verifying..."
             ) : (
               <>
-                Enter master console <ArrowRight className="h-4 w-4" />
+                Continue <ArrowRight className="h-4 w-4" />
               </>
             )}
           </Button>
-
-          <p className="text-center text-xs text-ink-500">
-            Admin?{" "}
-            <Link href="/admin" className="font-semibold text-brand-700">
-              Use the admin login
-            </Link>
-          </p>
-
-          <div className="rounded-xl border border-dashed border-ink-200 bg-ink-50 p-3 text-xs text-ink-600">
-            <span className="font-semibold text-ink-900">Credentials:</span>{" "}
-            <span className="font-mono">masteradmin@jmpnextgenpay.com</span> / <span className="font-mono">Demo@1234</span>
-          </div>
         </form>
       </div>
     </div>

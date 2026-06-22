@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   UserCog,
   Plus,
@@ -12,7 +12,7 @@ import {
   KeyRound,
   X,
   Eye,
-  EyeOff
+  EyeOff,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
@@ -20,38 +20,56 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { useAuth } from "@/lib/useAuth";
 import { generateRandomPassword } from "@/lib/utils";
-import {
-  createSubAdmin,
-  deleteSubAdmin,
-  listSubAdmins,
-  setSubAdminStatus,
-  type SubAdminRecord
-} from "@/lib/subAdmins";
+
+type SubAdmin = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  status: string;
+  twoFactorEnabled: boolean;
+  createdAt: string;
+};
 
 export default function AdminSubAdminsPage() {
-  const [rows, setRows] = useState<SubAdminRecord[]>([]);
+  const [rows, setRows] = useState<SubAdmin[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [issued, setIssued] = useState<{
-    record: SubAdminRecord;
+    record: SubAdmin;
     password: string;
   } | null>(null);
 
-  const refresh = () => setRows(listSubAdmins());
-  useEffect(refresh, []);
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/sub-admins");
+      const data = await res.json();
+      if (res.ok) setRows(data.subAdmins ?? []);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const stats = useMemo(() => {
-    const active = rows.filter((r) => r.status === "Active").length;
-    const pendingFirstLogin = rows.filter((r) => r.mustChangePassword).length;
-    return { total: rows.length, active, pendingFirstLogin };
+    const active = rows.filter((r) => r.status === "ACTIVE").length;
+    const with2FA = rows.filter((r) => r.twoFactorEnabled).length;
+    return { total: rows.length, active, with2FA };
   }, [rows]);
 
-  const cols: Column<SubAdminRecord>[] = [
+  const cols: Column<SubAdmin>[] = [
     {
       key: "id",
-      header: "Code",
-      render: (r) => <span className="font-mono text-xs">{r.id}</span>
+      header: "ID",
+      render: (r) => (
+        <span className="font-mono text-xs">{r.id.slice(0, 8)}</span>
+      ),
     },
     {
       key: "name",
@@ -61,32 +79,40 @@ export default function AdminSubAdminsPage() {
           <div className="font-semibold text-ink-900">{r.name}</div>
           <div className="text-xs text-ink-500">{r.email}</div>
         </div>
-      )
+      ),
     },
     { key: "phone", header: "Mobile" },
     {
-      key: "mustChangePassword",
-      header: "Password",
+      key: "twoFactorEnabled",
+      header: "2FA",
       render: (r) =>
-        r.mustChangePassword ? (
-          <Badge variant="warning">Awaiting first change</Badge>
+        r.twoFactorEnabled ? (
+          <Badge variant="success">Enabled</Badge>
         ) : (
-          <Badge variant="success">Self-set</Badge>
-        )
+          <Badge variant="warning">Not set up</Badge>
+        ),
     },
     {
       key: "status",
       header: "Status",
       render: (r) => (
-        <Badge variant={r.status === "Active" ? "success" : "danger"}>
+        <Badge
+          variant={
+            r.status === "ACTIVE"
+              ? "success"
+              : r.status === "SUSPENDED"
+                ? "danger"
+                : "default"
+          }
+        >
           {r.status}
         </Badge>
-      )
+      ),
     },
     {
       key: "createdAt",
       header: "Created",
-      render: (r) => new Date(r.createdAt).toLocaleString("en-IN")
+      render: (r) => new Date(r.createdAt).toLocaleString("en-IN"),
     },
     {
       key: "actions",
@@ -94,10 +120,14 @@ export default function AdminSubAdminsPage() {
       align: "right",
       render: (r) => (
         <div className="flex justify-end gap-1">
-          {r.status === "Active" ? (
+          {r.status === "ACTIVE" ? (
             <button
-              onClick={() => {
-                setSubAdminStatus(r.email, "Suspended");
+              onClick={async () => {
+                await fetch(`/api/admin/sub-admins/${r.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "suspend" }),
+                });
                 refresh();
               }}
               className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
@@ -105,10 +135,14 @@ export default function AdminSubAdminsPage() {
             >
               <ShieldOff className="h-4 w-4" />
             </button>
-          ) : (
+          ) : r.status === "SUSPENDED" ? (
             <button
-              onClick={() => {
-                setSubAdminStatus(r.email, "Active");
+              onClick={async () => {
+                await fetch(`/api/admin/sub-admins/${r.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "activate" }),
+                });
                 refresh();
               }}
               className="grid h-8 w-8 place-items-center rounded-lg text-emerald-700 hover:bg-emerald-50"
@@ -116,13 +150,15 @@ export default function AdminSubAdminsPage() {
             >
               <ShieldCheck className="h-4 w-4" />
             </button>
-          )}
+          ) : null}
           <button
-            onClick={() => {
+            onClick={async () => {
               if (
                 confirm(`Delete sub-admin ${r.name}? This cannot be undone.`)
               ) {
-                deleteSubAdmin(r.email);
+                await fetch(`/api/admin/sub-admins/${r.id}`, {
+                  method: "DELETE",
+                });
                 refresh();
               }
             }}
@@ -132,8 +168,8 @@ export default function AdminSubAdminsPage() {
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
-      )
-    }
+      ),
+    },
   ];
 
   return (
@@ -141,28 +177,28 @@ export default function AdminSubAdminsPage() {
       <PageHeader
         eyebrow="Admin"
         title="Sub-admins"
-        description="Create operations users delegated by you. Each sub-admin signs in at /sub-admin and is forced to change the auto-generated password on first login."
+        description="Create operations users delegated by you. Each sub-admin signs in at /sub-admin with 2FA enforced."
         actions={
           <>
             <ReportActions
               filename="sub-admins"
               title="JMP NextGenPay · Sub-Admins"
               columns={[
-                { key: "id", header: "Code" },
+                { key: "id", header: "ID" },
                 { key: "name", header: "Name" },
                 { key: "email", header: "Email" },
                 { key: "phone", header: "Mobile" },
                 { key: "status", header: "Status" },
                 {
-                  key: "mustChangePassword",
-                  header: "Awaiting first change",
-                  render: (r) => (r.mustChangePassword ? "Yes" : "No")
+                  key: "twoFactorEnabled",
+                  header: "2FA",
+                  render: (r) => (r.twoFactorEnabled ? "Yes" : "No"),
                 },
                 {
                   key: "createdAt",
                   header: "Created",
-                  render: (r) => new Date(r.createdAt).toLocaleString("en-IN")
-                }
+                  render: (r) => new Date(r.createdAt).toLocaleString("en-IN"),
+                },
               ]}
               rows={rows}
             />
@@ -176,11 +212,7 @@ export default function AdminSubAdminsPage() {
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Total sub-admins" value={stats.total} tone="brand" />
         <Stat label="Active" value={stats.active} tone="success" />
-        <Stat
-          label="Awaiting first login change"
-          value={stats.pendingFirstLogin}
-          tone="warning"
-        />
+        <Stat label="2FA enabled" value={stats.with2FA} tone="warning" />
       </div>
 
       {showNew && (
@@ -203,7 +235,7 @@ export default function AdminSubAdminsPage() {
       )}
 
       <DataTable
-        title={`${rows.length} sub-admins`}
+        title={loading ? "Loading..." : `${rows.length} sub-admins`}
         description="Sub-admins log in at /sub-admin and inherit a restricted operations dashboard."
         columns={cols}
         data={rows}
@@ -217,12 +249,11 @@ export default function AdminSubAdminsPage() {
 
 function NewSubAdminForm({
   onCancel,
-  onCreated
+  onCreated,
 }: {
   onCancel: () => void;
-  onCreated: (r: SubAdminRecord, password: string) => void;
+  onCreated: (r: SubAdmin, password: string) => void;
 }) {
-  const { session } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("+91 ");
@@ -235,16 +266,24 @@ function NewSubAdminForm({
     setSubmitting(true);
     try {
       const password = generateRandomPassword(10);
-      const record = await createSubAdmin({
-        name,
-        email,
-        phone,
-        plainPassword: password,
-        createdBy: session?.email ?? "admin"
+      const res = await fetch("/api/admin/sub-admins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, phone, password }),
       });
-      onCreated(record, password);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create.");
+      const data = await res.json();
+      if (!res.ok) {
+        setError(
+          typeof data.error === "string"
+            ? data.error
+            : "Failed to create sub-admin.",
+        );
+        setSubmitting(false);
+        return;
+      }
+      onCreated(data.subAdmin, password);
+    } catch {
+      setError("Network error. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -265,7 +304,7 @@ function NewSubAdminForm({
           </h3>
           <p className="text-xs text-ink-500">
             A 10-character password will be generated. Share it once — the
-            sub-admin must change it on first login.
+            sub-admin must set up 2FA on first login.
           </p>
         </div>
       </div>
@@ -289,7 +328,7 @@ function NewSubAdminForm({
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="ops.user@jmpnextgenpay.com"
+            placeholder="ops.user@company.com"
           />
         </div>
         <div>
@@ -317,7 +356,7 @@ function NewSubAdminForm({
         </Button>
         <Button type="submit" disabled={submitting}>
           <KeyRound className="h-4 w-4" />
-          {submitting ? "Generating..." : "Generate password & create"}
+          {submitting ? "Creating..." : "Generate password & create"}
         </Button>
       </div>
     </form>
@@ -327,21 +366,18 @@ function NewSubAdminForm({
 function CredentialsDialog({
   record,
   password,
-  onClose
+  onClose,
 }: {
-  record: SubAdminRecord;
+  record: SubAdmin;
   password: string;
   onClose: () => void;
 }) {
   const [showPwd, setShowPwd] = useState(true);
   const [copied, setCopied] = useState<"none" | "email" | "pwd" | "both">(
-    "none"
+    "none",
   );
 
-  const copy = async (
-    text: string,
-    which: "email" | "pwd" | "both"
-  ) => {
+  const copy = async (text: string, which: "email" | "pwd" | "both") => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(which);
@@ -362,14 +398,11 @@ function CredentialsDialog({
               Sub-admin created
             </p>
             <h3 className="mt-1 font-display text-lg font-bold text-ink-900">
-              {record.name}{" "}
-              <span className="font-mono text-xs text-ink-500">
-                · {record.id}
-              </span>
+              {record.name}
             </h3>
             <p className="mt-1 text-xs text-ink-600">
-              Share these credentials securely. The sub-admin will be forced to
-              change this password on first login.
+              Share these credentials securely. The sub-admin will be required to
+              set up 2FA on first login.
             </p>
           </div>
           <button
@@ -462,7 +495,7 @@ function Field({
   label,
   value,
   mono,
-  action
+  action,
 }: {
   label: string;
   value: string;
@@ -489,7 +522,7 @@ function Field({
 function Stat({
   label,
   value,
-  tone
+  tone,
 }: {
   label: string;
   value: number;
@@ -498,7 +531,7 @@ function Stat({
   const map = {
     brand: "from-brand-500 to-brand-700 text-brand-50",
     success: "from-emerald-500 to-emerald-700 text-emerald-50",
-    warning: "from-amber-500 to-amber-700 text-amber-50"
+    warning: "from-amber-500 to-amber-700 text-amber-50",
   };
   return (
     <div

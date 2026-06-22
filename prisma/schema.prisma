@@ -41,6 +41,9 @@ model User {
   emailVerifiedAt DateTime?
   phoneVerifiedAt DateTime?
   twoFactorEnabled Boolean   @default(false)
+  twoFactorSecret   String?   // AES-256 encrypted TOTP secret
+  twoFactorBackupCodes String[] @default([]) // bcrypt-hashed single-use recovery codes
+  twoFactorVerifiedAt DateTime? // when 2FA was first confirmed
 
   // tabs/features assigned by a higher-level admin (empty = full access for that role)
   allowedTabs     String[]   @default([])

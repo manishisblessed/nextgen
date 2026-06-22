@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   Eye,
   EyeOff,
@@ -10,16 +11,10 @@ import {
   ArrowRight,
   AlertTriangle,
   Check,
-  X
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
-import { getSession, saveSession, clearSession } from "@/lib/auth";
-import {
-  changeSubAdminPassword,
-  findSubAdminByEmail,
-  verifyPassword
-} from "@/lib/subAdmins";
 
 type Rule = { label: string; ok: boolean };
 
@@ -31,15 +26,14 @@ function evaluate(pwd: string): Rule[] {
     { label: "One number", ok: /\d/.test(pwd) },
     {
       label: "One special character (@ # $ % & * etc.)",
-      ok: /[^A-Za-z0-9]/.test(pwd)
-    }
+      ok: /[^A-Za-z0-9]/.test(pwd),
+    },
   ];
 }
 
 export default function SubAdminChangePasswordPage() {
   const router = useRouter();
-  const [email, setEmail] = useState<string | null>(null);
-  const [name, setName] = useState<string>("");
+  const { data: session, status } = useSession({ required: true });
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -48,24 +42,15 @@ export default function SubAdminChangePasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    const s = getSession();
-    if (!s || s.role !== "sub-admin") {
-      router.replace("/sub-admin");
-      return;
-    }
-    setEmail(s.email);
-    setName(s.name);
-  }, [router]);
-
   const rules = useMemo(() => evaluate(next), [next]);
   const allValid = rules.every((r) => r.ok);
   const matches = next.length > 0 && next === confirm;
 
+  const name = session?.user?.name ?? "";
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!email) return;
     if (!allValid) {
       setError("Please satisfy every password requirement below.");
       return;
@@ -81,39 +66,36 @@ export default function SubAdminChangePasswordPage() {
 
     setSubmitting(true);
     try {
-      const record = findSubAdminByEmail(email);
-      if (!record) throw new Error("Account not found.");
-
-      const ok = await verifyPassword(current, record.passwordHash);
-      if (!ok) throw new Error("Current password is incorrect.");
-
-      const updated = await changeSubAdminPassword(email, next);
-
-      saveSession({
-        name: updated.name,
-        email: updated.email,
-        phone: updated.phone,
-        role: "sub-admin",
-        walletBalance: 0,
-        loggedInAt: Date.now(),
-        mustChangePassword: false,
-        userCode: updated.id
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
       });
-
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Could not change password.");
+        setSubmitting(false);
+        return;
+      }
       router.push("/dashboard");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not change password.");
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  function cancel() {
-    clearSession();
-    router.replace("/sub-admin");
+  if (status === "loading") {
+    return (
+      <div className="grid min-h-[60vh] place-items-center">
+        <div className="flex items-center gap-3 text-ink-500">
+          <span className="h-3 w-3 animate-pulse rounded-full bg-brand-500" />
+          Loading...
+        </div>
+      </div>
+    );
   }
-
-  if (!email) return null;
 
   return (
     <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
@@ -126,9 +108,9 @@ export default function SubAdminChangePasswordPage() {
             Set a password <br /> only you know.
           </h2>
           <p className="mt-3 text-white/80">
-            For your security we never let auto-generated passwords stay
-            active. Pick a strong, unique password before you continue to the
-            sub-admin console.
+            For your security we never let auto-generated passwords stay active.
+            Pick a strong, unique password before you continue to the sub-admin
+            console.
           </p>
         </div>
 
@@ -137,7 +119,7 @@ export default function SubAdminChangePasswordPage() {
             "Never reuse a password from another service",
             "Store it in your password manager",
             "Don't share it — even with the Admin who created your account",
-            "We will ask you to change it every 90 days"
+            "We will ask you to change it every 90 days",
           ].map((t) => (
             <div key={t} className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-emerald-300" />
@@ -259,28 +241,20 @@ export default function SubAdminChangePasswordPage() {
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={cancel}
-              className="text-xs font-medium text-ink-500 hover:text-ink-900"
-            >
-              Cancel and sign out
-            </button>
-            <Button
-              type="submit"
-              size="lg"
-              disabled={submitting || !allValid || !matches}
-            >
-              {submitting ? (
-                "Saving..."
-              ) : (
-                <>
-                  Set password & continue <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </Button>
-          </div>
+          <Button
+            type="submit"
+            size="lg"
+            className="w-full"
+            disabled={submitting || !allValid || !matches}
+          >
+            {submitting ? (
+              "Saving..."
+            ) : (
+              <>
+                Set password & continue <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </Button>
         </form>
       </div>
     </div>
