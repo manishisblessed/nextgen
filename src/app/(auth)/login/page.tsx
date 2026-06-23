@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
+import { LocationGate, type LocationData } from "@/components/auth/LocationGate";
 import { cn } from "@/lib/utils";
 
 type PublicRole = "retailer" | "distributor" | "master-distributor";
@@ -29,6 +30,14 @@ const roleOptions: { id: PublicRole; label: string; icon: typeof Store; tagline:
 ];
 
 export default function LoginPage() {
+  return (
+    <LocationGate>
+      {(location) => <LoginForm location={location} />}
+    </LocationGate>
+  );
+}
+
+function LoginForm({ location }: { location: LocationData }) {
   const router = useRouter();
   const [role, setRole] = useState<PublicRole>("retailer");
   const [identifier, setIdentifier] = useState("");
@@ -55,7 +64,11 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: identifier.trim(), password }),
+        body: JSON.stringify({
+          identifier: identifier.trim(),
+          password,
+          location: { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy },
+        }),
       });
 
       const data = await res.json();

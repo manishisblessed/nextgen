@@ -27,31 +27,31 @@ export function DataTable<T>({
   empty?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-ink-100 bg-white">
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-sm">
       {(title || action) && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-100 px-5 py-4">
-          <div>
+          <div className="min-w-0">
             {title && (
               <h3 className="font-display text-base font-semibold text-ink-900">
                 {title}
               </h3>
             )}
             {description && (
-              <p className="text-xs text-ink-500">{description}</p>
+              <p className="truncate text-xs text-ink-500">{description}</p>
             )}
           </div>
           {action && <div className="flex items-center gap-2">{action}</div>}
         </div>
       )}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50/60 text-left text-xs uppercase tracking-wider text-ink-500">
+      <div className="w-full overflow-x-auto">
+        <table className="w-full min-w-max text-sm">
+          <thead className="sticky top-0 z-[1] bg-ink-50/80 text-left text-[11px] uppercase tracking-wider text-ink-500 backdrop-blur">
             <tr>
               {columns.map((c) => (
                 <th
                   key={String(c.key)}
                   className={cn(
-                    "px-5 py-3 font-semibold",
+                    "whitespace-nowrap px-5 py-3 font-semibold",
                     c.align === "right" && "text-right",
                     c.align === "center" && "text-center"
                   )}
@@ -75,13 +75,13 @@ export function DataTable<T>({
               data.map((row, i) => (
                 <tr
                   key={(row as { id?: string | number }).id ?? i}
-                  className="hover:bg-ink-50/40"
+                  className="transition-colors hover:bg-brand-50/40"
                 >
                   {columns.map((c) => (
                     <td
                       key={String(c.key)}
                       className={cn(
-                        "px-5 py-3",
+                        "whitespace-nowrap px-5 py-3",
                         c.align === "right" && "text-right",
                         c.align === "center" && "text-center",
                         c.className

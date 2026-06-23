@@ -5,9 +5,16 @@ import { prisma } from "@/lib/db";
 import { createMobileToken } from "@/lib/auth-server";
 import { createTempToken } from "@/lib/two-factor";
 
+const LocationSchema = z.object({
+  lat: z.number(),
+  lng: z.number(),
+  accuracy: z.number().optional(),
+});
+
 const Body = z.object({
   identifier: z.string().min(3),
   password: z.string().min(1),
+  location: LocationSchema,
 });
 
 /**
@@ -21,10 +28,13 @@ const Body = z.object({
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Location verification is required. Please allow location access." },
+      { status: 400 }
+    );
   }
 
-  const { identifier, password } = parsed.data;
+  const { identifier, password, location } = parsed.data;
   const normalized = identifier.trim().toLowerCase();
 
   const user = await prisma.user.findFirst({
@@ -46,6 +56,32 @@ export async function POST(req: Request) {
   if (user.status === "CLOSED") {
     return NextResponse.json({ error: "Account has been closed" }, { status: 403 });
   }
+
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const userAgent = req.headers.get("user-agent") || "unknown";
+
+  // Log login attempt with location
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      action: "user.login",
+      entity: "User",
+      entityId: user.id,
+      meta: { lat: location.lat, lng: location.lng, accuracy: location.accuracy },
+      ip,
+      userAgent,
+    },
+  });
+
+  // Update user's last known login location
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      lastLoginLat: location.lat,
+      lastLoginLng: location.lng,
+      lastLoginAt: new Date(),
+    },
+  });
 
   // 2FA is mandatory for all users
   if (user.twoFactorEnabled && user.twoFactorSecret) {

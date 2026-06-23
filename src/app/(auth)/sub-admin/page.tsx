@@ -15,8 +15,17 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
+import { LocationGate, type LocationData } from "@/components/auth/LocationGate";
 
 export default function SubAdminLoginPage() {
+  return (
+    <LocationGate>
+      {(location) => <SubAdminLoginForm location={location} />}
+    </LocationGate>
+  );
+}
+
+function SubAdminLoginForm({ location }: { location: LocationData }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +46,11 @@ export default function SubAdminLoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: email.trim(), password }),
+        body: JSON.stringify({
+          identifier: email.trim(),
+          password,
+          location: { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy },
+        }),
       });
 
       const data = await res.json();

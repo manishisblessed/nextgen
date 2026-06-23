@@ -15,8 +15,17 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
+import { LocationGate, type LocationData } from "@/components/auth/LocationGate";
 
 export default function MasterAdminLoginPage() {
+  return (
+    <LocationGate>
+      {(location) => <MasterAdminLoginForm location={location} />}
+    </LocationGate>
+  );
+}
+
+function MasterAdminLoginForm({ location }: { location: LocationData }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -38,7 +47,11 @@ export default function MasterAdminLoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: email.trim(), password }),
+        body: JSON.stringify({
+          identifier: email.trim(),
+          password,
+          location: { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy },
+        }),
       });
 
       const data = await res.json();

@@ -42,6 +42,12 @@ const schema = z.object({
   PARTNER_SMS_ENABLED: z.string().default("false"),
   PARTNER_EMAIL_ENABLED: z.string().default("false"),
   PARTNER_VERIFICATION_ENABLED: z.string().default("false"),
+  PARTNER_POS_ENABLED: z.string().default("false"),
+
+  // Same Day Solution — POS Partner API
+  SAMEDAY_POS_BASE_URL: z.string().url().default("https://api.samedaysolution.in"),
+  SAMEDAY_POS_API_KEY: z.string().min(1).optional(),
+  SAMEDAY_POS_API_SECRET: z.string().min(1).optional(),
 
   // eKYC Hub
   EKYCHUB_USERNAME: z.string().min(1).optional(),
@@ -88,7 +94,8 @@ export const flags = {
   pan: env.PARTNER_PAN_ENABLED === "true",
   sms: env.PARTNER_SMS_ENABLED === "true",
   email: env.PARTNER_EMAIL_ENABLED === "true",
-  verification: env.PARTNER_VERIFICATION_ENABLED === "true"
+  verification: env.PARTNER_VERIFICATION_ENABLED === "true",
+  pos: env.PARTNER_POS_ENABLED === "true"
 } as const;
 
 export const isProd = env.NODE_ENV === "production";

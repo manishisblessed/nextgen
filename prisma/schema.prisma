@@ -63,6 +63,11 @@ model User {
   // financial summary (denormalized for fast reads; keep authoritative ledger in WalletTxn)
   walletBalance   Decimal    @default(0) @db.Decimal(14, 2)
 
+  // login location tracking
+  lastLoginLat    Float?
+  lastLoginLng    Float?
+  lastLoginAt     DateTime?
+
   kyc             Kyc?
   documents       Document[]
   wallet          WalletTxn[]

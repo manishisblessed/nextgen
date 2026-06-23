@@ -30,9 +30,13 @@ export default function DashboardLayout({
   return (
     <div className="flex min-h-screen bg-ink-50/40">
       <Sidebar open={open} onClose={() => setOpen(false)} />
-      <div className="flex flex-1 flex-col lg:pl-0">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenSidebar={() => setOpen(true)} />
-        <main className="flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-10">
+          <div className="mx-auto w-full max-w-[1400px] min-w-0">
+            {children}
+          </div>
+        </main>
       </div>
 
       {needs2FASetup && <TwoFactorSetupModal />}

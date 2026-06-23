@@ -29,6 +29,7 @@ import {
   UserCog,
   CreditCard,
   Monitor,
+  Activity,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -60,6 +61,7 @@ const services: NavItem[] = [
 ];
 
 const account: NavItem[] = [
+  { href: "/dashboard/performance", label: "Performance", icon: Activity },
   { href: "/dashboard/transactions", label: "Transactions", icon: History },
   { href: "/dashboard/profile", label: "Profile", icon: User },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
