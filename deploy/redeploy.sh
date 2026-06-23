@@ -7,21 +7,25 @@ echo "=========================================="
 
 cd /home/ubuntu/nextgenpay
 
-echo "[1/5] Pulling latest code..."
+echo "[1/6] Pulling latest code..."
 git pull origin main
 
-echo "[2/5] Installing dependencies..."
+echo "[2/6] Validating .env (drift check)..."
+bash deploy/check-env.sh .env
+
+echo "[3/6] Installing dependencies..."
 npm ci --production=false
 
-echo "[3/5] Generating Prisma client..."
+echo "[4/6] Generating Prisma client..."
 npx prisma generate
 
-echo "[4/5] Applying database migrations..."
+echo "[5/6] Applying database migrations..."
 npx prisma migrate deploy
 
-echo "[5/5] Building and restarting..."
+echo "[6/6] Building and restarting..."
 npm run build
-pm2 restart ecosystem.config.js
+# --update-env ensures all cluster workers pick up new env vars
+pm2 restart ecosystem.config.js --update-env
 pm2 save
 
 echo ""
