@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { MapPin, MapPinOff, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 
@@ -22,19 +22,71 @@ type GateState =
   | { status: "denied"; reason: string }
   | { status: "unavailable" };
 
+const BROWSER_TIMEOUT_MS = 10_000;
+const SAFETY_TIMEOUT_MS = 12_000;
+
+async function fetchIpLocation(): Promise<LocationData | null> {
+  try {
+    const res = await fetch("/api/geo/ip", { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (typeof data.latitude === "number" && typeof data.longitude === "number") {
+      return {
+        latitude: data.latitude,
+        longitude: data.longitude,
+        accuracy: data.accuracy ?? 100_000,
+        timestamp: Date.now(),
+      };
+    }
+  } catch { /* swallow */ }
+  return null;
+}
+
 export function LocationGate({ children }: LocationGateProps) {
   const [state, setState] = useState<GateState>({ status: "idle" });
+  const resolved = useRef(false);
 
   const requestLocation = useCallback(() => {
+    resolved.current = false;
+
     if (!navigator.geolocation) {
-      setState({ status: "unavailable" });
+      // No browser support — go straight to IP fallback
+      setState({ status: "requesting" });
+      fetchIpLocation().then((loc) => {
+        if (loc) {
+          resolved.current = true;
+          setState({ status: "granted", location: loc });
+        } else {
+          setState({ status: "unavailable" });
+        }
+      });
       return;
     }
 
     setState({ status: "requesting" });
 
+    // Safety-net timer: if the browser API never calls back, use IP fallback
+    const safetyTimer = setTimeout(() => {
+      if (resolved.current) return;
+      fetchIpLocation().then((loc) => {
+        if (resolved.current) return;
+        resolved.current = true;
+        if (loc) {
+          setState({ status: "granted", location: loc });
+        } else {
+          setState({
+            status: "denied",
+            reason: "Location request timed out. Please try again.",
+          });
+        }
+      });
+    }, SAFETY_TIMEOUT_MS);
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        if (resolved.current) return;
+        resolved.current = true;
+        clearTimeout(safetyTimer);
         setState({
           status: "granted",
           location: {
@@ -46,15 +98,31 @@ export function LocationGate({ children }: LocationGateProps) {
         });
       },
       (error) => {
-        let reason = "Location access was denied.";
-        if (error.code === error.POSITION_UNAVAILABLE) {
-          reason = "Location information is unavailable on this device.";
-        } else if (error.code === error.TIMEOUT) {
-          reason = "Location request timed out. Please try again.";
-        }
-        setState({ status: "denied", reason });
+        if (resolved.current) return;
+        clearTimeout(safetyTimer);
+
+        // On denial/timeout, try IP fallback before giving up
+        fetchIpLocation().then((loc) => {
+          if (resolved.current) return;
+          resolved.current = true;
+          if (loc) {
+            setState({ status: "granted", location: loc });
+          } else {
+            let reason = "Location access was denied.";
+            if (error.code === error.POSITION_UNAVAILABLE) {
+              reason = "Location information is unavailable on this device.";
+            } else if (error.code === error.TIMEOUT) {
+              reason = "Location request timed out. Please try again.";
+            }
+            setState({ status: "denied", reason });
+          }
+        });
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+      {
+        enableHighAccuracy: false,
+        timeout: BROWSER_TIMEOUT_MS,
+        maximumAge: 120_000,
+      },
     );
   }, []);
 
@@ -93,6 +161,10 @@ export function LocationGate({ children }: LocationGateProps) {
             Your browser does not support geolocation. Please use a modern
             browser with location capabilities to sign in.
           </p>
+          <Button size="md" className="mt-5" onClick={requestLocation}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Try again
+          </Button>
         </>
       ) : (
         <>
