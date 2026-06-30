@@ -52,8 +52,7 @@ export const ONBOARD_CAPABLE_ROLES: DbRole[] = [
 /**
  * Can `creatorRole` onboard a user with `targetRole`?
  *
- * Strict single-level-down hierarchy:
- * - MASTER_ADMIN / ADMIN can ONLY create SUPER_DISTRIBUTOR.
+ * - MASTER_ADMIN / ADMIN can create ANY network role.
  * - SUPER_DISTRIBUTOR can ONLY create MASTER_DISTRIBUTOR.
  * - MASTER_DISTRIBUTOR can ONLY create DISTRIBUTOR.
  * - DISTRIBUTOR can ONLY create RETAILER.
@@ -63,12 +62,10 @@ export function canOnboard(creatorRole: string, targetRole: string): boolean {
   const tRank = ROLE_RANK[targetRole as DbRole];
   if (cRank === undefined || tRank === undefined) return false;
 
-  // Staff (ADMIN / MASTER_ADMIN) can only create SUPER_DISTRIBUTOR
   if (STAFF_ROLES.includes(creatorRole as DbRole)) {
-    return targetRole === "SUPER_DISTRIBUTOR";
+    return NETWORK_TIERS.includes(targetRole as DbRole);
   }
 
-  // Network roles can only create their immediate subordinate (one level down)
   const cIdx = NETWORK_TIERS.indexOf(creatorRole as DbRole);
   const tIdx = NETWORK_TIERS.indexOf(targetRole as DbRole);
   return cIdx > 0 && tIdx >= 0 && cIdx === tIdx + 1;

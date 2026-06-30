@@ -125,7 +125,7 @@ export default function AdminInvitesPage() {
       <PageHeader
         eyebrow="Admin"
         title="Onboarding Invites"
-        description="Create and manage onboarding invites for Super Distributors. SDs, MDs, and Distributors onboard their own downline."
+        description="Create and manage onboarding invites for any network role."
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -357,10 +357,10 @@ function CreateInviteForm({
             onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
           >
             <option value="SUPER_DISTRIBUTOR">Super Distributor</option>
+            <option value="MASTER_DISTRIBUTOR">Master Distributor</option>
+            <option value="DISTRIBUTOR">Distributor</option>
+            <option value="RETAILER">Retailer</option>
           </Select>
-          <p className="mt-1 text-xs text-ink-500">
-            Admins can only onboard Super Distributors. Other roles are onboarded by their upline.
-          </p>
         </div>
         <div className="flex items-center gap-3 md:col-span-2">
           <Button type="submit" disabled={submitting}>
