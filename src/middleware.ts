@@ -5,28 +5,26 @@ import { MAX_BODY_BYTES } from "@/lib/env";
 const isDev = process.env.NODE_ENV !== "production";
 
 /**
- * Nonce-based Content-Security-Policy.
+ * Content-Security-Policy applied to every document response.
  *
- * A fresh nonce is generated per request and:
- *   1. injected into the *request* headers as `x-nonce` so Next.js applies it
- *      to the framework's own inline bootstrap scripts (and our components can
- *      read it from `headers()`), and
- *   2. sent back in the response CSP header.
+ * Uses 'unsafe-inline' for script-src because Next.js 14.x does not reliably
+ * propagate the x-nonce to every inline <script> it emits (bootstrap, data,
+ * font-loader, etc.), causing the browser to block hydration entirely.
  *
- * This removes script-src 'unsafe-inline' (the old policy). Inline styles still
- * require 'unsafe-inline' because Tailwind/styled-jsx/next-font emit inline
- * <style> tags — acceptable, since CSS injection is far lower risk than JS.
+ * TODO: migrate to nonce-based CSP once upgraded to Next.js 15+ which has
+ * first-class nonce support via the `experimental.serverActions.nonce` flag.
+ *
  * Cloudflare Turnstile (CAPTCHA) is explicitly allowlisted for script/frame/
  * connect so it works when SECURITY_CAPTCHA_ENABLED is on.
  */
-function buildCsp(nonce: string): string {
+function buildCsp(): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' https://challenges.cloudflare.com${isDev ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https://res.cloudinary.com https://api.qrserver.com https://images.unsplash.com https://api.dicebear.com",
     "font-src 'self' data:",
-    "connect-src 'self' https://challenges.cloudflare.com",
+    "connect-src 'self' https://challenges.cloudflare.com https://ip-api.com",
     "frame-src 'self' https://challenges.cloudflare.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
@@ -56,13 +54,10 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // ── 2. Per-request CSP nonce
-  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = buildCsp(nonce);
+  // ── 2. CSP header
+  const csp = buildCsp();
 
   const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set("content-security-policy", csp);
 
   // ── 3. Auth gate for dashboard routes (replaces withAuth wrapper so we keep
   //       full control of the response headers).
