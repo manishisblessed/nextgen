@@ -1,0 +1,107 @@
+#!/bin/bash
+set -euo pipefail
+
+# ── NextGenPay — Production Deploy ────────────────────────────────────
+# Usage:  ./deploy.sh
+# Stores production .env at ~/env-nextgenpay (outside the repo) so
+# git pull never clobbers secrets. Every deploy copies it in fresh.
+# ──────────────────────────────────────────────────────────────────────
+
+APP_DIR="/home/ubuntu/nextgenpay"
+ENV_SOURCE="/home/ubuntu/env-nextgenpay"
+ECOSYSTEM="/home/ubuntu/ecosystem.config.js"
+LOG_DIR="/home/ubuntu/logs"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+step=0
+total=7
+
+log() { step=$((step+1)); echo -e "\n${CYAN}[${step}/${total}]${NC} ${GREEN}$1${NC}"; }
+warn() { echo -e "${YELLOW}⚠  $1${NC}"; }
+fail() { echo -e "${RED}✖  $1${NC}"; exit 1; }
+
+START=$(date +%s)
+
+echo ""
+echo -e "${CYAN}══════════════════════════════════════════${NC}"
+echo -e "${CYAN}  NextGenPay — Production Deploy${NC}"
+echo -e "${CYAN}  $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+echo -e "${CYAN}══════════════════════════════════════════${NC}"
+
+# ── Pre-flight checks ────────────────────────────────────────────────
+
+if [ ! -d "$APP_DIR/.git" ]; then
+  fail "No git repo found at $APP_DIR"
+fi
+
+if [ ! -f "$ENV_SOURCE" ]; then
+  fail "Production env file not found at $ENV_SOURCE\n   Create it once:  cp $APP_DIR/.env $ENV_SOURCE\n   Then edit $ENV_SOURCE with production values."
+fi
+
+mkdir -p "$LOG_DIR"
+
+# ── Step 1: Pull latest code ─────────────────────────────────────────
+
+log "Pulling latest code from origin/main..."
+cd "$APP_DIR"
+git fetch origin
+LOCAL=$(git rev-parse HEAD)
+REMOTE=$(git rev-parse origin/main)
+
+if [ "$LOCAL" = "$REMOTE" ]; then
+  warn "Already up-to-date ($(git rev-parse --short HEAD)). Continuing anyway..."
+else
+  git reset --hard origin/main
+  echo "  Updated: $(git rev-parse --short "$LOCAL") → $(git rev-parse --short HEAD)"
+fi
+
+# ── Step 2: Copy production .env ──────────────────────────────────────
+
+log "Copying production .env..."
+cp "$ENV_SOURCE" "$APP_DIR/.env"
+echo "  Copied from $ENV_SOURCE"
+
+# ── Step 3: Install dependencies ─────────────────────────────────────
+
+log "Installing dependencies (npm ci)..."
+npm ci --production=false 2>&1 | tail -3
+
+# ── Step 4: Generate Prisma client ────────────────────────────────────
+
+log "Generating Prisma client..."
+npx prisma generate
+
+# ── Step 5: Sync database schema ─────────────────────────────────────
+
+log "Applying database migrations..."
+npx prisma migrate deploy
+
+# ── Step 6: Build ─────────────────────────────────────────────────────
+
+log "Building Next.js app..."
+npm run build 2>&1 | tail -5
+
+# ── Step 7: Restart PM2 ──────────────────────────────────────────────
+
+log "Restarting PM2 processes..."
+pm2 restart "$ECOSYSTEM" --update-env
+pm2 save
+
+echo ""
+pm2 list
+
+END=$(date +%s)
+ELAPSED=$((END - START))
+
+echo ""
+echo -e "${GREEN}══════════════════════════════════════════${NC}"
+echo -e "${GREEN}  Deploy complete in ${ELAPSED}s${NC}"
+echo -e "${GREEN}  Commit: $(git rev-parse --short HEAD)${NC}"
+echo -e "${GREEN}  Run 'pm2 logs' to verify startup${NC}"
+echo -e "${GREEN}══════════════════════════════════════════${NC}"
+echo ""
