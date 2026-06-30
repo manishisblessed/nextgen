@@ -5,6 +5,14 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { headers } from "next/headers";
 import { prisma } from "./db";
+import {
+  assertNotLocked,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+  AccountLockedError,
+  normalizeIdentifier,
+} from "./security/lockout";
+import { bumpTokenVersion } from "./security/session";
 
 export type SessionUser = {
   id: string;
@@ -15,6 +23,7 @@ export type SessionUser = {
   status: string;
   walletBalance: number;
   allowedTabs: string[];
+  disabledServices: string[];
   twoFactorEnabled: boolean;
 };
 
@@ -26,11 +35,17 @@ declare module "next-auth" {
 }
 
 declare module "next-auth/jwt" {
-  interface JWT extends SessionUser {}
+  interface JWT extends SessionUser {
+    /** Version this token was minted with; checked against User.tokenVersion. */
+    tokenVersion: number;
+    disabledServices: string[];
+  }
 }
 
 export const authOptions: NextAuthOptions = {
-  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
+  // Short JWT lifetime for a finance portal; combined with the per-request
+  // tokenVersion check this bounds how long any leaked/replayed cookie is usable.
+  session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
   pages: {
     signIn: "/login",
     error: "/login",
@@ -76,6 +91,7 @@ export const authOptions: NextAuthOptions = {
           status: user.status,
           walletBalance: Number(user.walletBalance),
           allowedTabs: (user as any).allowedTabs ?? [],
+          disabledServices: (user as any).disabledServices ?? [],
           twoFactorEnabled: user.twoFactorEnabled,
         };
       },
@@ -90,7 +106,16 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.identifier || !credentials?.password) return null;
 
-        const identifier = credentials.identifier.trim().toLowerCase();
+        const identifier = normalizeIdentifier(credentials.identifier);
+
+        // Brute-force lockout (shared with /api/auth/login). A locked
+        // identifier is refused here too; surface a clear error to NextAuth.
+        try {
+          await assertNotLocked(identifier);
+        } catch (e) {
+          if (e instanceof AccountLockedError) throw new Error("ACCOUNT_LOCKED");
+          throw e;
+        }
 
         const user = await prisma.user.findFirst({
           where: {
@@ -102,16 +127,19 @@ export const authOptions: NextAuthOptions = {
           },
         });
 
-        if (!user) return null;
-
-        const valid = await bcrypt.compare(credentials.password, user.passwordHash);
-        if (!valid) return null;
+        const valid = user ? await bcrypt.compare(credentials.password, user.passwordHash) : false;
+        if (!user || !valid) {
+          await recordFailedLogin(identifier);
+          return null;
+        }
 
         if (user.status === "CLOSED") return null;
 
         // If 2FA is enabled, block NextAuth session creation.
         // The frontend must use /api/auth/login → /api/auth/2fa/verify flow instead.
         if (user.twoFactorEnabled) return null;
+
+        await recordSuccessfulLogin(identifier);
 
         return {
           id: user.id,
@@ -122,13 +150,16 @@ export const authOptions: NextAuthOptions = {
           status: user.status,
           walletBalance: Number(user.walletBalance),
           allowedTabs: (user as any).allowedTabs ?? [],
+          disabledServices: (user as any).disabledServices ?? [],
           twoFactorEnabled: user.twoFactorEnabled,
         };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user }) {
+      // ── Fresh sign-in: seed the token (incl. the current tokenVersion) and
+      //    trust it for this pass — no validation needed, it was just minted.
       if (user) {
         token.id = user.id;
         token.name = user.name;
@@ -138,30 +169,55 @@ export const authOptions: NextAuthOptions = {
         token.status = user.status;
         token.walletBalance = user.walletBalance;
         token.allowedTabs = (user as any).allowedTabs ?? [];
+        token.disabledServices = (user as any).disabledServices ?? [];
         token.twoFactorEnabled = (user as any).twoFactorEnabled ?? false;
+        const seed = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { tokenVersion: true },
+        });
+        token.tokenVersion = seed?.tokenVersion ?? 0;
+        return token;
       }
 
-      if (trigger === "update" && token.id) {
-        const freshUser = await prisma.user.findUnique({
+      // ── Every subsequent request: re-validate against the DB so privilege
+      //    changes and forced sign-outs take effect immediately, and reject any
+      //    token whose version != the user's current tokenVersion (replay /
+      //    stolen-cookie defense).
+      if (token.id) {
+        const fresh = await prisma.user.findUnique({
           where: { id: token.id as string },
           select: {
+            tokenVersion: true,
             twoFactorEnabled: true,
             walletBalance: true,
             status: true,
             role: true,
+            disabledServices: true,
           },
         });
-        if (freshUser) {
-          token.twoFactorEnabled = freshUser.twoFactorEnabled;
-          token.walletBalance = Number(freshUser.walletBalance);
-          token.status = freshUser.status;
-          token.role = freshUser.role;
+        if (
+          !fresh ||
+          fresh.status === "CLOSED" ||
+          (token.tokenVersion ?? -1) !== fresh.tokenVersion
+        ) {
+          return {} as typeof token;
         }
+        token.tokenVersion = fresh.tokenVersion;
+        token.twoFactorEnabled = fresh.twoFactorEnabled;
+        token.walletBalance = Number(fresh.walletBalance);
+        token.status = fresh.status;
+        token.role = fresh.role;
+        token.disabledServices = fresh.disabledServices;
       }
 
       return token;
     },
     async session({ session, token }) {
+      // A token invalidated in the jwt callback has no id — fail closed by
+      // returning a session without a user so requireAuth() rejects it.
+      if (!token?.id) {
+        return { ...session, user: undefined as unknown as SessionUser };
+      }
       session.user = {
         id: token.id as string,
         name: token.name as string,
@@ -171,9 +227,19 @@ export const authOptions: NextAuthOptions = {
         status: token.status as string,
         walletBalance: token.walletBalance as number,
         allowedTabs: (token.allowedTabs as string[]) ?? [],
+        disabledServices: (token.disabledServices as string[]) ?? [],
         twoFactorEnabled: (token.twoFactorEnabled as boolean) ?? false,
       };
       return session;
+    },
+  },
+  events: {
+    // Logout invalidates every outstanding token for this user (server-side),
+    // so pressing Back / replaying a cached cookie cannot resurrect the session.
+    async signOut({ token }) {
+      if (token?.id) {
+        await bumpTokenVersion(token.id as string, { swallow: true });
+      }
     },
   },
 };
@@ -206,6 +272,7 @@ export function createMobileToken(user: SessionUser, expiresInSec = 30 * 24 * 60
     role: user.role,
     status: user.status,
     allowedTabs: user.allowedTabs,
+    disabledServices: user.disabledServices,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + expiresInSec,
   })));
@@ -239,6 +306,7 @@ export function verifyMobileToken(token: string): SessionUser | null {
       status: data.status,
       walletBalance: 0,
       allowedTabs: data.allowedTabs ?? [],
+      disabledServices: data.disabledServices ?? [],
       twoFactorEnabled: data.twoFactorEnabled ?? false,
     };
   } catch {

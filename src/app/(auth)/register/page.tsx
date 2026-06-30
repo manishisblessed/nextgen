@@ -7,6 +7,7 @@ import { signIn } from "next-auth/react";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
+import { Turnstile, captchaConfigured } from "@/components/security/Turnstile";
 
 const roleMap = {
   retailer: "RETAILER",
@@ -18,6 +19,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -47,6 +49,7 @@ export default function RegisterPage() {
           phone: form.phone,
           password: form.password,
           role: roleMap[form.role],
+          captchaToken,
         }),
       });
 
@@ -245,7 +248,13 @@ export default function RegisterPage() {
             </label>
           </div>
           <div className="sm:col-span-2">
-            <Button type="submit" size="lg" className="w-full" disabled={loading}>
+            <Turnstile onToken={setCaptchaToken} className="mb-3 flex justify-center" />
+            <Button
+              type="submit"
+              size="lg"
+              className="w-full"
+              disabled={loading || (captchaConfigured && !captchaToken)}
+            >
               {loading ? "Creating account..." : "Create my agent account"}
             </Button>
           </div>

@@ -1,37 +1,32 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, CheckCircle2, ShieldCheck, Loader2 } from "lucide-react";
+import { Send, CheckCircle2, Loader2, Link2, Copy } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { Input, Label, Select } from "@/components/ui/Input";
+import { Input, Label } from "@/components/ui/Input";
 import { type Role } from "@/lib/auth";
 import { useAuth } from "@/lib/useAuth";
 
-const STEPS = ["Basic info", "KYC", "Commission slab", "Review"] as const;
-
-export default function OnboardPage() {
+export default function OnboardInvitePage() {
   const { session } = useAuth();
   const role: Role = session?.role ?? "retailer";
-  const [step, setStep] = useState(0);
   const [done, setDone] = useState(false);
-  const [refId, setRefId] = useState("");
+  const [onboardingLink, setOnboardingLink] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
 
-  // Form state
   const [form, setForm] = useState({
     name: "",
-    shopName: "",
     phone: "",
     email: "",
-    pincode: "",
-    state: "Uttar Pradesh",
-    city: "",
-    panNumber: "",
   });
 
-  const childLabel = role === "master-distributor" ? "distributor" : "retailer";
+  const childLabel =
+    role === "super-distributor" ? "Master Distributor" :
+    role === "master-distributor" ? "Distributor" :
+    "Retailer";
 
   function updateForm(key: string, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -39,42 +34,39 @@ export default function OnboardPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (step < STEPS.length - 1) {
-      setStep(step + 1);
-      return;
-    }
-
     setSubmitting(true);
     setError("");
+
     try {
-      const res = await fetch("/api/network/onboard", {
+      const res = await fetch("/api/admin/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: form.name,
+          name: form.name || undefined,
           email: form.email,
           phone: form.phone.replace(/\s/g, ""),
-          shopName: form.shopName,
-          pincode: form.pincode,
-          state: form.state,
-          city: form.city,
-          panNumber: form.panNumber || undefined,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? "Onboarding failed");
+        setError(data.error ?? "Failed to send invite");
         return;
       }
 
-      setRefId(data.user.id);
+      setOnboardingLink(data.invite.onboardingLink);
       setDone(true);
     } catch {
       setError("Network error — please try again");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function copyLink() {
+    await navigator.clipboard.writeText(onboardingLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   if (done) {
@@ -84,17 +76,37 @@ export default function OnboardPage() {
           <CheckCircle2 className="h-8 w-8" />
         </div>
         <h2 className="mt-5 font-display text-2xl font-bold text-ink-900">
-          Onboarding complete
+          Invite Sent!
         </h2>
         <p className="mt-2 text-sm text-ink-600">
-          A welcome email with login credentials has been sent to the new {childLabel}. They&apos;ll need to complete KYC verification before transacting.
+          An onboarding link has been sent to <strong>{form.email}</strong> and <strong>{form.phone}</strong>.
+          They&apos;ll receive an email and SMS with the registration link.
         </p>
-        <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-mono shadow-sm">
-          ID: <strong>{refId.slice(0, 12)}</strong>
+
+        <div className="mt-5 rounded-xl border border-ink-200 bg-white p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-500">
+            Onboarding Link
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 truncate rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-700">
+              {onboardingLink}
+            </code>
+            <button
+              onClick={copyLink}
+              className="rounded-lg border border-ink-200 p-2 text-ink-600 hover:bg-ink-50"
+              title="Copy link"
+            >
+              {copied ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-ink-500">
+            You can also share this link manually. It expires in 7 days.
+          </p>
         </div>
+
         <div className="mt-6">
-          <Button onClick={() => { setDone(false); setStep(0); setForm({ name: "", shopName: "", phone: "", email: "", pincode: "", state: "Uttar Pradesh", city: "", panNumber: "" }); }}>
-            Onboard another <ArrowRight className="h-4 w-4" />
+          <Button onClick={() => { setDone(false); setForm({ name: "", phone: "", email: "" }); }}>
+            <Send className="h-4 w-4" /> Send Another Invite
           </Button>
         </div>
       </div>
@@ -104,28 +116,10 @@ export default function OnboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Onboard"
-        title={`Add a new ${childLabel}`}
-        description="Four-step onboarding · auto-KYC · commission slab in place before first transaction."
+        eyebrow="Invite"
+        title={`Invite a ${childLabel}`}
+        description={`Send an onboarding link via email and SMS. The ${childLabel.toLowerCase()} will complete their own registration and KYC.`}
       />
-
-      <ol className="flex flex-wrap items-center gap-3">
-        {STEPS.map((s, i) => (
-          <li key={s} className="flex items-center gap-2">
-            <span
-              className={`grid h-7 w-7 place-items-center rounded-full text-xs font-bold ${
-                i <= step ? "bg-brand-600 text-white" : "bg-ink-100 text-ink-500"
-              }`}
-            >
-              {i + 1}
-            </span>
-            <span className={i <= step ? "text-sm font-semibold text-ink-900" : "text-sm text-ink-500"}>
-              {s}
-            </span>
-            {i < STEPS.length - 1 && <span className="mx-2 h-px w-8 bg-ink-200" />}
-          </li>
-        ))}
-      </ol>
 
       {error && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -134,111 +128,59 @@ export default function OnboardPage() {
       )}
 
       <form
-        className="rounded-2xl border border-ink-100 bg-white p-6"
+        className="mx-auto max-w-lg rounded-2xl border border-ink-100 bg-white p-6 shadow-soft"
         onSubmit={handleSubmit}
       >
-        {step === 0 && (
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field label="Owner full name"><Input required value={form.name} onChange={(e) => updateForm("name", e.target.value)} placeholder="As per PAN" /></Field>
-            <Field label="Shop / firm name"><Input required value={form.shopName} onChange={(e) => updateForm("shopName", e.target.value)} placeholder="Sharma Mobile World" /></Field>
-            <Field label="Mobile"><Input required value={form.phone} onChange={(e) => updateForm("phone", e.target.value)} placeholder="+91 98765 43210" /></Field>
-            <Field label="Email"><Input required type="email" value={form.email} onChange={(e) => updateForm("email", e.target.value)} placeholder="owner@example.com" /></Field>
-            <Field label="City"><Input value={form.city} onChange={(e) => updateForm("city", e.target.value)} placeholder="Lucknow" /></Field>
-            <Field label="Pin code"><Input required maxLength={6} value={form.pincode} onChange={(e) => updateForm("pincode", e.target.value)} /></Field>
-            <Field label="State">
-              <Select value={form.state} onChange={(e) => updateForm("state", e.target.value)}>
-                <option>Uttar Pradesh</option><option>Maharashtra</option><option>Karnataka</option>
-                <option>Delhi</option><option>West Bengal</option><option>Tamil Nadu</option>
-                <option>Gujarat</option><option>Rajasthan</option><option>Bihar</option>
-              </Select>
-            </Field>
-          </div>
-        )}
-        {step === 1 && (
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field label="PAN number"><Input maxLength={10} className="uppercase" placeholder="ABCDE1234F" value={form.panNumber} onChange={(e) => updateForm("panNumber", e.target.value)} /></Field>
-            <Field label="Aadhaar number"><Input maxLength={14} placeholder="XXXX XXXX XXXX" /></Field>
-            <Field label="GSTIN (optional)"><Input maxLength={15} className="uppercase" /></Field>
-            <Field label="Bank account">
-              <div className="grid grid-cols-3 gap-2">
-                <Input placeholder="Account number" className="col-span-2" />
-                <Input placeholder="IFSC" className="uppercase" />
-              </div>
-            </Field>
-            <div className="md:col-span-2 rounded-xl border border-dashed border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
-              <ShieldCheck className="mr-2 inline h-4 w-4" />
-              KYC will be verified after the {childLabel} uploads documents from their profile page.
-            </div>
-          </div>
-        )}
-        {step === 2 && (
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field label="Slab template">
-              <Select>
-                <option>Standard ({role === "master-distributor" ? "JNPD-default" : "JNPR-default"})</option>
-                <option>Growth (1.2x AePS payout)</option>
-                <option>Power (custom)</option>
-              </Select>
-            </Field>
-            <Field label="AePS payout (%)"><Input defaultValue="0.40" /></Field>
-            <Field label="DMT payout (₹/txn)"><Input defaultValue="6" /></Field>
-            <Field label="Recharge payout (%)"><Input defaultValue="3.00" /></Field>
-            <Field label="Bills payout (%)"><Input defaultValue="0.80" /></Field>
-            <Field label="Travel payout (%)"><Input defaultValue="5.00" /></Field>
-          </div>
-        )}
-        {step === 3 && (
-          <div className="grid gap-5 md:grid-cols-2">
-            <Summary heading="Profile" rows={[["Owner", form.name || "—"], ["Shop", form.shopName || "—"], ["State", form.state]]} />
-            <Summary heading="Contact" rows={[["Phone", form.phone || "—"], ["Email", form.email || "—"], ["City", form.city || "—"]]} />
-            <Summary heading="KYC" rows={[["PAN", form.panNumber ? `${form.panNumber.slice(0, 5)}••••${form.panNumber.slice(-1)}` : "—"], ["Status", "Pending KYC"]]} />
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              <strong>Ready to onboard.</strong> A welcome email with temporary login credentials will be sent.
-            </div>
-          </div>
-        )}
+        <div className="mb-6 flex items-center gap-3 rounded-xl bg-brand-50 px-4 py-3">
+          <Link2 className="h-5 w-5 text-brand-600" />
+          <p className="text-sm text-brand-900">
+            An onboarding link will be sent to the invitee. They&apos;ll register themselves — you won&apos;t need to enter their personal details.
+          </p>
+        </div>
 
-        <div className="mt-6 flex items-center justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setStep(Math.max(0, step - 1))}
-            disabled={step === 0}
-          >
-            Back
-          </Button>
-          <Button type="submit" disabled={submitting}>
-            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {step === STEPS.length - 1 ? "Submit onboarding" : "Continue"}
-            {!submitting && <ArrowRight className="h-4 w-4" />}
+        <div className="grid gap-5">
+          <div>
+            <Label>Name (optional)</Label>
+            <Input
+              value={form.name}
+              onChange={(e) => updateForm("name", e.target.value)}
+              placeholder="Full name of the invitee"
+            />
+          </div>
+          <div>
+            <Label>Mobile Number *</Label>
+            <Input
+              required
+              value={form.phone}
+              onChange={(e) => updateForm("phone", e.target.value)}
+              placeholder="+91 98765 43210"
+            />
+          </div>
+          <div>
+            <Label>Email *</Label>
+            <Input
+              required
+              type="email"
+              value={form.email}
+              onChange={(e) => updateForm("email", e.target.value)}
+              placeholder="user@example.com"
+            />
+          </div>
+
+          <div className="rounded-xl border border-ink-100 bg-ink-50/50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Inviting as</p>
+            <p className="mt-1 font-semibold text-ink-900">{childLabel}</p>
+            <p className="text-xs text-ink-500">This person will be mapped under your network.</p>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <Button type="submit" disabled={submitting} className="w-full">
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Send Onboarding Invite
           </Button>
         </div>
       </form>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function Summary({ heading, rows }: { heading: string; rows: [string, string][] }) {
-  return (
-    <div className="rounded-xl border border-ink-100 bg-ink-50/40 p-4">
-      <p className="text-xs font-bold uppercase tracking-widest text-ink-500">{heading}</p>
-      <dl className="mt-2 space-y-1.5 text-sm">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex justify-between">
-            <dt className="text-ink-500">{k}</dt>
-            <dd className="font-semibold text-ink-900">{v}</dd>
-          </div>
-        ))}
-      </dl>
     </div>
   );
 }

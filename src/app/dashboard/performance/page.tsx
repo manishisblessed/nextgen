@@ -67,6 +67,7 @@ function roleBadgeColor(role: string) {
     case "MASTER_ADMIN": return "bg-violet-100 text-violet-800";
     case "ADMIN": return "bg-ink-100 text-ink-800";
     case "SUPPORT": return "bg-slate-100 text-slate-800";
+    case "SUPER_DISTRIBUTOR": return "bg-rose-100 text-rose-800";
     case "MASTER_DISTRIBUTOR": return "bg-emerald-100 text-emerald-800";
     case "DISTRIBUTOR": return "bg-blue-100 text-blue-800";
     default: return "bg-brand-100 text-brand-800";

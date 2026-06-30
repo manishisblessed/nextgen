@@ -1,5 +1,6 @@
 import { PrismaClient, Role, UserStatus, ServiceCode } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { seedServiceRoutes } from "../src/lib/services/catalog";
 
 const prisma = new PrismaClient();
 
@@ -55,6 +56,22 @@ async function main() {
     }
   });
 
+  // ── Super Distributor (regional network head) ──
+  const superDist = await prisma.user.upsert({
+    where: { email: "superdist@jmpnextgenpay.com" },
+    update: {},
+    create: {
+      name: "Priya Mehta",
+      email: "superdist@jmpnextgenpay.com",
+      phone: "+919000000041",
+      passwordHash: demoHash,
+      role: Role.SUPER_DISTRIBUTOR,
+      status: UserStatus.ACTIVE,
+      walletBalance: 5000000,
+      parentId: admin.id
+    }
+  });
+
   const master = await prisma.user.upsert({
     where: { email: "master@jmpnextgenpay.com" },
     update: {},
@@ -65,7 +82,8 @@ async function main() {
       passwordHash: demoHash,
       role: Role.MASTER_DISTRIBUTOR,
       status: UserStatus.ACTIVE,
-      walletBalance: 2148000
+      walletBalance: 2148000,
+      parentId: superDist.id
     }
   });
 
@@ -124,10 +142,15 @@ async function main() {
     });
   }
 
+  // ── Service routes (On/Off Services panel) ──
+  const routes = await seedServiceRoutes(prisma);
+  console.log(`  Service routes: +${routes.created} new, ${routes.updated} refreshed`);
+
   console.log("✓ Seed complete.");
-  console.log("  Master Admin: manish@shahworks.com / 9090702707");
-  console.log("  Admin:        support@grandhr.in / 9090702705");
-  console.log("  Demo users:   Demo@1234");
+  console.log("  Master Admin:       manish@shahworks.com / 9090702707");
+  console.log("  Admin:              support@grandhr.in / 9090702705");
+  console.log("  Super Distributor:  superdist@jmpnextgenpay.com / Demo@1234");
+  console.log("  Demo users:         Demo@1234");
 }
 
 main()

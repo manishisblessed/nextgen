@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { clientIp } from "@/lib/security/audit";
+import { bumpTokenVersion } from "@/lib/security/session";
 
 const Body = z.object({
   action: z.enum(["suspend", "activate", "close"]),
   reason: z.string().optional(),
-});
+}).strict();
+
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
 
 export async function PATCH(
   req: Request,
@@ -50,10 +55,13 @@ export async function PATCH(
           entity: "User",
           entityId: params.id,
           meta: { reason, previousStatus: targetUser.status },
-          ip: req.headers.get("x-forwarded-for") ?? undefined,
+          ip: clientIp(req),
         },
       }),
     ]);
+
+    // Status change is a privilege change → invalidate the target's sessions.
+    await bumpTokenVersion(params.id, { swallow: true });
 
     return NextResponse.json({ ok: true, status: newStatus });
   } catch (e: any) {

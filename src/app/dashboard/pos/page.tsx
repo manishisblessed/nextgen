@@ -23,11 +23,11 @@ import { Button } from "@/components/ui/Button";
 import { cn, formatINR } from "@/lib/utils";
 import type {
   PosTransactionsResponse,
-  PosMachinesResponse,
   PosTransaction,
-  PosMachine,
   PosTransactionStatus,
   PosPaymentMode,
+  LocalPosMachine,
+  MyPosMachinesResponse,
 } from "@/lib/partners/sameday-pos.types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -69,11 +69,6 @@ function machineBadge(status: string) {
 function cleanName(name: string | null) {
   if (!name) return "—";
   return name.replace(/\s*\/\s*$/, "").trim() || "—";
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function fmtTime(iso: string) {
@@ -134,32 +129,32 @@ export default function PosPage() {
 function MachinesTab() {
   const [page, setPage] = useState(1);
 
-  const { data, error, isLoading, mutate } = useSWR<PosMachinesResponse>(
-    `/api/pos/machines?page=${page}&limit=50`,
+  const { data, error, isLoading, mutate } = useSWR<MyPosMachinesResponse>(
+    `/api/pos/my-machines?page=${page}&pageSize=50`,
     fetcher,
     { revalidateOnFocus: false, keepPreviousData: true }
   );
 
   const machines = data?.data ?? [];
   const pagination = data?.pagination;
-  const active = machines.filter((m) => m.status === "active").length;
+  const stats = data?.stats;
 
-  const cols: Column<PosMachine>[] = [
-    { key: "tid", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.tid}</span> },
-    { key: "serial_number", header: "Serial No.", render: (r) => <span className="font-mono text-xs">{r.serial_number}</span> },
-    { key: "brand", header: "Brand" },
-    { key: "machine_type", header: "Type" },
+  const cols: Column<LocalPosMachine>[] = [
+    { key: "tid", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.tid ?? "—"}</span> },
+    { key: "serial", header: "Serial No.", render: (r) => <span className="font-mono text-xs">{r.serial ?? "—"}</span> },
+    { key: "mid", header: "MID", render: (r) => <span className="font-mono text-xs">{r.mid ?? "—"}</span> },
+    { key: "model", header: "Model", render: (r) => r.model ?? "—" },
     { key: "location", header: "Location", render: (r) => r.location || "—" },
     { key: "city", header: "City", render: (r) => r.city || "—" },
     { key: "status", header: "Status", render: (r) => machineBadge(r.status) },
-    { key: "installation_date", header: "Installed", render: (r) => fmtDate(r.installation_date) },
+    { key: "assignee", header: "Assigned To", render: (r) => r.assignee ? <span className="text-xs font-medium text-ink-700">{r.assignee.name}</span> : "—" },
   ];
 
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard label="Active Terminals" value={isLoading ? "..." : String(active)} icon={Monitor} accent="brand" />
-        <StatCard label="Total Machines" value={isLoading ? "..." : String(pagination?.total ?? machines.length)} icon={CreditCard} accent="violet" />
+        <StatCard label="Active Terminals" value={stats ? String(stats.active) : "..."} icon={Monitor} accent="brand" />
+        <StatCard label="Total Machines" value={stats ? String(stats.total) : "..."} icon={CreditCard} accent="violet" />
         <StatCard label="On This Page" value={String(machines.length)} icon={ArrowLeftRight} accent="emerald" />
       </div>
 
@@ -177,13 +172,13 @@ function MachinesTab() {
           description={pagination ? `${pagination.total} terminal${pagination.total === 1 ? "" : "s"} assigned to your account` : "Loading..."}
           columns={cols}
           data={machines}
-          empty={isLoading ? "Loading machines..." : "No POS machines assigned yet."}
+          empty={isLoading ? "Loading machines..." : "No POS machines assigned to your account yet."}
         />
       )}
 
-      {pagination && pagination.total_pages > 1 && (
-        <Paginator page={pagination.page} totalPages={pagination.total_pages}
-          hasPrev={pagination.has_prev_page} hasNext={pagination.has_next_page}
+      {pagination && pagination.totalPages > 1 && (
+        <Paginator page={pagination.page} totalPages={pagination.totalPages}
+          hasPrev={pagination.hasPrev} hasNext={pagination.hasNext}
           onPrev={() => setPage((p) => Math.max(1, p - 1))} onNext={() => setPage((p) => p + 1)} />
       )}
     </>

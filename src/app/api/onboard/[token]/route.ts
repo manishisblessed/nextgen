@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ token: string }> }
@@ -55,6 +58,9 @@ export async function GET(
       name: invite.name,
       status: invite.status,
       expiresAt: invite.expiresAt.toISOString(),
+      phoneVerifiedAt: invite.phoneVerifiedAt?.toISOString() ?? null,
+      emailVerifiedAt: invite.emailVerifiedAt?.toISOString() ?? null,
+      aadhaarVerifiedAt: invite.aadhaarVerifiedAt?.toISOString() ?? null,
     },
     verifications,
   });

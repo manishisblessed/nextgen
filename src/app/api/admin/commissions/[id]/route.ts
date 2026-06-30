@@ -11,6 +11,9 @@ const UpdateBody = z.object({
   active: z.boolean().optional(),
 });
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }

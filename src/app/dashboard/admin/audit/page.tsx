@@ -16,6 +16,7 @@ type AuditRow = {
   target: string;
   ip: string;
   severity: "info" | "warn" | "danger";
+  flags?: string[];
   ts: string;
 };
 
@@ -65,6 +66,22 @@ export default function AdminAuditPage() {
         </Badge>
       ),
     },
+    {
+      key: "flags",
+      header: "Anomalies",
+      render: (r) =>
+        r.flags && r.flags.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {r.flags.map((f) => (
+              <Badge key={f} variant="danger">
+                {f}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-ink-400">—</span>
+        ),
+    },
     { key: "ts", header: "When", className: "whitespace-nowrap text-xs text-ink-500" },
   ];
 
@@ -106,6 +123,7 @@ export default function AdminAuditPage() {
           <Filter className="h-4 w-4 text-ink-400" />
           <Select value={sev} onChange={(e) => setSev(e.target.value)} className="h-10 w-44">
             <option value="all">All severities</option>
+            <option value="security">Security events</option>
             <option value="info">Info</option>
             <option value="warn">Warning</option>
             <option value="danger">Danger</option>

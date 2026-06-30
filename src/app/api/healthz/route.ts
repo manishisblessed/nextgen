@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { partnerStatus } from "@/lib/partners";
 
+export const fetchCache = "force-no-store";
+
 export const dynamic = "force-dynamic";
 
 export async function GET() {

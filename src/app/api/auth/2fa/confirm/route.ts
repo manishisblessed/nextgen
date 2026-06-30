@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { clientIp } from "@/lib/security/audit";
 import { decryptSecret, verifyTotpCode } from "@/lib/two-factor";
 
 const Body = z.object({
@@ -13,6 +14,9 @@ const Body = z.object({
  * Verifies the user's first TOTP code to activate 2FA.
  * Must be called after /setup with a valid 6-digit code.
  */
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   let user;
   try {
@@ -70,7 +74,7 @@ export async function POST(req: Request) {
       action: "2fa.enabled",
       entity: "User",
       entityId: user.id,
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
 

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireRole } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 
+export const fetchCache = "force-no-store";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {

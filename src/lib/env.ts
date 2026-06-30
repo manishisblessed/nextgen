@@ -52,7 +52,53 @@ const schema = z.object({
   // eKYC Hub
   EKYCHUB_USERNAME: z.string().min(1).optional(),
   EKYCHUB_API_TOKEN: z.string().min(1).optional(),
-  EKYCHUB_BASE_URL: z.string().url().default("https://connect.ekychub.in/v3")
+  EKYCHUB_BASE_URL: z.string().url().default("https://connect.ekychub.in/v3"),
+
+  // Monthly Re-KYC gate (Phase 13). Method is configurable; defaults to
+  // Aadhaar OTP eKYC. Face match (when selected) compares a fresh liveness
+  // capture against the onboarding baseline via the eKYC Hub.
+  REKYC_METHOD: z.enum(["aadhaar_otp", "face_match", "aadhaar_otp+face"]).default("aadhaar_otp"),
+  REKYC_FACE_MATCH_THRESHOLD: z.string().default("80"),
+
+  // ---------- Phase 14: Onboarding liveness video (private S3 + face baseline) ----------
+  // The 10s liveness video for network users is stored in a PRIVATE S3 bucket
+  // (Block Public Access, SSE-KMS, versioning, TLS-only). Credentials prefer the
+  // EC2 IAM instance role; the access keys below are a local/dev fallback only.
+  AWS_REGION: z.string().min(1).default("ap-south-1"),
+  S3_KYC_BUCKET: z.string().min(1).optional(),
+  S3_KMS_KEY_ID: z.string().min(1).optional(),
+  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  // Max accepted liveness video size (bytes) and duration (seconds).
+  KYC_VIDEO_MAX_BYTES: z.string().default("15728640"), // 15 MiB
+  KYC_VIDEO_MAX_DURATION_SEC: z.string().default("12"),
+  // Absolute path to the ffmpeg/ffprobe binaries on EC2 (apt install ffmpeg).
+  FFMPEG_PATH: z.string().default("ffmpeg"),
+  FFPROBE_PATH: z.string().default("ffprobe"),
+
+  // BulkPe — Payouts. Gated behind PARTNER_PAYOUT_ENABLED (flags.payout).
+  // Needs a static Elastic IP whitelisted with BulkPe (see docs/PAYOUT.md).
+  BULKPE_BASE_URL: z.string().url().default("https://api.bulkpe.in/client"),
+  BULKPE_TOKEN: z.string().min(1).optional(),
+  BULKPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  // ---------- Security controls (see SECURITY.md) ----------
+  // Cloudflare Turnstile (bot / CAPTCHA). When SECURITY_CAPTCHA_ENABLED="true"
+  // the secret MUST be present or sensitive auth endpoints fail closed.
+  SECURITY_CAPTCHA_ENABLED: z.string().default("false"),
+  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
+
+  // Have-I-Been-Pwned breached-password check (k-anonymity range API).
+  SECURITY_HIBP_ENABLED: z.string().default("true"),
+
+  // Step-up 2FA on sensitive money-moving / config actions. Off by default so
+  // it can be switched on once the client step-up prompt is wired everywhere.
+  SECURITY_STEPUP_ENABLED: z.string().default("false"),
+
+  // Max JSON request body accepted by API routes (bytes). Defends against
+  // memory-exhaustion / oversized-payload abuse at the edge (middleware).
+  SECURITY_MAX_BODY_BYTES: z.string().default("1048576") // 1 MiB
 });
 
 const parsed = schema.safeParse(process.env);
@@ -95,7 +141,18 @@ export const flags = {
   sms: env.PARTNER_SMS_ENABLED === "true",
   email: env.PARTNER_EMAIL_ENABLED === "true",
   verification: env.PARTNER_VERIFICATION_ENABLED === "true",
-  pos: env.PARTNER_POS_ENABLED === "true"
+  pos: env.PARTNER_POS_ENABLED === "true",
+
+  // Security toggles
+  captcha: env.SECURITY_CAPTCHA_ENABLED === "true",
+  hibp: env.SECURITY_HIBP_ENABLED !== "false",
+  stepUp: env.SECURITY_STEPUP_ENABLED === "true"
 } as const;
 
 export const isProd = env.NODE_ENV === "production";
+
+/** Max accepted JSON body size in bytes (used by middleware + route guards). */
+export const MAX_BODY_BYTES = (() => {
+  const n = Number(env.SECURITY_MAX_BODY_BYTES);
+  return Number.isFinite(n) && n > 0 ? n : 1_048_576;
+})();

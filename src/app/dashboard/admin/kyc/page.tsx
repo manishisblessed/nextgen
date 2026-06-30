@@ -64,6 +64,7 @@ const ROLE_LABEL: Record<string, string> = {
   RETAILER: "Retailer",
   DISTRIBUTOR: "Distributor",
   MASTER_DISTRIBUTOR: "Master Dist.",
+  SUPER_DISTRIBUTOR: "Super Dist.",
   ADMIN: "Admin",
   SUPPORT: "Sub-admin",
 };

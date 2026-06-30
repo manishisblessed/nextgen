@@ -21,5 +21,28 @@ module.exports = {
       max_restarts: 10,
       restart_delay: 5000,
     },
+    {
+      // Background queue worker (pg-boss): payout initiation + reconciliation.
+      // Single instance (fork) — pg-boss handles concurrency internally and a
+      // single scheduler avoids duplicate cron fan-out.
+      name: "nextgenpay-worker",
+      script: "node_modules/.bin/tsx",
+      args: "scripts/worker.ts",
+      cwd: "/home/ubuntu/nextgenpay",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "production",
+      },
+      max_memory_restart: "384M",
+      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+      error_file: "/home/ubuntu/logs/nextgenpay-worker-error.log",
+      out_file: "/home/ubuntu/logs/nextgenpay-worker-out.log",
+      merge_logs: true,
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      restart_delay: 5000,
+    },
   ],
 };

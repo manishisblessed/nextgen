@@ -15,6 +15,9 @@ import {
  * Generates a new TOTP secret + QR code for the authenticated user.
  * Does NOT activate 2FA yet — user must confirm with /api/auth/2fa/confirm.
  */
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST() {
   let user;
   try {
@@ -56,6 +59,16 @@ export async function POST() {
       twoFactorSecret: encryptSecret(base32Secret),
       twoFactorBackupCodes: hashedCodes,
       twoFactorEnabled: false,
+    },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: user.id,
+      action: "2fa.setup_initiated",
+      entity: "User",
+      entityId: user.id,
+      meta: { backupCodeCount: backupCodes.length },
     },
   });
 

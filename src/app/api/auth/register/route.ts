@@ -3,6 +3,11 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { getPartner } from "@/lib/partners";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { assertCaptcha } from "@/lib/security/captcha";
+import { assertPasswordNotBreached } from "@/lib/security/breachedPassword";
+import { logSecurityEvent, clientIp } from "@/lib/security/audit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 
 const Body = z.object({
   name: z.string().min(2).max(100),
@@ -11,15 +16,31 @@ const Body = z.object({
   password: z.string().min(8).max(72),
   role: z.enum(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR"]).default("RETAILER"),
   referralCode: z.string().optional(),
+  captchaToken: z.string().max(4000).optional(),
 });
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
+  const ip = clientIp(req);
+  const userAgent = req.headers.get("user-agent") || "unknown";
+
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
   const { name, email, phone, password, role } = parsed.data;
+
+  try {
+    // Throttle account creation per IP, gate bots, and reject breached passwords.
+    await enforceRateLimit(`register:ip:${ip}`, RATE_LIMITS.register);
+    await assertCaptcha(parsed.data.captchaToken, ip);
+    await assertPasswordNotBreached(password);
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 
   const existing = await prisma.user.findFirst({
     where: { OR: [{ email: email.toLowerCase() }, { phone }] },
@@ -35,6 +56,11 @@ export async function POST(req: Request) {
 
   const passwordHash = await bcrypt.hash(password, 12);
 
+  // Phase 14: the account is created WITHOUT a liveness baseline
+  // (hasLivenessVideo defaults to false). For network self-registrants this
+  // makes the account non-transaction-capable: the liveness gate blocks all
+  // money movement and the dashboard routes them to /dashboard/liveness to
+  // record their 10-second video before they can transact. Login/read stay open.
   const user = await prisma.user.create({
     data: {
       name,
@@ -44,6 +70,17 @@ export async function POST(req: Request) {
       role,
       status: "PENDING_KYC",
     },
+  });
+
+  await logSecurityEvent({
+    action: "auth.register",
+    severity: "info",
+    userId: user.id,
+    entity: "User",
+    entityId: user.id,
+    ip,
+    userAgent,
+    meta: { role: user.role },
   });
 
   // Send welcome email

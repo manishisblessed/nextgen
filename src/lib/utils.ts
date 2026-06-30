@@ -48,6 +48,42 @@ export function generateUserCode(
   return `${USER_CODE_PREFIX[role]}${rand}`;
 }
 
+/**
+ * Fuzzy name comparison for cross-document verification (Aadhaar vs PAN vs Bank).
+ * Normalises casing, strips honorifics, and tolerates word reordering / minor diffs.
+ */
+export function namesMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, "")
+      .replace(
+        /\b(mr|mrs|ms|shri|smt|dr|prof|kumari|sri|late)\b/g,
+        ""
+      )
+      .trim()
+      .replace(/\s+/g, " ");
+
+  const na = normalize(a);
+  const nb = normalize(b);
+
+  if (na === nb) return true;
+
+  const wordsA = na.split(" ").filter(Boolean).sort();
+  const wordsB = nb.split(" ").filter(Boolean).sort();
+
+  if (wordsA.join(" ") === wordsB.join(" ")) return true;
+
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
+  const intersection = wordsA.filter((w) => setB.has(w));
+  const union = new Set([...setA, ...setB]);
+  const similarity = intersection.length / union.size;
+  return similarity >= 0.6;
+}
+
 /** Generate a strong, human-friendly random password (10 chars, mixed case + digits). */
 export function generateRandomPassword(length = 10): string {
   const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";

@@ -2,11 +2,22 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 
+export const fetchCache = "force-no-store";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
     const user = await requireAuth();
+
+    // Only admin roles can view user data
+    if (!["MASTER_ADMIN", "ADMIN"].includes(user.role)) {
+      return NextResponse.json(
+        { error: "Only admins can view user data" },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q") ?? "";
     const status = searchParams.get("status");
@@ -72,6 +83,7 @@ export async function GET(req: Request) {
         RETAILER: "retailer",
         DISTRIBUTOR: "distributor",
         MASTER_DISTRIBUTOR: "master-distributor",
+        SUPER_DISTRIBUTOR: "super-distributor",
       };
       return map[r] ?? r.toLowerCase();
     };

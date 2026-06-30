@@ -2,25 +2,53 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
-import { requireAuth, AuthError } from "@/lib/auth-server";
+import { requireAuth } from "@/lib/auth-server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { requireStepUp, readStepUpCode } from "@/lib/security/stepUp";
+import { assertLivenessReady } from "@/lib/security/livenessGate";
+import { clientIp } from "@/lib/security/audit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 
 const Body = z.object({
   aadhaar: z.string().min(12).max(14),
   bankIin: z.string().min(3),
   amount: z.number().positive().max(10000),
-  biometric: z.object({ type: z.enum(["FMR", "FIR"]), data: z.string().min(8) }),
-  idempotencyKey: z.string().min(8)
-});
+  biometric: z.object({ type: z.enum(["FMR", "FIR"]), data: z.string().min(8) }).strict(),
+  idempotencyKey: z.string().min(8),
+  stepUpCode: z.string().max(20).optional(),
+  stepUpType: z.enum(["totp", "backup"]).optional()
+}).strict();
+
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   let user;
-  try { user = await requireAuth(); } catch (e) {
-    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+  try {
+    user = await requireAuth();
+    // Onboarding liveness gate — network users must have a face baseline first.
+    await assertLivenessReady(user);
+    await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
+  } catch (e) {
+    return toErrorResponse(e);
   }
 
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  // Step-up 2FA on cash withdrawal (no-op unless SECURITY_STEPUP_ENABLED).
+  try {
+    const { code, type } = readStepUpCode(req, parsed.data);
+    await requireStepUp(user, {
+      action: "aeps.withdraw",
+      code: code ?? parsed.data.stepUpCode,
+      type: parsed.data.stepUpType ?? type,
+      ip: clientIp(req),
+      userAgent: req.headers.get("user-agent")
+    });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 
   const aeps = getPartner("aeps");
   const result = await runTransaction({
@@ -34,7 +62,7 @@ export async function POST(req: Request) {
     operator: parsed.data.bankIin,
     partner: aeps.name,
     request: parsed.data,
-    ip: req.headers.get("x-forwarded-for") ?? undefined,
+    ip: clientIp(req),
     call: () =>
       aeps.withdraw({
         userId: user.id,

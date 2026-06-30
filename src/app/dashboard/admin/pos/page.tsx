@@ -9,11 +9,16 @@ import {
   CreditCard,
   Search,
   RefreshCw,
+  RefreshCcw,
   Download,
   ChevronLeft,
   ChevronRight,
   Loader2,
   AlertCircle,
+  UserPlus,
+  UserMinus,
+  X,
+  Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -23,11 +28,11 @@ import { Button } from "@/components/ui/Button";
 import { cn, formatINR } from "@/lib/utils";
 import type {
   PosTransactionsResponse,
-  PosMachinesResponse,
   PosTransaction,
-  PosMachine,
   PosTransactionStatus,
   PosPaymentMode,
+  LocalPosMachine,
+  LocalPosMachinesResponse,
 } from "@/lib/partners/sameday-pos.types";
 
 // ── Fetchers ──
@@ -73,11 +78,6 @@ function machineBadge(status: string) {
 function cleanName(name: string | null) {
   if (!name) return "—";
   return name.replace(/\s*\/\s*$/, "").trim() || "—";
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function fmtTime(iso: string) {
@@ -135,46 +135,105 @@ function MachinesTab() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [assigneeFilter, setAssigneeFilter] = useState("all");
+  const [syncing, setSyncing] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<LocalPosMachine | null>(null);
 
-  const params = new URLSearchParams({ page: String(page), limit: "50" });
+  const params = new URLSearchParams({ page: String(page), pageSize: "50" });
   if (statusFilter) params.set("status", statusFilter);
   if (search) params.set("search", search);
+  if (assigneeFilter) params.set("assignee", assigneeFilter);
 
-  const { data, error, isLoading, mutate } = useSWR<PosMachinesResponse>(
-    `/api/pos/machines?${params}`,
+  const { data, error, isLoading, mutate } = useSWR<LocalPosMachinesResponse>(
+    `/api/admin/pos/machines?${params}`,
     fetcher,
     { revalidateOnFocus: false, keepPreviousData: true }
   );
 
   const machines = data?.data ?? [];
   const pagination = data?.pagination;
-  const active = machines.filter((m) => m.status === "active").length;
+  const stats = data?.stats;
 
-  const cols: Column<PosMachine>[] = [
-    { key: "tid", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.tid}</span> },
-    { key: "serial_number", header: "Serial No.", render: (r) => <span className="font-mono text-xs">{r.serial_number}</span> },
-    { key: "mid", header: "MID", render: (r) => <span className="font-mono text-xs">{r.mid}</span> },
-    { key: "brand", header: "Brand" },
-    { key: "machine_type", header: "Type" },
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/admin/pos/machines/sync", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.error ?? "Sync failed");
+      } else {
+        await mutate();
+      }
+    } catch {
+      alert("Sync request failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, [mutate]);
+
+  const handleUnassign = useCallback(async (machine: LocalPosMachine) => {
+    if (!confirm(`Unassign ${machine.tid ?? machine.externalId} from ${machine.assignee?.name ?? "user"}?`)) return;
+    const res = await fetch("/api/admin/pos/machines/assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machineId: machine.id, userId: null }),
+    });
+    const d = await res.json();
+    if (!res.ok) alert(typeof d.error === "string" ? d.error : "Unassign failed");
+    else mutate();
+  }, [mutate]);
+
+  const cols: Column<LocalPosMachine>[] = [
+    { key: "tid", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.tid ?? "—"}</span> },
+    { key: "serial", header: "Serial No.", render: (r) => <span className="font-mono text-xs">{r.serial ?? "—"}</span> },
+    { key: "mid", header: "MID", render: (r) => <span className="font-mono text-xs">{r.mid ?? "—"}</span> },
+    { key: "model", header: "Model", render: (r) => r.model ?? "—" },
     { key: "location", header: "Location", render: (r) => r.location || "—" },
-    { key: "city", header: "City", render: (r) => r.city || "—" },
-    { key: "state", header: "State", render: (r) => r.state || "—" },
     { key: "status", header: "Status", render: (r) => machineBadge(r.status) },
-    { key: "installation_date", header: "Installed", render: (r) => fmtDate(r.installation_date) },
+    {
+      key: "assignee",
+      header: "Assigned To",
+      render: (r) =>
+        r.assignee ? (
+          <div className="flex flex-col">
+            <span className="text-xs font-semibold text-ink-900">{r.assignee.name}</span>
+            <span className="text-[11px] uppercase tracking-wide text-ink-400">{r.assignee.role.toLowerCase()}</span>
+          </div>
+        ) : (
+          <Badge variant="default">Unassigned</Badge>
+        ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      align: "right",
+      render: (r) => (
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => setAssignTarget(r)}>
+            <UserPlus className="h-3.5 w-3.5" /> {r.assignee ? "Reassign" : "Assign"}
+          </Button>
+          {r.assignee && (
+            <Button variant="ghost" size="sm" onClick={() => handleUnassign(r)} title="Unassign">
+              <UserMinus className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      ),
+    },
   ];
 
   return (
     <div className="min-w-0 space-y-6">
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard label="Active Terminals" value={isLoading ? "..." : String(active)} icon={Monitor} accent="brand" />
-        <StatCard label="Total Machines" value={isLoading ? "..." : String(pagination?.total ?? machines.length)} icon={CreditCard} accent="violet" />
-        <StatCard label="Terminals on Page" value={String(machines.length)} icon={ArrowLeftRight} accent="emerald" />
+        <StatCard label="Total Machines" value={stats ? String(stats.total) : "..."} icon={CreditCard} accent="violet" />
+        <StatCard label="Assigned" value={stats ? String(stats.assigned) : "..."} icon={Monitor} accent="brand" />
+        <StatCard label="Unassigned" value={stats ? String(stats.unassigned) : "..."} icon={ArrowLeftRight} accent="emerald" />
       </div>
 
       {/* Filters */}
       <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr,200px,auto]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr,170px,170px,auto]">
           <div className="min-w-0">
             <label className="mb-1 block text-xs font-semibold text-ink-500">Search</label>
             <div className="relative">
@@ -195,17 +254,32 @@ function MachinesTab() {
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
               className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
             >
-              <option value="">All</option>
+              <option value="">All statuses</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="maintenance">Maintenance</option>
               <option value="decommissioned">Decommissioned</option>
             </select>
           </div>
-          <div className="flex items-end">
+          <div className="min-w-0">
+            <label className="mb-1 block text-xs font-semibold text-ink-500">Assignment</label>
+            <select
+              value={assigneeFilter}
+              onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1); }}
+              className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+            >
+              <option value="all">All machines</option>
+              <option value="assigned">Assigned</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
+          </div>
+          <div className="flex items-end gap-2">
             <Button variant="outline" size="sm" onClick={() => mutate()} title="Refresh">
               <RefreshCw className="h-4 w-4" />
-              <span className="ml-2 hidden sm:inline">Refresh</span>
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleSync} disabled={syncing}>
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              <span className="ml-1 hidden sm:inline">Sync</span>
             </Button>
           </div>
         </div>
@@ -217,24 +291,155 @@ function MachinesTab() {
       ) : (
         <DataTable
           title="Terminal Inventory"
-          description={pagination ? `${pagination.total} terminal${pagination.total === 1 ? "" : "s"} across your fleet` : "Loading..."}
+          description={
+            pagination
+              ? `${pagination.total} terminal${pagination.total === 1 ? "" : "s"} · page ${pagination.page} of ${pagination.totalPages}`
+              : "Loading..."
+          }
           columns={cols}
           data={machines}
-          empty={isLoading ? "Loading machines..." : "No POS machines found."}
+          empty={isLoading ? "Loading machines..." : "No POS machines found. Click Sync to pull the latest inventory."}
         />
       )}
 
       {/* Pagination */}
-      {pagination && pagination.total_pages > 1 && (
+      {pagination && pagination.totalPages > 1 && (
         <Paginator
           page={pagination.page}
-          totalPages={pagination.total_pages}
-          hasPrev={pagination.has_prev_page}
-          hasNext={pagination.has_next_page}
+          totalPages={pagination.totalPages}
+          hasPrev={pagination.hasPrev}
+          hasNext={pagination.hasNext}
           onPrev={() => setPage((p) => Math.max(1, p - 1))}
           onNext={() => setPage((p) => p + 1)}
         />
       )}
+
+      {assignTarget && (
+        <AssignModal
+          machine={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={() => { setAssignTarget(null); mutate(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Assign modal: search a user and assign the machine ──
+
+type UserSearchResult = { id: string; name: string; role: string; city: string; shop: string };
+
+function AssignModal({
+  machine,
+  onClose,
+  onAssigned,
+}: {
+  machine: LocalPosMachine;
+  onClose: () => void;
+  onAssigned: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const { data, isLoading } = useSWR<{ users: UserSearchResult[] }>(
+    `/api/admin/users?role=all&q=${encodeURIComponent(q)}&pageSize=10`,
+    fetcher,
+    { revalidateOnFocus: false, keepPreviousData: true }
+  );
+
+  const users = data?.users ?? [];
+
+  const assign = useCallback(async (userId: string) => {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/admin/pos/machines/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machineId: machine.id, userId }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setErr(typeof d.error === "string" ? d.error : "Assignment failed");
+        setSubmitting(false);
+        return;
+      }
+      onAssigned();
+    } catch {
+      setErr("Assignment request failed");
+      setSubmitting(false);
+    }
+  }, [machine.id, onAssigned]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-ink-100 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
+          <div>
+            <h3 className="font-display text-base font-semibold text-ink-900">Assign terminal</h3>
+            <p className="text-xs text-ink-500">
+              {machine.tid ? `TID ${machine.tid}` : machine.externalId}
+              {machine.assignee ? ` · currently with ${machine.assignee.name}` : ""}
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-ink-400 hover:bg-ink-100 hover:text-ink-700">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-5">
+          <div className="relative mb-3">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search by name, shop, city, ID..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full rounded-lg border border-ink-200 py-2 pl-9 pr-3 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+            />
+          </div>
+
+          {err && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {err}
+            </div>
+          )}
+
+          <div className="max-h-72 divide-y divide-ink-100 overflow-y-auto rounded-lg border border-ink-100">
+            {isLoading && users.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-ink-500">Loading users…</div>
+            ) : users.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-ink-500">No users found.</div>
+            ) : (
+              users.map((u) => {
+                const isCurrent = u.id === machine.assignedUserId;
+                return (
+                  <button
+                    key={u.id}
+                    disabled={submitting || isCurrent}
+                    onClick={() => assign(u.id)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-brand-50/50 disabled:opacity-50"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-ink-900">{u.name}</div>
+                      <div className="truncate text-xs text-ink-500">
+                        {u.role} · {u.shop !== "—" ? u.shop : u.city}
+                      </div>
+                    </div>
+                    {isCurrent ? (
+                      <Badge variant="success"><Check className="h-3 w-3" /> Current</Badge>
+                    ) : (
+                      <UserPlus className="h-4 w-4 shrink-0 text-brand-600" />
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

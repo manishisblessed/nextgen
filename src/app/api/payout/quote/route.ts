@@ -1,0 +1,44 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireAuth, AuthError } from "@/lib/auth-server";
+import { assertKycCurrent, ReKycRequiredError } from "@/lib/security/kycGate";
+import { toNumber } from "@/lib/money";
+import { quotePayoutForUser, GST_PERCENT } from "@/lib/payout/charges";
+
+const QuerySchema = z.object({
+  amount: z.coerce.number().positive().max(500000),
+  mode: z.enum(["IMPS", "NEFT", "RTGS", "UPI"]),
+});
+
+/** Server-authoritative charge preview for the payout form. */
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
+export async function GET(req: Request) {
+  let user;
+  try {
+    user = await requireAuth();
+    await assertKycCurrent(user);
+  } catch (e) {
+    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    if (e instanceof ReKycRequiredError)
+      return NextResponse.json({ error: e.message, code: e.code, reKycDueAt: e.dueAt }, { status: e.statusCode });
+    throw e;
+  }
+
+  const { searchParams } = new URL(req.url);
+  const parsed = QuerySchema.safeParse({
+    amount: searchParams.get("amount"),
+    mode: searchParams.get("mode"),
+  });
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  const q = await quotePayoutForUser(user.id, parsed.data.amount, parsed.data.mode);
+  return NextResponse.json({
+    gstPercent: GST_PERCENT,
+    amount: toNumber(q.amount),
+    serviceCharge: toNumber(q.serviceCharge),
+    gst: toNumber(q.gst),
+    totalDebit: toNumber(q.totalDebit),
+  });
+}

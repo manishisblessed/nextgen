@@ -12,7 +12,6 @@ import {
   LifeBuoy,
   QrCode,
   Users,
-  Network,
   Banknote,
   ShieldCheck,
   ServerCog,
@@ -30,6 +29,11 @@ import {
   CreditCard,
   Monitor,
   Activity,
+  Landmark,
+  ListChecks,
+  Power,
+  Layers,
+  Images,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -52,6 +56,7 @@ const services: NavItem[] = [
   { href: "/dashboard/qr", label: "QR Payments", icon: QrCode, badge: "New" },
   { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
   { href: "/dashboard/money-transfer", label: "Money Transfer", icon: Send },
+  { href: "/dashboard/payout", label: "Payout", icon: Landmark, badge: "New" },
   { href: "/dashboard/aadhaar-pay", label: "AePS / Aadhaar Pay", icon: Fingerprint },
   { href: "/dashboard/upi", label: "UPI Collect", icon: Send },
   { href: "/dashboard/recharge/mobile", label: "Recharges", icon: Smartphone },
@@ -78,7 +83,9 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "kyc", label: "KYC Approvals" },
   { href: "billers", label: "Billers / Routing" },
   { href: "commissions", label: "Commission Master" },
+  { href: "schemes", label: "Scheme Manager" },
   { href: "settlements", label: "Settlements" },
+  { href: "services", label: "On/Off Services" },
   { href: "audit", label: "Audit Log" },
   { href: "system", label: "System Health" },
 ] as const;
@@ -107,9 +114,14 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/master-admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/master-admin/billers", label: "Billers / Routing", icon: Boxes },
         { href: "/dashboard/master-admin/commissions", label: "Commission Master", icon: CircleDollarSign },
+        { href: "/dashboard/admin/schemes", label: "Scheme Manager", icon: Layers, badge: "New" },
         { href: "/dashboard/master-admin/settlements", label: "Settlements", icon: Banknote },
+        { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
+        { href: "/dashboard/admin/services", label: "On/Off Services", icon: Power, badge: "New" },
+        { href: "/dashboard/admin/slider", label: "Slider & Pop-ups", icon: Images, badge: "New" },
         { href: "/dashboard/master-admin/audit", label: "Audit Log", icon: ScrollText },
-        { href: "/dashboard/master-admin/system", label: "System Health", icon: ServerCog }
+        { href: "/dashboard/master-admin/system", label: "System Health", icon: ServerCog },
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
     },
     { heading: "Account", items: account }
@@ -133,11 +145,35 @@ export const navByRole: Record<Role, NavGroup[]> = {
       heading: "Workspace",
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-        { href: "/dashboard/network", label: "My Retailers", icon: Users },
-        { href: "/dashboard/network/onboard", label: "Onboard Retailer", icon: PackagePlus },
+        { href: "/dashboard/network/onboard", label: "Invite Retailer", icon: PackagePlus },
         { href: "/dashboard/funds-request", label: "Fund Requests", icon: HandCoins, badge: "12" },
+        { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
         { href: "/dashboard/commissions", label: "Commission Slabs", icon: CircleDollarSign },
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
+      ]
+    },
+    { heading: "Run Services", items: services },
+    { heading: "Account", items: account }
+  ],
+
+  "super-distributor": [
+    {
+      heading: "Workspace",
+      items: [
+        { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+        { href: "/dashboard/network/onboard", label: "Invite Master Distributor", icon: PackagePlus },
+        { href: "/dashboard/funds-request", label: "Fund Requests", icon: HandCoins },
+        { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
+        { href: "/dashboard/commissions", label: "Commission Master", icon: CircleDollarSign },
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
+      ]
+    },
+    {
+      heading: "Platform",
+      items: [
+        { href: "/dashboard/api", label: "API Keys", icon: KeyRound },
+        { href: "/dashboard/whitelabel", label: "White Label", icon: Globe },
+        { href: "/dashboard/marketing", label: "Marketing Tools", icon: Megaphone }
       ]
     },
     { heading: "Run Services", items: services },
@@ -149,9 +185,9 @@ export const navByRole: Record<Role, NavGroup[]> = {
       heading: "Workspace",
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-        { href: "/dashboard/network", label: "Network Tree", icon: Network },
-        { href: "/dashboard/network/onboard", label: "Onboard Distributor", icon: PackagePlus },
+        { href: "/dashboard/network/onboard", label: "Invite Distributor", icon: PackagePlus },
         { href: "/dashboard/funds-request", label: "Fund Requests", icon: HandCoins, badge: "47" },
+        { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
         { href: "/dashboard/commissions", label: "Commission Master", icon: CircleDollarSign },
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
@@ -181,9 +217,14 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/admin/billers", label: "Billers / Routing", icon: Boxes },
         { href: "/dashboard/admin/commissions", label: "Commission Master", icon: CircleDollarSign },
+        { href: "/dashboard/admin/schemes", label: "Scheme Manager", icon: Layers, badge: "New" },
         { href: "/dashboard/admin/settlements", label: "Settlements", icon: Banknote },
+        { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
+        { href: "/dashboard/admin/services", label: "On/Off Services", icon: Power, badge: "New" },
+        { href: "/dashboard/admin/slider", label: "Slider & Pop-ups", icon: Images, badge: "New" },
         { href: "/dashboard/admin/audit", label: "Audit Log", icon: ScrollText },
-        { href: "/dashboard/admin/system", label: "System Health", icon: ServerCog }
+        { href: "/dashboard/admin/system", label: "System Health", icon: ServerCog },
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
     },
     { heading: "Account", items: account }
@@ -199,7 +240,10 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/sub-admin/pos", label: "POS Fleet", icon: Monitor },
         { href: "/dashboard/sub-admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/sub-admin/billers", label: "Billers / Routing", icon: Boxes },
-        { href: "/dashboard/sub-admin/settlements", label: "Settlements", icon: Banknote }
+        { href: "/dashboard/sub-admin/settlements", label: "Settlements", icon: Banknote },
+        { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
+        { href: "/dashboard/admin/services", label: "On/Off Services", icon: Power, badge: "New" },
+        { href: "/dashboard/admin/slider", label: "Slider & Pop-ups", icon: Images, badge: "New" }
       ]
     },
     { heading: "Account", items: account }

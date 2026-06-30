@@ -194,3 +194,75 @@ export interface PosApiError {
     message: string;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Local assignment layer (our DB) — mirrors the external feed and adds the
+// assignment of a physical terminal to a platform user.
+// ---------------------------------------------------------------------------
+
+export interface PosAssignee {
+  id: string;
+  name: string;
+  phone: string;
+  role: string;
+}
+
+/** A locally-synced POS machine, including assignment. */
+export interface LocalPosMachine {
+  id: string;
+  externalId: string;
+  mid: string | null;
+  tid: string | null;
+  serial: string | null;
+  model: string | null;
+  provider: string;
+  status: string;
+  location: string | null;
+  city: string | null;
+  state: string | null;
+  assignedUserId: string | null;
+  assignedAt: string | null;
+  assignee: PosAssignee | null;
+  syncedAt: string;
+}
+
+export interface LocalPosMachinesResponse {
+  data: LocalPosMachine[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+  stats: {
+    total: number;
+    assigned: number;
+    unassigned: number;
+  };
+}
+
+/** User-facing (ownership-scoped) list of assigned machines. */
+export interface MyPosMachinesResponse {
+  data: LocalPosMachine[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    hasPrev: boolean;
+    hasNext: boolean;
+  };
+  stats: {
+    total: number;
+    active: number;
+  };
+}
+
+export interface PosSyncResult {
+  ok: true;
+  scanned: number;
+  created: number;
+  updated: number;
+}

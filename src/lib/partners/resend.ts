@@ -15,9 +15,14 @@ export const resendEmail: EmailProvider = {
         body: JSON.stringify({ from: from ?? process.env.EMAIL_FROM, to, subject, html })
       });
       const json = (await res.json()) as { id?: string; message?: string };
-      if (!res.ok) return { ok: false, code: `HTTP_${res.status}`, message: json.message ?? "resend error", raw: json };
+      if (!res.ok) {
+        console.error(`[resend] Email failed (${res.status}):`, json);
+        return { ok: false, code: `HTTP_${res.status}`, message: json.message ?? "resend error", raw: json };
+      }
+      console.info(`[resend] Email sent to ${to}, id=${json.id}`);
       return { ok: true, data: { messageId: json.id! } } satisfies PartnerResult<{ messageId: string }>;
     } catch (e) {
+      console.error("[resend] Network error:", (e as Error).message);
       return { ok: false, code: "NETWORK", message: (e as Error).message };
     }
   }

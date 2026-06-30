@@ -2,6 +2,8 @@ import { Tv } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { RechargeForm } from "@/components/dashboard/RechargeForm";
 
+export const dynamic = "force-dynamic";
+
 export default function DthRechargePage() {
   return (
     <div className="mx-auto max-w-3xl">

@@ -13,7 +13,8 @@ import {
   EyeOff,
   Copy,
   Check,
-  Settings2
+  Settings2,
+  Star
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
@@ -33,20 +34,39 @@ type AdminRecord = {
   createdAt: string;
 };
 
+type MasterAdminRecord = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  status: string;
+  createdAt: string;
+};
+
 export default function ManageAdminsPage() {
+  const [tab, setTab] = useState<"admins" | "master-admins">("admins");
   const [rows, setRows] = useState<AdminRecord[]>([]);
+  const [masterRows, setMasterRows] = useState<MasterAdminRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
+  const [showNewMaster, setShowNewMaster] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<AdminRecord | null>(null);
-  const [created, setCreated] = useState<{ admin: AdminRecord; password: string } | null>(null);
+  const [created, setCreated] = useState<{ admin: AdminRecord | MasterAdminRecord; password: string } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/admins");
-      if (res.ok) {
-        const data = await res.json();
+      const [adminsRes, masterRes] = await Promise.all([
+        fetch("/api/admin/admins"),
+        fetch("/api/admin/master-admins"),
+      ]);
+      if (adminsRes.ok) {
+        const data = await adminsRes.json();
         setRows(data.admins);
+      }
+      if (masterRes.ok) {
+        const data = await masterRes.json();
+        setMasterRows(data.masterAdmins);
       }
     } finally {
       setLoading(false);
@@ -60,6 +80,11 @@ export default function ManageAdminsPage() {
     const suspended = rows.filter((r) => r.status === "SUSPENDED").length;
     return { total: rows.length, active, suspended };
   }, [rows]);
+
+  const masterStats = useMemo(() => {
+    const active = masterRows.filter((r) => r.status === "ACTIVE").length;
+    return { total: masterRows.length, active };
+  }, [masterRows]);
 
   async function handleAction(id: string, action: string) {
     await fetch(`/api/admin/admins/${id}`, {
@@ -159,34 +184,146 @@ export default function ManageAdminsPage() {
     }
   ];
 
+  const masterCols: Column<MasterAdminRecord>[] = [
+    {
+      key: "name",
+      header: "Master Admin",
+      render: (r) => (
+        <div>
+          <div className="flex items-center gap-2">
+            <Star className="h-4 w-4 text-amber-500" />
+            <span className="font-semibold text-ink-900">{r.name}</span>
+          </div>
+          <div className="ml-6 text-xs text-ink-500">{r.email}</div>
+        </div>
+      )
+    },
+    { key: "phone", header: "Mobile" },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => (
+        <Badge variant={r.status === "ACTIVE" ? "success" : "danger"}>
+          {r.status === "ACTIVE" ? "Active" : r.status}
+        </Badge>
+      )
+    },
+    {
+      key: "createdAt",
+      header: "Created",
+      render: (r) => new Date(r.createdAt).toLocaleString("en-IN")
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Master Admin"
         title="Manage Admins"
-        description="Create admin accounts and assign specific tabs & permissions. Admins sign in at /admin and can manage sub-admins for their assigned scope."
+        description="Create and manage admin accounts. Master admins have full platform access; regular admins can be scoped to specific tabs."
         actions={
-          <Button onClick={() => setShowNew(true)}>
-            <Plus className="h-4 w-4" /> Create admin
-          </Button>
+          tab === "admins" ? (
+            <Button onClick={() => setShowNew(true)}>
+              <Plus className="h-4 w-4" /> Create admin
+            </Button>
+          ) : (
+            <Button onClick={() => setShowNewMaster(true)}>
+              <Plus className="h-4 w-4" /> Add master admin
+            </Button>
+          )
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Total admins" value={stats.total} tone="brand" />
-        <Stat label="Active" value={stats.active} tone="success" />
-        <Stat label="Suspended" value={stats.suspended} tone="warning" />
+      {/* Tab switcher */}
+      <div className="flex gap-1 rounded-xl border border-ink-100 bg-white p-1 w-fit">
+        <button
+          onClick={() => setTab("admins")}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+            tab === "admins"
+              ? "bg-brand-600 text-white shadow-sm"
+              : "text-ink-600 hover:bg-ink-50"
+          }`}
+        >
+          Admins ({rows.length})
+        </button>
+        <button
+          onClick={() => setTab("master-admins")}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+            tab === "master-admins"
+              ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm"
+              : "text-ink-600 hover:bg-ink-50"
+          }`}
+        >
+          <span className="flex items-center gap-1.5">
+            <Star className="h-3.5 w-3.5" /> Master Admins ({masterRows.length})
+          </span>
+        </button>
       </div>
 
-      {showNew && (
-        <NewAdminForm
-          onCancel={() => setShowNew(false)}
-          onCreated={(admin, password) => {
-            setShowNew(false);
-            setCreated({ admin, password });
-            refresh();
-          }}
-        />
+      {tab === "admins" ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Stat label="Total admins" value={stats.total} tone="brand" />
+            <Stat label="Active" value={stats.active} tone="success" />
+            <Stat label="Suspended" value={stats.suspended} tone="warning" />
+          </div>
+
+          {showNew && (
+            <NewAdminForm
+              onCancel={() => setShowNew(false)}
+              onCreated={(admin, password) => {
+                setShowNew(false);
+                setCreated({ admin, password });
+                refresh();
+              }}
+            />
+          )}
+
+          {editingAdmin && (
+            <EditTabsDialog
+              admin={editingAdmin}
+              onClose={() => setEditingAdmin(null)}
+              onSaved={() => {
+                setEditingAdmin(null);
+                refresh();
+              }}
+            />
+          )}
+
+          <DataTable
+            title={`${rows.length} admin${rows.length !== 1 ? "s" : ""}`}
+            description="Admins log in at /admin and see only the tabs you have assigned."
+            columns={cols}
+            data={rows}
+            empty={loading ? "Loading..." : "No admins created yet. Click 'Create admin' to get started."}
+          />
+        </>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Stat label="Total master admins" value={masterStats.total} tone="brand" />
+            <Stat label="Active" value={masterStats.active} tone="success" />
+          </div>
+
+          {showNewMaster && (
+            <NewMasterAdminForm
+              onCancel={() => setShowNewMaster(false)}
+              onCreated={(admin, password) => {
+                setShowNewMaster(false);
+                setCreated({ admin, password });
+                refresh();
+              }}
+            />
+          )}
+
+          <DataTable
+            title={`${masterRows.length} master admin${masterRows.length !== 1 ? "s" : ""}`}
+            description="Master admins have full unrestricted access to the entire platform."
+            columns={masterCols}
+            data={masterRows}
+            empty={loading ? "Loading..." : "No other master admins yet."}
+          />
+        </>
       )}
 
       {created && (
@@ -196,25 +333,6 @@ export default function ManageAdminsPage() {
           onClose={() => setCreated(null)}
         />
       )}
-
-      {editingAdmin && (
-        <EditTabsDialog
-          admin={editingAdmin}
-          onClose={() => setEditingAdmin(null)}
-          onSaved={() => {
-            setEditingAdmin(null);
-            refresh();
-          }}
-        />
-      )}
-
-      <DataTable
-        title={`${rows.length} admin${rows.length !== 1 ? "s" : ""}`}
-        description="Admins log in at /admin and see only the tabs you have assigned."
-        columns={cols}
-        data={rows}
-        empty={loading ? "Loading..." : "No admins created yet. Click 'Create admin' to get started."}
-      />
     </div>
   );
 }
@@ -390,6 +508,120 @@ function NewAdminForm({
 
 /* ----------------------------------------------------------------------- */
 
+function NewMasterAdminForm({
+  onCancel,
+  onCreated
+}: {
+  onCancel: () => void;
+  onCreated: (admin: MasterAdminRecord, password: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("+91 ");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      const password = generateRandomPassword(14);
+      const res = await fetch("/api/admin/master-admins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, phone, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to create master admin");
+      onCreated(data.masterAdmin, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50/60 to-white p-5"
+    >
+      <div className="mb-4 flex items-center gap-3">
+        <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white">
+          <Star className="h-4 w-4" />
+        </span>
+        <div>
+          <h3 className="font-display text-base font-semibold text-ink-900">
+            New master admin
+          </h3>
+          <p className="text-xs text-ink-500">
+            Master admins have unrestricted access to all platform features. Add with caution.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div>
+          <Label htmlFor="madm-name">Full name</Label>
+          <Input
+            id="madm-name"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Full name"
+          />
+        </div>
+        <div>
+          <Label htmlFor="madm-email">Email</Label>
+          <Input
+            id="madm-email"
+            required
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="masteradmin@jmpnextgenpay.com"
+          />
+        </div>
+        <div>
+          <Label htmlFor="madm-phone">Mobile</Label>
+          <Input
+            id="madm-phone"
+            required
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+91 9XXXXXXXXX"
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+        <strong>Warning:</strong> Master admins can create other admins, manage all users, toggle services,
+        and access every feature. Only grant this level to fully trusted personnel.
+      </div>
+
+      {error && (
+        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {error}
+        </p>
+      )}
+
+      <div className="mt-4 flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={submitting}>
+          <KeyRound className="h-4 w-4" />
+          {submitting ? "Creating..." : "Generate password & create"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/* ----------------------------------------------------------------------- */
+
 function EditTabsDialog({
   admin,
   onClose,
@@ -501,7 +733,7 @@ function CredentialsDialog({
   password,
   onClose
 }: {
-  admin: AdminRecord;
+  admin: AdminRecord | MasterAdminRecord;
   password: string;
   onClose: () => void;
 }) {

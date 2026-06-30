@@ -1,0 +1,366 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import {
+  RefreshCw,
+  DownloadCloud,
+  Power,
+  CreditCard,
+  Monitor,
+  Receipt,
+  Landmark,
+  QrCode,
+  Send,
+  Smartphone,
+  Fingerprint,
+  Plane,
+  Boxes,
+  type LucideIcon,
+} from "lucide-react";
+
+type ServiceRoute = {
+  id: string;
+  key: string;
+  name: string;
+  type: "SERVICE" | "CONFIG" | "SETTING";
+  kind: string;
+  provider: string | null;
+  enabled: boolean;
+  note: string | null;
+  sortOrder: number;
+  updatedAt: string;
+};
+
+type KindMeta = {
+  label: string;
+  icon: LucideIcon;
+  /** Gradient used for the group header chip + active toggle. */
+  gradient: string;
+  ring: string;
+};
+
+const KIND_META: Record<string, KindMeta> = {
+  PAYOUT: { label: "Payouts", icon: Landmark, gradient: "from-violet-500 to-brand-500", ring: "ring-violet-200" },
+  PG: { label: "Payment Gateway", icon: CreditCard, gradient: "from-brand-500 to-sky-500", ring: "ring-brand-200" },
+  POS: { label: "POS Terminals", icon: Monitor, gradient: "from-sky-500 to-cyan-500", ring: "ring-sky-200" },
+  BBPS: { label: "Bill Payments", icon: Receipt, gradient: "from-amber-500 to-orange-500", ring: "ring-amber-200" },
+  QR: { label: "QR Payments", icon: QrCode, gradient: "from-fuchsia-500 to-pink-500", ring: "ring-fuchsia-200" },
+  UPI: { label: "UPI", icon: Send, gradient: "from-emerald-500 to-teal-500", ring: "ring-emerald-200" },
+  RECHARGE: { label: "Recharges", icon: Smartphone, gradient: "from-rose-500 to-red-500", ring: "ring-rose-200" },
+  AEPS: { label: "AePS / Aadhaar Pay", icon: Fingerprint, gradient: "from-indigo-500 to-blue-500", ring: "ring-indigo-200" },
+  DMT: { label: "Money Transfer", icon: Send, gradient: "from-teal-500 to-emerald-500", ring: "ring-teal-200" },
+  TRAVEL: { label: "Travel", icon: Plane, gradient: "from-cyan-500 to-blue-500", ring: "ring-cyan-200" },
+  OTHER: { label: "Other", icon: Boxes, gradient: "from-ink-500 to-ink-700", ring: "ring-ink-200" },
+};
+
+function metaFor(kind: string): KindMeta {
+  return KIND_META[kind] ?? KIND_META.OTHER;
+}
+
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  const sec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+export default function AdminServicesPage() {
+  const [services, setServices] = useState<ServiceRoute[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
+  const [pending, setPending] = useState<Record<string, boolean>>({});
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const fetchServices = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/services");
+      const data = await res.json();
+      if (Array.isArray(data.services)) setServices(data.services);
+    } catch {
+      setNotice({ text: "Failed to load services.", ok: false });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchServices();
+  }, [fetchServices]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  const toggle = useCallback(
+    async (svc: ServiceRoute) => {
+      const next = !svc.enabled;
+      // Optimistic update.
+      setServices((prev) =>
+        prev.map((s) => (s.id === svc.id ? { ...s, enabled: next } : s))
+      );
+      setPending((p) => ({ ...p, [svc.id]: true }));
+      try {
+        const res = await fetch(`/api/admin/services/${svc.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: next }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error ?? "Update failed");
+        // Reconcile with server truth (updatedAt etc.).
+        setServices((prev) =>
+          prev.map((s) => (s.id === svc.id ? { ...s, ...data.service } : s))
+        );
+        setNotice({
+          text: `${svc.name} ${next ? "enabled" : "disabled"} — audit logged.`,
+          ok: true,
+        });
+      } catch (e) {
+        // Revert on failure.
+        setServices((prev) =>
+          prev.map((s) => (s.id === svc.id ? { ...s, enabled: svc.enabled } : s))
+        );
+        setNotice({
+          text: e instanceof Error ? e.message : "Update failed",
+          ok: false,
+        });
+      } finally {
+        setPending((p) => {
+          const { [svc.id]: _omit, ...rest } = p;
+          return rest;
+        });
+      }
+    },
+    []
+  );
+
+  const seedDefaults = useCallback(async () => {
+    setSeeding(true);
+    try {
+      const res = await fetch("/api/admin/services", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "seed" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Seed failed");
+      setNotice({ text: `Seeded defaults: +${data.created} new, ${data.updated} refreshed.`, ok: true });
+      await fetchServices();
+    } catch (e) {
+      setNotice({ text: e instanceof Error ? e.message : "Seed failed", ok: false });
+    } finally {
+      setSeeding(false);
+    }
+  }, [fetchServices]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, ServiceRoute[]>();
+    for (const s of services) {
+      const arr = map.get(s.kind) ?? [];
+      arr.push(s);
+      map.set(s.kind, arr);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      const sa = Math.min(...a[1].map((x) => x.sortOrder));
+      const sb = Math.min(...b[1].map((x) => x.sortOrder));
+      return sa - sb;
+    });
+  }, [services]);
+
+  const enabledCount = services.filter((s) => s.enabled).length;
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Admin"
+        title="On / Off Services"
+        description="Master kill-switch for every money rail & platform flag. Turning a rail off blocks its mutations across the app immediately — every change is audit logged."
+        actions={
+          <>
+            <Button variant="outline" onClick={fetchServices} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </Button>
+            <Button variant="outline" onClick={seedDefaults} disabled={seeding}>
+              <DownloadCloud className={`h-4 w-4 ${seeding ? "animate-pulse" : ""}`} /> Seed defaults
+            </Button>
+          </>
+        }
+      />
+
+      {notice && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+            notice.ok
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-rose-200 bg-rose-50 text-rose-700"
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-ink-100 bg-white p-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-ink-500">Total rails</p>
+          <p className="mt-1 font-display text-xl font-bold text-ink-900">{services.length}</p>
+        </div>
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Live</p>
+          <p className="mt-1 font-display text-xl font-bold text-emerald-700">{enabledCount}</p>
+        </div>
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-rose-600">Disabled</p>
+          <p className="mt-1 font-display text-xl font-bold text-rose-700">{services.length - enabledCount}</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="rounded-2xl border border-ink-100 bg-white p-10 text-center text-sm text-ink-500">
+          Loading services…
+        </div>
+      ) : services.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-ink-200 bg-white p-10 text-center">
+          <Power className="mx-auto h-8 w-8 text-ink-300" />
+          <p className="mt-3 text-sm font-semibold text-ink-700">No service routes yet</p>
+          <p className="mt-1 text-sm text-ink-500">Seed the known rails to populate the panel.</p>
+          <div className="mt-4 flex justify-center">
+            <Button onClick={seedDefaults} disabled={seeding}>
+              <DownloadCloud className="h-4 w-4" /> Seed defaults
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {grouped.map(([kind, items]) => {
+            const meta = metaFor(kind);
+            const Icon = meta.icon;
+            return (
+              <section key={kind}>
+                <div className="mb-3 flex items-center gap-3">
+                  <span
+                    className={`inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${meta.gradient} text-white shadow-soft`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h2 className="font-display text-base font-bold text-ink-900">{meta.label}</h2>
+                    <p className="text-xs text-ink-500">
+                      {items.filter((i) => i.enabled).length}/{items.length} live
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {items.map((svc) => (
+                    <ServiceCard
+                      key={svc.id}
+                      svc={svc}
+                      meta={meta}
+                      busy={!!pending[svc.id]}
+                      onToggle={() => toggle(svc)}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServiceCard({
+  svc,
+  meta,
+  busy,
+  onToggle,
+}: {
+  svc: ServiceRoute;
+  meta: KindMeta;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className={`group relative overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all ${
+        svc.enabled
+          ? `border-transparent ring-2 ${meta.ring}`
+          : "border-ink-100 opacity-90"
+      }`}
+    >
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
+          svc.enabled ? meta.gradient : "from-ink-200 to-ink-200"
+        }`}
+      />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate font-display text-base font-semibold text-ink-900">{svc.name}</h3>
+            <Badge variant={svc.enabled ? "success" : "danger"}>{svc.enabled ? "ON" : "OFF"}</Badge>
+          </div>
+          <p className="mt-0.5 font-mono text-[11px] text-ink-400">{svc.key}</p>
+        </div>
+
+        <Toggle on={svc.enabled} busy={busy} gradient={meta.gradient} onClick={onToggle} label={svc.name} />
+      </div>
+
+      {svc.note && <p className="mt-3 text-sm leading-relaxed text-ink-600">{svc.note}</p>}
+
+      <div className="mt-4 flex items-center justify-between border-t border-ink-100 pt-3 text-xs text-ink-500">
+        <span className="inline-flex items-center gap-1">
+          <span className="font-semibold text-ink-700">Provider:</span>{" "}
+          {svc.provider ?? "—"}
+        </span>
+        <span>Updated {timeAgo(svc.updatedAt)}</span>
+      </div>
+    </div>
+  );
+}
+
+function Toggle({
+  on,
+  busy,
+  gradient,
+  onClick,
+  label,
+}: {
+  on: boolean;
+  busy: boolean;
+  gradient: string;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={`Toggle ${label}`}
+      disabled={busy}
+      onClick={onClick}
+      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-60 ${
+        on ? `bg-gradient-to-r ${gradient}` : "bg-ink-200"
+      }`}
+    >
+      <span
+        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+          on ? "translate-x-6" : "translate-x-1"
+        } ${busy ? "animate-pulse" : ""}`}
+      />
+    </button>
+  );
+}

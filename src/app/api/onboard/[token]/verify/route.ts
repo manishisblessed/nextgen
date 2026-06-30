@@ -58,6 +58,9 @@ const VerifyBody = z.discriminatedUnion("type", [
   AadhaarCompleteBody,
 ]);
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ token: string }> }
@@ -153,12 +156,16 @@ export async function POST(
       });
 
       if (result.ok) {
+        const rawStatus = (result.raw as any)?.account_status
+          ?? (result.raw as any)?.accountStatus;
         return NextResponse.json({
           ok: true,
           type: "BANK_PENNY_DROP",
           data: {
             nameAtBank: result.data.nameAtBank,
             utr: result.data.utr,
+            accountStatus: rawStatus ?? "active",
+            depositAmount: 1,
           },
         });
       }
@@ -285,6 +292,12 @@ export async function POST(
         document_type: "AADHAAR",
       });
 
+      const aadhaarMobile = result.ok
+        ? ((result.raw as any)?.mobile_number ??
+           (result.raw as any)?.phone ??
+           null)
+        : null;
+
       await prisma.verificationResult.create({
         data: {
           inviteId: invite.id,
@@ -305,12 +318,18 @@ export async function POST(
                 gender: result.data.gender,
                 address: result.data.address,
                 split_address: result.data.split_address,
+                aadhaarMobile,
               }
             : (result.raw as any),
         },
       });
 
       if (result.ok) {
+        await prisma.invite.update({
+          where: { id: invite.id },
+          data: { aadhaarVerifiedAt: new Date() },
+        });
+
         return NextResponse.json({
           ok: true,
           type: "AADHAAR_COMPLETE",
@@ -322,6 +341,8 @@ export async function POST(
             address: result.data.address,
             state: result.data.split_address?.state,
             pincode: result.data.split_address?.pincode,
+            city: result.data.split_address?.dist,
+            aadhaarMobile,
           },
         });
       }

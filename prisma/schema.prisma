@@ -18,6 +18,7 @@ enum Role {
   RETAILER
   DISTRIBUTOR
   MASTER_DISTRIBUTOR
+  SUPER_DISTRIBUTOR
   ADMIN
   SUPPORT
   MASTER_ADMIN
@@ -31,85 +32,154 @@ enum UserStatus {
 }
 
 model User {
-  id              String     @id @default(cuid())
-  name            String
-  email           String     @unique
-  phone           String     @unique
-  passwordHash    String
-  role            Role       @default(RETAILER)
-  status          UserStatus @default(PENDING_KYC)
-  emailVerifiedAt DateTime?
-  phoneVerifiedAt DateTime?
-  twoFactorEnabled Boolean   @default(false)
-  twoFactorSecret   String?   // AES-256 encrypted TOTP secret
-  twoFactorBackupCodes String[] @default([]) // bcrypt-hashed single-use recovery codes
-  twoFactorVerifiedAt DateTime? // when 2FA was first confirmed
+  id                   String     @id @default(cuid())
+  name                 String
+  email                String     @unique
+  phone                String     @unique
+  passwordHash         String
+  role                 Role       @default(RETAILER)
+  status               UserStatus @default(PENDING_KYC)
+  emailVerifiedAt      DateTime?
+  phoneVerifiedAt      DateTime?
+  twoFactorEnabled     Boolean    @default(false)
+  twoFactorSecret      String? // AES-256 encrypted TOTP secret
+  twoFactorBackupCodes String[]   @default([]) // bcrypt-hashed single-use recovery codes
+  twoFactorVerifiedAt  DateTime? // when 2FA was first confirmed
+
+  // Server-side session invalidation. Every issued JWT carries the tokenVersion
+  // it was minted with; the jwt/session callbacks reject any token whose version
+  // != this value. Incrementing it (logout, role/status change, forced sign-out)
+  // instantly invalidates all outstanding sessions for this user — defends
+  // against replay of a cached/stolen session cookie.
+  tokenVersion Int @default(0)
 
   // tabs/features assigned by a higher-level admin (empty = full access for that role)
-  allowedTabs     String[]   @default([])
+  allowedTabs String[] @default([])
+
+  // Service-level access control. Stores ServiceRoute keys that are explicitly
+  // disabled for this user by an admin. Empty = all globally-enabled services
+  // are available. Checked by assertServiceEnabled() before any money rail call.
+  disabledServices String[] @default([])
+
+  // ── Monthly Re-KYC gate (Phase 13) ──────────────────────────────────────
+  // Network tiers (RT/DT/MD/SD) must re-verify identity on the 1st of every
+  // month before they can transact. A scheduled job raises `reKycRequired` for
+  // ACTIVE network users; a successful re-KYC clears it and pushes `reKycDueAt`
+  // to the 1st of the next month. Staff/admin roles are never gated.
+  reKycRequired Boolean   @default(false)
+  lastReKycAt   DateTime?
+  reKycDueAt    DateTime?
+
+  // ── Onboarding liveness video / face baseline (Phase 14) ────────────────
+  // Network tiers (RT/DT/MD/SD) must record a short liveness video at onboarding;
+  // a face frame from it becomes the baseline for Phase 13's monthly face match.
+  // Until the baseline is ready, transactions are blocked (login/read stay open).
+  // Staff/admin roles are never prompted and never gated. The video bytes live in
+  // a private S3 bucket — only an encrypted key + hash is kept (see KycVideo).
+  hasLivenessVideo Boolean @default(false)
+
+  // Commission/charge scheme assigned to this user. Null = fall back to the
+  // platform default scheme (Scheme.isDefault). Resolved by getEffectiveRate.
+  schemeId String?
+  scheme   Scheme? @relation("UserScheme", fields: [schemeId], references: [id])
 
   // hierarchy
-  parentId        String?
-  parent          User?      @relation("Hierarchy", fields: [parentId], references: [id])
-  children        User[]     @relation("Hierarchy")
+  parentId String?
+  parent   User?   @relation("Hierarchy", fields: [parentId], references: [id])
+  children User[]  @relation("Hierarchy")
 
   // org / shop info
-  shopName        String?
-  shopAddress     String?
-  pincode         String?
-  state           String?
-  city            String?
+  shopName    String?
+  shopAddress String?
+  pincode     String?
+  state       String?
+  city        String?
 
   // financial summary (denormalized for fast reads; keep authoritative ledger in WalletTxn)
-  walletBalance   Decimal    @default(0) @db.Decimal(14, 2)
+  // walletBalance = available/spendable balance. heldBalance = funds reserved for
+  // in-flight operations (e.g. a pending payout). spendable = walletBalance - heldBalance.
+  walletBalance Decimal @default(0) @db.Decimal(14, 2)
+  heldBalance   Decimal @default(0) @db.Decimal(14, 2)
 
   // login location tracking
-  lastLoginLat    Float?
-  lastLoginLng    Float?
-  lastLoginAt     DateTime?
+  lastLoginLat Float?
+  lastLoginLng Float?
+  lastLoginAt  DateTime?
 
-  kyc             Kyc?
-  documents       Document[]
-  wallet          WalletTxn[]
-  transactions    Transaction[]
-  fundRequestsRaised   FundRequest[] @relation("FundRequester")
-  fundRequestsApproved FundRequest[] @relation("FundApprover")
-  apiKeys         ApiKey[]
-  sessions        Session[]
-  auditLogs       AuditLog[]
-  notifications   Notification[]
-  commissionSlabs CommissionSlab[]
+  // device / session-context tracking for anomaly detection (new-device, impossible travel)
+  lastLoginIp        String?
+  lastLoginUserAgent String?
+  knownDevices       String[] @default([]) // sha256 hashes of trusted device/user-agent fingerprints
 
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  deletedAt       DateTime?
+  kyc                  Kyc?
+  documents            Document[]
+  wallet               WalletTxn[]
+  transactions         Transaction[]
+  fundRequestsRaised   FundRequest[]    @relation("FundRequester")
+  fundRequestsApproved FundRequest[]    @relation("FundApprover")
+  apiKeys              ApiKey[]
+  sessions             Session[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+  commissionSlabs      CommissionSlab[]
+  payoutRequests       PayoutRequest[]  @relation("PayoutOwner")
+  schemesCreated       Scheme[]         @relation("SchemeCreator")
+  posMachines          PosMachine[]     @relation("PosAssignee")
+  slidersCreated       Slider[]         @relation("SliderCreator")
+  reKycLogs            ReKycLog[]
+  kycVideo             KycVideo?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([role])
   @@index([parentId])
   @@index([status])
+  @@index([schemeId])
+  @@index([reKycRequired])
 }
 
 model Session {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshToken String   @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String    @unique
   device       String?
   ip           String?
   userAgent    String?
   expiresAt    DateTime
   revokedAt    DateTime?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
 }
 
+// ---------- Brute-force protection ----------
+// Per-identifier failed-login tracking that drives account lockout with
+// exponential backoff. Keyed by the normalized identifier (email/phone) so it
+// works even when the identifier does not resolve to a real user (this avoids
+// account-enumeration via timing while still throttling guessing). The dedicated
+// /api/auth/login route and the NextAuth credentials provider both consult this.
+model LoginAttempt {
+  id           String    @id @default(cuid())
+  identifier   String    @unique // normalized email/phone (lowercased + trimmed)
+  failedCount  Int       @default(0)
+  lockedUntil  DateTime? // when set & in the future, auth is refused
+  lastFailedAt DateTime?
+  lastIp       String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([lockedUntil])
+}
+
 model Otp {
   id        String   @id @default(cuid())
-  channel   String   // SMS | EMAIL
-  target    String   // phone or email
+  channel   String // SMS | EMAIL
+  target    String // phone or email
   codeHash  String
-  purpose   String   // LOGIN | REGISTER | RESET | TXN
+  purpose   String // LOGIN | REGISTER | RESET | TXN | ONBOARD
   attempts  Int      @default(0)
   expiresAt DateTime
   consumed  Boolean  @default(false)
@@ -128,22 +198,100 @@ enum KycStatus {
 }
 
 model Kyc {
-  id              String    @id @default(cuid())
-  userId          String    @unique
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status          KycStatus @default(NOT_STARTED)
-  panNumber       String?
-  panVerifiedAt   DateTime?
-  aadhaarLast4    String?
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status            KycStatus @default(NOT_STARTED)
+  panNumber         String?
+  panVerifiedAt     DateTime?
+  panName           String?
+  aadhaarLast4      String?
   aadhaarVerifiedAt DateTime?
-  gstin           String?
-  dob             DateTime?
-  rejectedReason  String?
-  reviewedById    String?
-  reviewedAt      DateTime?
-  submittedAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  aadhaarNumber     String? // masked, e.g. XXXX-XXXX-1234
+  aadhaarName       String?
+  aadhaarDob        String?
+  aadhaarGender     String?
+  aadhaarAddress    String?
+  aadhaarMobile     String? // Aadhaar-registered mobile for records
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  bankAccountStatus String? // active | inactive
+  gstin             String?
+  msmeNumber        String? // Udyam number (optional, no API verification)
+  nameMismatch      Boolean   @default(false)
+  dob               DateTime?
+  rejectedReason    String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  submittedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// ---------- Monthly Re-KYC audit trail (Phase 13) ----------
+// One row per re-verification attempt by a network user. Holds NO raw PII —
+// only the method, provider correlation reference, outcome, and request
+// context. PII returned by the eKYC Hub is field-encrypted/masked before it is
+// ever persisted (see src/lib/rekyc/*).
+
+enum ReKycStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+model ReKycLog {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method      String // aadhaar_otp | face_match | aadhaar_otp+face
+  status      ReKycStatus @default(PENDING)
+  provider    String? // EKYCHUB | SIMULATED
+  providerRef String? // opaque provider verification id / orderid (never raw Aadhaar)
+  ip          String?
+  userAgent   String?
+  meta        Json? // safe extras (masked values, enrolledBaseline flag, failureCode)
+  createdAt   DateTime    @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ---------- Onboarding liveness video / face baseline (Phase 14) ----------
+// One row per network user. The 10-second liveness video is stored in a PRIVATE
+// S3 bucket (Block Public Access, SSE-KMS, versioning). We persist NO video
+// bytes here — only the field-encrypted S3 object key, a sha256 of the bytes for
+// integrity, and the field-encrypted eKYC Hub face-baseline reference. Access to
+// the video is admin-only via short-TTL signed URLs and is always audited.
+// DPDP/RBI: biometric PII — explicit consent (consentAt) is mandatory and a
+// retention policy purges the object + nulls the references after closure.
+
+enum KycVideoStatus {
+  UPLOADED // object stored in S3; baseline extraction queued
+  BASELINE_READY // a face frame was registered as the baseline
+  FAILED // no usable face detected — user must re-capture
+}
+
+model KycVideo {
+  id                 String         @id @default(cuid())
+  userId             String         @unique
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider           String         @default("s3")
+  storageKeyEnc      String // S3 object key, field-encrypted (fieldEncryption.ts)
+  sha256             String // hex digest of the uploaded video bytes (integrity)
+  durationSec        Int
+  sizeBytes          Int
+  contentType        String
+  faceBaselineRefEnc String? // eKYC Hub baseline reference, field-encrypted
+  status             KycVideoStatus @default(UPLOADED)
+  consentAt          DateTime // explicit biometric-capture consent timestamp
+  capturedIp         String?
+  capturedUa         String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([status])
 }
 
 enum DocumentType {
@@ -152,9 +300,23 @@ enum DocumentType {
   AADHAAR_BACK
   SHOP_PHOTO
   BANK_PROOF
+  CANCEL_CHEQUE
+  PASSBOOK
   GST_CERT
   SELFIE
+  LIVE_VIDEO
   AGREEMENT
+  SHOP_ESTABLISHMENT
+  GUMASTA_LICENSE
+  SIGNATURE
+  ELECTRICITY_BILL
+  ADDITIONAL_ID
+  FAMILY_REFERENCE
+  PG_FORM
+  GPS_PHOTO_OUTSIDE
+  GPS_PHOTO_INSIDE
+  GPS_SELFIE_DISTRIBUTOR
+  DISTRIBUTOR_DECLARATION
   OTHER
 }
 
@@ -164,13 +326,16 @@ model Document {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   type         DocumentType
   // Cloudinary
-  publicId     String       // e.g. "nextgenpay/kyc/abc123"
-  url          String       // secure_url
+  publicId     String // e.g. "nextgenpay/kyc/abc123"
+  url          String // secure_url
   resourceType String       @default("image") // image | raw | video
   format       String?
   bytes        Int?
   width        Int?
   height       Int?
+  // GPS metadata for geo-tagged uploads
+  gpsLatitude  Float?
+  gpsLongitude Float?
   // privacy: signed delivery — never expose publicly
   isSensitive  Boolean      @default(true)
   uploadedAt   DateTime     @default(now())
@@ -196,20 +361,24 @@ enum WalletReason {
   FUND_TRANSFER_OUT
   FEE
   PENALTY
+  PAYOUT
 }
 
 model WalletTxn {
-  id            String          @id @default(cuid())
-  userId        String
-  user          User            @relation(fields: [userId], references: [id])
-  direction     WalletDirection
-  reason        WalletReason
-  amount        Decimal         @db.Decimal(14, 2)
-  balanceAfter  Decimal         @db.Decimal(14, 2)
-  refType       String?         // "Transaction" | "FundRequest" | etc
-  refId         String?
-  note          String?
-  createdAt     DateTime        @default(now())
+  id             String          @id @default(cuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id])
+  direction      WalletDirection
+  reason         WalletReason
+  amount         Decimal         @db.Decimal(14, 2)
+  balanceAfter   Decimal         @db.Decimal(14, 2)
+  refType        String? // "Transaction" | "FundRequest" | "PayoutRequest" | etc
+  refId          String?
+  note           String?
+  // Idempotency guard — a unique key ensures a given money movement is applied
+  // at most once, even under retries / duplicate webhook deliveries.
+  idempotencyKey String?         @unique
+  createdAt      DateTime        @default(now())
 
   @@index([userId, createdAt])
   @@index([refType, refId])
@@ -255,35 +424,35 @@ enum TxnStatus {
 }
 
 model Transaction {
-  id              String      @id @default(cuid())
-  refId           String      @unique // human-friendly: TXN8K2X9P
-  userId          String      // retailer who originated it
-  user            User        @relation(fields: [userId], references: [id])
-  service         ServiceCode
-  amount          Decimal     @db.Decimal(14, 2)
-  fee             Decimal     @default(0) @db.Decimal(14, 2)
-  commission      Decimal     @default(0) @db.Decimal(14, 2)
-  gst             Decimal     @default(0) @db.Decimal(14, 2)
-  status          TxnStatus   @default(INITIATED)
-  customer        String?     // mobile / consumerNo / VPA / a/c last 4
-  operator        String?     // SBI, Jio, BSES, etc.
+  id           String      @id @default(cuid())
+  refId        String      @unique // human-friendly: TXN8K2X9P
+  userId       String // retailer who originated it
+  user         User        @relation(fields: [userId], references: [id])
+  service      ServiceCode
+  amount       Decimal     @db.Decimal(14, 2)
+  fee          Decimal     @default(0) @db.Decimal(14, 2)
+  commission   Decimal     @default(0) @db.Decimal(14, 2)
+  gst          Decimal     @default(0) @db.Decimal(14, 2)
+  status       TxnStatus   @default(INITIATED)
+  customer     String? // mobile / consumerNo / VPA / a/c last 4
+  operator     String? // SBI, Jio, BSES, etc.
   // partner details
-  partner         String?     // PAYSPRINT, RAZORPAY, etc.
-  partnerTxnId    String?
+  partner      String? // PAYSPRINT, RAZORPAY, etc.
+  partnerTxnId String?
   // arbitrary partner payload for audit / reconciliation
-  request         Json?
-  response        Json?
-  errorCode       String?
-  errorMessage    String?
+  request      Json?
+  response     Json?
+  errorCode    String?
+  errorMessage String?
   // refunds
-  refundedAt      DateTime?
-  refundRefId     String?
+  refundedAt   DateTime?
+  refundRefId  String?
 
-  ipAddress       String?
-  device          String?
+  ipAddress String?
+  device    String?
 
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, createdAt])
   @@index([service, status])
@@ -293,20 +462,78 @@ model Transaction {
 // ---------- Commissions ----------
 
 model CommissionSlab {
-  id          String      @id @default(cuid())
-  userId      String      // applies to this user / level
-  user        User        @relation(fields: [userId], references: [id])
-  service     ServiceCode
-  minAmount   Decimal     @db.Decimal(14, 2)
-  maxAmount   Decimal     @db.Decimal(14, 2)
+  id            String      @id @default(cuid())
+  userId        String // applies to this user / level
+  user          User        @relation(fields: [userId], references: [id])
+  service       ServiceCode
+  minAmount     Decimal     @db.Decimal(14, 2)
+  maxAmount     Decimal     @db.Decimal(14, 2)
   // either flat or percent — but enforce one in app code
-  flat        Decimal?    @db.Decimal(14, 2)
-  percent     Decimal?    @db.Decimal(6, 4) // e.g. 0.0050 for 0.5%
-  active      Boolean     @default(true)
-  effectiveFrom DateTime  @default(now())
+  flat          Decimal?    @db.Decimal(14, 2)
+  percent       Decimal?    @db.Decimal(6, 4) // e.g. 0.0050 for 0.5%
+  active        Boolean     @default(true)
+  effectiveFrom DateTime    @default(now())
   effectiveTo   DateTime?
 
   @@index([userId, service, active])
+}
+
+// ---------- Scheme Manager (named groupings of charge/commission slabs) ----------
+// A Scheme bundles per-service charge + commission slabs and is assigned to
+// users (User.schemeId). Exactly one Scheme may be the platform default
+// (isDefault) — it is the fallback when a user has no scheme assigned. The
+// resolver (src/lib/scheme/resolver.ts → getEffectiveRate) reads these.
+
+/// Whether a slab value is a flat rupee amount or a percentage fraction
+/// (e.g. 0.0050 = 0.5%). Mirrors the CommissionSlab flat/percent convention.
+enum RateType {
+  FLAT
+  PERCENT
+}
+
+model Scheme {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  active      Boolean      @default(true)
+  isDefault   Boolean      @default(false)
+  createdById String?
+  createdBy   User?        @relation("SchemeCreator", fields: [createdById], references: [id])
+  slabs       SchemeSlab[]
+  users       User[]       @relation("UserScheme")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([active])
+  @@index([isDefault])
+}
+
+model SchemeSlab {
+  id        String      @id @default(cuid())
+  schemeId  String
+  scheme    Scheme      @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  service   ServiceCode
+  minAmount Decimal     @db.Decimal(14, 2)
+  maxAmount Decimal     @db.Decimal(14, 2)
+
+  // Customer-facing charge for this slab. `chargeValue` is a flat ₹ amount when
+  // chargeType = FLAT, or a fraction (0.0050 = 0.5%) when chargeType = PERCENT.
+  chargeType  RateType @default(FLAT)
+  chargeValue Decimal  @default(0) @db.Decimal(14, 4)
+
+  // Commission split across the distribution chain. Same flat/percent semantics
+  // as the charge (driven by commissionType). All three may be zero.
+  commissionType             RateType @default(PERCENT)
+  commissionRetailer         Decimal  @default(0) @db.Decimal(14, 4)
+  commissionDistributor      Decimal  @default(0) @db.Decimal(14, 4)
+  commissionMaster           Decimal  @default(0) @db.Decimal(14, 4)
+  commissionSuperDistributor Decimal  @default(0) @db.Decimal(14, 4)
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([schemeId, service, active])
 }
 
 // ---------- Fund requests ----------
@@ -319,21 +546,21 @@ enum FundRequestStatus {
 }
 
 model FundRequest {
-  id            String            @id @default(cuid())
-  requesterId   String
-  requester     User              @relation("FundRequester", fields: [requesterId], references: [id])
-  approverId    String?
-  approver      User?             @relation("FundApprover", fields: [approverId], references: [id])
-  amount        Decimal           @db.Decimal(14, 2)
-  mode          String            // UTR | UPI | CASH
-  utr           String?
-  bankName      String?
-  proofDocId    String?           // Document.id
-  status        FundRequestStatus @default(PENDING)
-  remarks       String?
-  approvedAt    DateTime?
-  rejectedAt    DateTime?
-  createdAt     DateTime          @default(now())
+  id          String            @id @default(cuid())
+  requesterId String
+  requester   User              @relation("FundRequester", fields: [requesterId], references: [id])
+  approverId  String?
+  approver    User?             @relation("FundApprover", fields: [approverId], references: [id])
+  amount      Decimal           @db.Decimal(14, 2)
+  mode        String // UTR | UPI | CASH
+  utr         String?
+  bankName    String?
+  proofDocId  String? // Document.id
+  status      FundRequestStatus @default(PENDING)
+  remarks     String?
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  createdAt   DateTime          @default(now())
 
   @@index([requesterId, status])
   @@index([approverId, status])
@@ -342,17 +569,17 @@ model FundRequest {
 // ---------- API keys (for white-label master distributors) ----------
 
 model ApiKey {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   label       String
-  keyId       String   @unique // public id
+  keyId       String    @unique // public id
   secretHash  String
   scopes      String[] // ["txn.read","txn.create","wallet.topup"]
-  ipAllowlist String[] @default([])
+  ipAllowlist String[]  @default([])
   lastUsedAt  DateTime?
   revokedAt   DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@index([userId])
 }
@@ -363,8 +590,8 @@ model AuditLog {
   id        String   @id @default(cuid())
   userId    String?
   user      User?    @relation(fields: [userId], references: [id])
-  action    String   // user.login, kyc.approve, txn.refund, ...
-  entity    String?  // User | Transaction | Kyc
+  action    String // user.login, kyc.approve, txn.refund, ...
+  entity    String? // User | Transaction | Kyc
   entityId  String?
   meta      Json?
   ip        String?
@@ -376,14 +603,14 @@ model AuditLog {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   body      String
-  channel   String   // INAPP | EMAIL | SMS | PUSH
+  channel   String // INAPP | EMAIL | SMS | PUSH
   readAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([userId, readAt])
 }
@@ -400,27 +627,30 @@ enum InviteStatus {
 }
 
 model Invite {
-  id             String       @id @default(cuid())
-  token          String       @unique @default(cuid())
-  phone          String
-  email          String
-  role           Role
-  parentId       String?
-  invitedById    String
-  status         InviteStatus @default(PENDING)
+  id          String       @id @default(cuid())
+  token       String       @unique @default(cuid())
+  phone       String
+  email       String
+  role        Role
+  parentId    String?
+  invitedById String
+  status      InviteStatus @default(PENDING)
 
-  userId         String?      @unique
-  name           String?
+  userId String? @unique
+  name   String?
 
-  expiresAt      DateTime
-  registeredAt   DateTime?
-  verifiedAt     DateTime?
-  approvedAt     DateTime?
-  rejectedAt     DateTime?
-  rejectedReason String?
+  expiresAt        DateTime
+  registeredAt     DateTime?
+  verifiedAt       DateTime?
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  rejectedReason   String?
+  phoneVerifiedAt  DateTime?
+  emailVerifiedAt  DateTime?
+  aadhaarVerifiedAt DateTime?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([token])
   @@index([invitedById, status])
@@ -434,9 +664,9 @@ model VerificationResult {
   id              String   @id @default(cuid())
   userId          String?
   inviteId        String?
-  type            String   // PAN_360 | BANK_PENNY_DROP | AADHAAR_DIGILOCKER | GST | CIN | BANK_ADVANCE
+  type            String // PAN_360 | BANK_PENNY_DROP | AADHAAR_DIGILOCKER | GST | CIN | BANK_ADVANCE
   orderid         String   @unique
-  status          String   // Success | Failure
+  status          String // Success | Failure
   verifiedName    String?
   requestPayload  Json?
   responsePayload Json?
@@ -449,26 +679,277 @@ model VerificationResult {
 // ---------- Master data ----------
 
 model Operator {
-  id        String      @id @default(cuid())
-  service   ServiceCode
-  name      String
-  code      String      @unique
-  logoUrl   String?
-  active    Boolean     @default(true)
-  meta      Json?
+  id      String      @id @default(cuid())
+  service ServiceCode
+  name    String
+  code    String      @unique
+  logoUrl String?
+  active  Boolean     @default(true)
+  meta    Json?
 
   @@index([service, active])
 }
 
 model Biller {
-  id          String   @id @default(cuid())
-  category    String   // ELECTRICITY | WATER | GAS | INSURANCE | EDUCATION
+  id          String  @id @default(cuid())
+  category    String // ELECTRICITY | WATER | GAS | INSURANCE | EDUCATION
   name        String
-  code        String   @unique
+  code        String  @unique
   state       String?
-  active      Boolean  @default(true)
-  partner     String?  // BBPS / BillAvenue
+  active      Boolean @default(true)
+  partner     String? // BBPS / BillAvenue
   partnerCode String?
 
   @@index([category, state, active])
+}
+
+// =====================================================================
+// Phase 0 — Secure foundation
+// =====================================================================
+
+// ---------- Service / vendor route registry ----------
+// One unified registry of toggleable money rails & platform flags. Powers the
+// On/Off Services panel, dashboard "Service Overview" + "Vendor Balances", and
+// (later) the Scheme Manager service chips. An OFF route hard-gates its rail.
+
+enum ServiceRouteType {
+  SERVICE // a payable money rail (PG, POS, BBPS, Payout, QR, ...)
+  CONFIG // a platform configuration flag
+  SETTING // a platform setting flag
+}
+
+enum ServiceRouteKind {
+  PG
+  POS
+  BBPS
+  PAYOUT
+  QR
+  UPI
+  RECHARGE
+  AEPS
+  DMT
+  TRAVEL
+  OTHER
+}
+
+model ServiceRoute {
+  id        String           @id @default(cuid())
+  key       String           @unique // machine key, e.g. "payout_bulkpe"
+  name      String // human label, e.g. "Payout (BulkPe)"
+  type      ServiceRouteType @default(SERVICE)
+  kind      ServiceRouteKind @default(OTHER)
+  provider  String? // e.g. "BULKPE", "SAMEDAY", "EKYCHUB"
+  enabled   Boolean          @default(true)
+  note      String? // operational note shown in the On/Off panel
+  balance   Decimal?         @db.Decimal(14, 2) // vendor wallet balance (dashboard)
+  sortOrder Int              @default(0)
+  meta      Json?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([type, enabled])
+  @@index([kind, enabled])
+}
+
+// ---------- Generic API idempotency ----------
+// Guards non-ledger operations (e.g. "submit payout request") against
+// duplicate submissions. Money-movement idempotency lives on WalletTxn.idempotencyKey.
+
+model IdempotencyKey {
+  id        String    @id @default(cuid())
+  key       String    @unique
+  scope     String // e.g. "payout.create"
+  userId    String?
+  status    String    @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED
+  response  Json?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  @@index([scope, createdAt])
+  @@index([expiresAt])
+}
+
+// ---------- DB-backed rate limiter ----------
+// Fixed-window counters shared across all PM2 processes on the EC2 box
+// (no Redis required to start). `key` encodes the bucket + window.
+
+model RateLimit {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "login:ip:1.2.3.4:1719500400"
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+}
+
+// =====================================================================
+// Payouts (BulkPe) — bank/UPI disbursals with maker-checker + ledger holds
+// =====================================================================
+
+enum PayoutMode {
+  IMPS
+  NEFT
+  RTGS
+  UPI
+}
+
+enum PayoutStatus {
+  DRAFT // created but not submitted (reserved for future bulk uploads)
+  PENDING_APPROVAL // submitted by maker, funds held, awaiting checker
+  APPROVED // checker approved, queued for the worker
+  PROCESSING // sent to BulkPe, awaiting terminal state (webhook/poll)
+  SUCCESS // settled at BulkPe; hold captured into a real DEBIT
+  FAILED // BulkPe declined / failed; hold released back to spendable
+  REJECTED // checker rejected before initiation; hold released
+  REVERSED // settled then reversed by bank/BulkPe; funds returned
+}
+
+/// A single disbursal to a beneficiary. The user pays
+/// totalDebit = amount + serviceCharge + GST(serviceCharge); the beneficiary
+/// receives the full `amount`. Funds are reserved with a ledger hold at
+/// submit and only converted to a real DEBIT (captureHold) on terminal
+/// success — released on failure/rejection/reversal.
+model PayoutRequest {
+  id     String @id @default(cuid())
+  // Wallet owner whose balance is held/debited (also the maker in our flow).
+  userId String
+  user   User   @relation("PayoutOwner", fields: [userId], references: [id])
+
+  // Beneficiary — PII encrypted at rest (AES-256-GCM via fieldEncryption).
+  beneficiaryName String
+  accountNumber   String // ENCRYPTED (bank a/c number, or UPI VPA for mode=UPI)
+  ifsc            String? // ENCRYPTED (null for UPI)
+  accountLast4    String // plain, for safe display only
+
+  mode PayoutMode
+
+  // Money (charge is ON TOP — beneficiary gets `amount`, user pays `totalDebit`).
+  amount        Decimal @db.Decimal(14, 2)
+  serviceCharge Decimal @db.Decimal(14, 2)
+  gst           Decimal @db.Decimal(14, 2) // 18% of serviceCharge
+  totalDebit    Decimal @db.Decimal(14, 2) // amount + serviceCharge + gst
+
+  status PayoutStatus @default(PENDING_APPROVAL)
+
+  // Maker-checker
+  makerId   String // who created the request (usually == userId)
+  checkerId String? // who approved/rejected
+  remarks   String? // checker remarks on approve/reject
+
+  // Provider (BulkPe) correlation
+  bulkpeReferenceId String  @unique // our idempotency reference_id sent to BulkPe
+  bulkpeTxnId       String? // BulkPe's transaction id
+  utr               String? // bank UTR on success
+  failureReason     String?
+
+  // Raw provider payloads for audit / reconciliation (never contains secrets).
+  request  Json?
+  response Json?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  approvedAt  DateTime?
+  processedAt DateTime? // when handed to BulkPe
+  completedAt DateTime? // terminal (success/failed/reversed)
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@index([checkerId, status])
+}
+
+// =====================================================================
+// POS machines (Same Day Solution) — local mirror + assignment layer.
+//
+// Machines themselves are sourced externally (read-only feed). This local
+// model lets us OWN the assignment of a physical terminal to a platform
+// user (retailer/distributor). `sync` upserts the external inventory by
+// `externalId`; `assignedUserId` is set/cleared only by admins and never
+// touched by the sync (assignment is our source of truth).
+// =====================================================================
+
+model PosMachine {
+  id         String @id @default(cuid())
+  externalId String @unique // Same Day machine id (stable external key)
+
+  // Denormalized display fields copied from the external feed on each sync.
+  mid      String? // merchant id
+  tid      String? // terminal id
+  serial   String? // device serial number
+  model    String? // brand / machine_type label
+  provider String  @default("SAMEDAY")
+  status   String  @default("active") // active | inactive | maintenance | decommissioned
+  location String?
+  city     String?
+  state    String?
+
+  // Assignment (our source of truth — preserved across syncs).
+  assignedUserId String?
+  assignedUser   User?     @relation("PosAssignee", fields: [assignedUserId], references: [id])
+  assignedAt     DateTime?
+  assignedById   String? // admin who performed the last assignment
+
+  // Full external payload for audit / future fields.
+  meta Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  syncedAt  DateTime @default(now())
+
+  assignmentLogs PosAssignmentLog[]
+
+  @@index([assignedUserId])
+  @@index([status])
+  @@index([tid])
+}
+
+model PosAssignmentLog {
+  id        String     @id @default(cuid())
+  machineId String
+  machine   PosMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  action     String // assign | unassign
+  fromUserId String? // previous assignee (if any)
+  toUserId   String? // new assignee (null on unassign)
+  byUserId   String // admin who performed the action
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([machineId, createdAt])
+}
+
+// =====================================================================
+// Slides / Pop-up Management — homepage/dashboard banners & pop-ups.
+//
+// Admins manage colorful promotional SLIDE banners (carousel) and POPUP
+// modals. The public surface only renders rows that are `active`, inside
+// their [startAt, endAt] window, and targeted to the viewer's role
+// (audienceRoles empty = everyone). Images live in Cloudinary (public
+// delivery) — `imagePublicId` is destroyed when a slider is removed.
+// =====================================================================
+
+enum SliderKind {
+  SLIDE // carousel banner on the dashboard
+  POPUP // dismissible modal shown once per user (localStorage)
+}
+
+model Slider {
+  id            String     @id @default(cuid())
+  title         String
+  imagePublicId String // Cloudinary public_id (for delivery + delete)
+  imageUrl      String // secure_url
+  linkUrl       String? // optional click-through target
+  kind          SliderKind @default(SLIDE)
+  // Target DB Role values (e.g. ["RETAILER","DISTRIBUTOR"]). Empty = all roles.
+  audienceRoles String[]   @default([])
+  active        Boolean    @default(true)
+  sortOrder     Int        @default(0)
+  startAt       DateTime? // null = live immediately
+  endAt         DateTime? // null = no expiry
+  createdById   String?
+  createdBy     User?      @relation("SliderCreator", fields: [createdById], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([kind, active])
 }

@@ -4,6 +4,22 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { createMobileToken } from "@/lib/auth-server";
 import { createTempToken } from "@/lib/two-factor";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import {
+  assertNotLocked,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+  recentFailureCount,
+  normalizeIdentifier,
+} from "@/lib/security/lockout";
+import { assertCaptcha } from "@/lib/security/captcha";
+import {
+  logSecurityEvent,
+  detectLoginAnomalies,
+  deviceHash,
+  clientIp,
+} from "@/lib/security/audit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 
 const LocationSchema = z.object({
   lat: z.number(),
@@ -12,20 +28,28 @@ const LocationSchema = z.object({
 });
 
 const Body = z.object({
-  identifier: z.string().min(3),
-  password: z.string().min(1),
+  identifier: z.string().min(3).max(120),
+  password: z.string().min(1).max(200),
   location: LocationSchema,
+  captchaToken: z.string().max(4000).optional(),
 });
 
 /**
  * POST /api/auth/login
- * Step 1 of login — validates email/phone + password.
+ * Step 1 of login — validates email/phone + password, with brute-force
+ * lockout, IP+identifier rate limiting, optional CAPTCHA, and login-anomaly
+ * detection. Never reveals whether the identifier exists.
  *
  * If 2FA is enabled: returns { needs2FA: true, tempToken } — no session issued.
- * If 2FA is NOT enabled: returns { needs2FA: false, needsSetup: true } for mandatory setup.
- * Legacy (2FA not required): returns full token + user. (removed — 2FA is now mandatory)
+ * If 2FA is NOT enabled: returns { needs2FA: false, needsSetup: true }.
  */
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
+  const ip = clientIp(req);
+  const userAgent = req.headers.get("user-agent") || "unknown";
+
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
@@ -34,75 +58,118 @@ export async function POST(req: Request) {
     );
   }
 
-  const { identifier, password, location } = parsed.data;
-  const normalized = identifier.trim().toLowerCase();
+  const { identifier, password, location, captchaToken } = parsed.data;
+  const normalized = normalizeIdentifier(identifier);
 
-  const user = await prisma.user.findFirst({
-    where: {
-      OR: [{ email: normalized }, { phone: normalized }],
-      deletedAt: null,
-    },
-  });
+  try {
+    // 1) Rate limit by IP and by identifier (fixed window, shared across PM2).
+    await enforceRateLimit(`login:ip:${ip}`, RATE_LIMITS.login);
+    await enforceRateLimit(`login:id:${normalized}`, RATE_LIMITS.login);
 
-  if (!user) {
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    // 2) Bot/abuse gate (no-op unless SECURITY_CAPTCHA_ENABLED).
+    await assertCaptcha(captchaToken, ip);
+
+    // 3) Brute-force lockout (exponential backoff across windows).
+    await assertNotLocked(normalized);
+  } catch (e) {
+    return toErrorResponse(e);
   }
 
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) {
+  const user = await prisma.user.findFirst({
+    where: { OR: [{ email: normalized }, { phone: normalized }], deletedAt: null },
+  });
+
+  const valid = user ? await bcrypt.compare(password, user.passwordHash) : false;
+
+  if (!user || !valid) {
+    const { failedCount, locked, lockedUntil } = await recordFailedLogin(normalized, ip);
+    await logSecurityEvent({
+      action: "auth.login_failed",
+      severity: locked ? "danger" : "warn",
+      userId: user?.id ?? null,
+      entity: "User",
+      entityId: user?.id ?? null,
+      ip,
+      userAgent,
+      meta: { identifier: normalized, failedCount, locked, lockedUntil: lockedUntil?.toISOString() ?? null },
+    });
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
   if (user.status === "CLOSED") {
+    await logSecurityEvent({
+      action: "auth.login_blocked",
+      severity: "warn",
+      userId: user.id,
+      entity: "User",
+      entityId: user.id,
+      ip,
+      userAgent,
+      meta: { reason: "account_closed" },
+    });
     return NextResponse.json({ error: "Account has been closed" }, { status: 403 });
   }
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const userAgent = req.headers.get("user-agent") || "unknown";
+  // Successful credential check — clear lockout counter.
+  const priorFailures = await recentFailureCount(normalized);
+  await recordSuccessfulLogin(normalized);
 
-  // Log login attempt with location
-  await prisma.auditLog.create({
-    data: {
-      userId: user.id,
-      action: "user.login",
-      entity: "User",
-      entityId: user.id,
-      meta: { lat: location.lat, lng: location.lng, accuracy: location.accuracy },
-      ip,
-      userAgent,
-    },
+  // Anomaly detection against the user's last known login context.
+  const anomalies = detectLoginAnomalies({
+    lastLoginLat: user.lastLoginLat,
+    lastLoginLng: user.lastLoginLng,
+    lastLoginAt: user.lastLoginAt,
+    knownDevices: user.knownDevices ?? [],
+    lat: location.lat,
+    lng: location.lng,
+    userAgent,
+    recentFailures: priorFailures,
   });
 
-  // Update user's last known login location
+  const device = deviceHash(userAgent);
+  const knownDevices = Array.from(new Set([...(user.knownDevices ?? []), device])).slice(-10);
+
   await prisma.user.update({
     where: { id: user.id },
     data: {
       lastLoginLat: location.lat,
       lastLoginLng: location.lng,
       lastLoginAt: new Date(),
+      lastLoginIp: ip,
+      lastLoginUserAgent: userAgent.slice(0, 512),
+      knownDevices,
     },
   });
 
-  // 2FA is mandatory for all users
+  await logSecurityEvent({
+    action: "auth.login",
+    severity: anomalies.flagged ? "danger" : "info",
+    userId: user.id,
+    entity: "User",
+    entityId: user.id,
+    ip,
+    userAgent,
+    meta: {
+      lat: location.lat,
+      lng: location.lng,
+      accuracy: location.accuracy,
+      anomalies,
+    },
+  });
+
+  // 2FA is mandatory for all users.
   if (user.twoFactorEnabled && user.twoFactorSecret) {
-    // User has 2FA configured — issue temp token for step 2
     const tempToken = createTempToken(user.id);
     return NextResponse.json({
       ok: true,
       needs2FA: true,
       needsSetup: false,
       tempToken,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role },
     });
   }
 
-  // 2FA NOT configured — issue a limited session for setup only
-  // The frontend must redirect to 2FA setup before granting full access
+  // 2FA NOT configured — issue a limited session for setup only.
   const sessionUser = {
     id: user.id,
     name: user.name,
@@ -112,6 +179,7 @@ export async function POST(req: Request) {
     status: user.status,
     walletBalance: Number(user.walletBalance),
     allowedTabs: user.allowedTabs ?? [],
+    disabledServices: user.disabledServices ?? [],
     twoFactorEnabled: user.twoFactorEnabled,
   };
 

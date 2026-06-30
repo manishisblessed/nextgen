@@ -302,9 +302,19 @@ function NewRequestForm({
     setError(null);
     setSubmitting(true);
     try {
+      // Single-use submit nonce + idempotency key → a captured/cached POST
+      // cannot be replayed to raise a duplicate fund request.
+      const nonceRes = await fetch("/api/security/nonce");
+      if (!nonceRes.ok) throw new Error("Could not start a secure session. Please retry.");
+      const { nonce } = (await nonceRes.json()) as { nonce: string };
+
       const res = await fetch("/api/fund-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+          "x-submit-nonce": nonce,
+        },
         body: JSON.stringify({
           amount: Number(amount),
           mode,

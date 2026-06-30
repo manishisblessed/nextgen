@@ -8,6 +8,9 @@ const Body = z.object({
   isSensitive: z.boolean().optional()
 });
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   let user;
   try { user = await requireAuth(); } catch (e) {

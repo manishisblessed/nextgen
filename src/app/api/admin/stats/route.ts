@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
-import { partnerStatus } from "@/lib/partners";
+import { getPartner, partnerStatus } from "@/lib/partners";
+import { flags } from "@/lib/env";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
+import { add, dec, toNumber } from "@/lib/money";
+
+export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +19,10 @@ export async function GET() {
     todayStart.setHours(0, 0, 0, 0);
 
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Rolling 30-day window used for the payout success-rate KPI.
+    const last30Start = new Date(now);
+    last30Start.setDate(last30Start.getDate() - 30);
+    last30Start.setHours(0, 0, 0, 0);
 
     const [
       userCounts,
@@ -22,6 +31,11 @@ export async function GET() {
       monthlyGmv,
       recentAudit,
       partners,
+      serviceRoutes,
+      payoutToday,
+      payoutMonth,
+      payoutStatusCounts,
+      payoutInflight,
     ] = await Promise.all([
       prisma.user.groupBy({
         by: ["status"],
@@ -44,7 +58,54 @@ export async function GET() {
         take: 6,
       }),
       Promise.resolve(partnerStatus()),
+      prisma.serviceRoute.findMany({
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      }),
+      prisma.payoutRequest.aggregate({
+        where: { status: "SUCCESS", completedAt: { gte: todayStart } },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      prisma.payoutRequest.aggregate({
+        where: { status: "SUCCESS", completedAt: { gte: monthStart } },
+        _sum: { amount: true },
+      }),
+      // Terminal payout outcomes over the last 30 days (for success-rate KPI).
+      prisma.payoutRequest.groupBy({
+        by: ["status"],
+        where: {
+          status: { in: ["SUCCESS", "FAILED", "REJECTED", "REVERSED"] },
+          createdAt: { gte: last30Start },
+        },
+        _count: true,
+      }),
+      // In-flight payouts awaiting a terminal state.
+      prisma.payoutRequest.count({
+        where: { status: { in: ["PENDING_APPROVAL", "APPROVED", "PROCESSING"] } },
+      }),
     ]);
+
+    // Best-effort: refresh the BulkPe vendor float so the "Vendor Balances"
+    // card shows live data. Never block the dashboard if BulkPe is unreachable.
+    const payoutRoute = serviceRoutes.find((r) => r.key === SERVICE_KEYS.PAYOUT);
+    if (payoutRoute && flags.payout) {
+      try {
+        const provider = getPartner("payout");
+        if (typeof provider.fetchBalance === "function") {
+          const bal = await provider.fetchBalance();
+          if (bal.ok) {
+            const balance = dec(bal.data);
+            await prisma.serviceRoute.update({
+              where: { id: payoutRoute.id },
+              data: { balance },
+            });
+            payoutRoute.balance = balance;
+          }
+        }
+      } catch (err) {
+        console.warn("[admin/stats] BulkPe fetchBalance failed (non-fatal):", err);
+      }
+    }
 
     const activeUsers =
       userCounts.find((c) => c.status === "ACTIVE")?._count ?? 0;
@@ -65,6 +126,69 @@ export async function GET() {
       });
       dailyGmv.push(Number(agg._sum.amount ?? 0));
     }
+
+    // Daily settled payout volume for last 14 days (for the payout sparkline).
+    const dailyPayout: number[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const dayStart = new Date(now);
+      dayStart.setDate(dayStart.getDate() - i);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const agg = await prisma.payoutRequest.aggregate({
+        where: { status: "SUCCESS", completedAt: { gte: dayStart, lte: dayEnd } },
+        _sum: { amount: true },
+      });
+      dailyPayout.push(toNumber(dec(agg._sum.amount ?? 0)));
+    }
+
+    // ---- Service Overview + Vendor Balances (from ServiceRoute registry) ----
+    const services = serviceRoutes.map((r) => ({
+      id: r.id,
+      key: r.key,
+      name: r.name,
+      type: r.type,
+      kind: r.kind,
+      provider: r.provider,
+      enabled: r.enabled,
+      balance: r.balance == null ? null : toNumber(dec(r.balance)),
+    }));
+
+    // Vendor balances = SERVICE rails that carry a tracked vendor wallet balance.
+    const vendorBalances = services
+      .filter((s) => s.type === "SERVICE" && s.balance != null)
+      .map((s) => ({
+        id: s.id,
+        key: s.key,
+        name: s.name,
+        kind: s.kind,
+        provider: s.provider,
+        enabled: s.enabled,
+        balance: s.balance as number,
+      }));
+    const vendorBalanceTotal = toNumber(
+      vendorBalances.reduce((acc, v) => add(acc, v.balance), dec(0))
+    );
+
+    // ---- Payout KPIs ----
+    const payoutCountByStatus = payoutStatusCounts.reduce<Record<string, number>>(
+      (acc, row) => {
+        acc[row.status] = row._count;
+        return acc;
+      },
+      {}
+    );
+    const payoutSuccess30 = payoutCountByStatus.SUCCESS ?? 0;
+    const payoutTerminal30 =
+      (payoutCountByStatus.SUCCESS ?? 0) +
+      (payoutCountByStatus.FAILED ?? 0) +
+      (payoutCountByStatus.REJECTED ?? 0) +
+      (payoutCountByStatus.REVERSED ?? 0);
+    const payoutSuccessRate =
+      payoutTerminal30 === 0
+        ? null
+        : Math.round((payoutSuccess30 / payoutTerminal30) * 1000) / 10;
 
     // Service health from partner status
     const serviceHealth = Object.entries(partners).map(([key, val]) => ({
@@ -104,6 +228,21 @@ export async function GET() {
       dailyGmv,
       serviceHealth,
       auditEvents,
+      // --- additive: Service Overview + Vendor Balances ---
+      services,
+      vendorBalances,
+      vendorBalanceTotal,
+      // --- additive: Payout KPIs ---
+      payout: {
+        volumeToday: toNumber(dec(payoutToday._sum.amount ?? 0)),
+        countToday: payoutToday._count,
+        volumeMonth: toNumber(dec(payoutMonth._sum.amount ?? 0)),
+        successRate: payoutSuccessRate,
+        successCount30: payoutSuccess30,
+        terminalCount30: payoutTerminal30,
+        inflight: payoutInflight,
+        daily: dailyPayout,
+      },
     });
   } catch (e: any) {
     if (e?.name === "AuthError") return NextResponse.json({ error: e.message }, { status: 401 });

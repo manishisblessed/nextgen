@@ -292,6 +292,110 @@ export async function getDigilockerDocument(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Aadhaar OTP eKYC (used by the monthly Re-KYC gate — Phase 13)
+//
+// Two-step: generate an OTP to the Aadhaar-linked mobile, then submit it to
+// pull the verified identity. Endpoint paths are overridable via env so they
+// can be aligned with the live eKYC Hub Aadhaar OTP contract without a code
+// change. Responses follow the same { status: "Success" | "Failure" } shape.
+// ---------------------------------------------------------------------------
+
+export interface AadhaarOtpInitResponse {
+  status: string;
+  reference_id: string | number;
+  message: string;
+}
+
+export async function aadhaarOtpInitiate(input: {
+  aadhaar: string;
+  orderid: string;
+}): Promise<PartnerResult<AadhaarOtpInitResponse>> {
+  const path = process.env.EKYCHUB_AADHAAR_OTP_INIT_PATH || "/aadhaar/otp";
+  return ekychubGet(path, { id_number: input.aadhaar, orderid: input.orderid });
+}
+
+export interface AadhaarOtpVerifyResponse {
+  status: string;
+  name: string;
+  /** eKYC Hub returns a masked Aadhaar (e.g. "XXXXXXXX1234"). */
+  aadhaar_number?: string;
+  dob?: string;
+  gender?: string;
+  message: string;
+}
+
+export async function aadhaarOtpVerify(input: {
+  reference_id: string;
+  otp: string;
+  orderid: string;
+}): Promise<PartnerResult<AadhaarOtpVerifyResponse>> {
+  const path = process.env.EKYCHUB_AADHAAR_OTP_VERIFY_PATH || "/aadhaar/verify_otp";
+  return ekychubGet(path, {
+    reference_id: input.reference_id,
+    otp: input.otp,
+    orderid: input.orderid,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Face match (liveness selfie/video frame vs. an enrolled baseline — Phase 13/14)
+//
+// Compares a freshly-captured face image against the stored onboarding
+// baseline reference and returns a confidence score. The caller supplies opaque
+// provider-side references (never raw biometrics travel through our DB).
+// ---------------------------------------------------------------------------
+
+export interface FaceMatchResponse {
+  status: string;
+  match: boolean;
+  /** 0..100 confidence; the caller compares against its own threshold. */
+  confidence: number;
+  message: string;
+}
+
+export async function faceMatch(input: {
+  /** Provider reference for the enrolled baseline (from onboarding). */
+  baselineRef: string;
+  /** Provider reference for the freshly-captured liveness frame. */
+  probeRef: string;
+  orderid: string;
+}): Promise<PartnerResult<FaceMatchResponse>> {
+  const path = process.env.EKYCHUB_FACE_MATCH_PATH || "/face/match";
+  return ekychubGet(path, {
+    baseline_ref: input.baselineRef,
+    probe_ref: input.probeRef,
+    orderid: input.orderid,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Face register (enroll an onboarding baseline — Phase 14)
+//
+// Registers a single clear face frame (extracted from the onboarding liveness
+// video) as the user's baseline and returns an opaque provider reference. The
+// raw frame is delivered to the provider out-of-band (a short-TTL signed URL);
+// our DB only ever stores the returned reference, field-encrypted.
+// ---------------------------------------------------------------------------
+
+export interface FaceRegisterResponse {
+  status: string;
+  /** Provider-side reference for the enrolled baseline. */
+  reference_id: string | number;
+  /** Whether a usable face was detected in the supplied frame. */
+  face_detected?: boolean;
+  message: string;
+}
+
+export async function faceRegister(input: {
+  /** A short-TTL URL the provider can fetch the face frame from. */
+  imageUrl: string;
+  orderid: string;
+}): Promise<PartnerResult<FaceRegisterResponse>> {
+  const path = process.env.EKYCHUB_FACE_REGISTER_PATH || "/face/register";
+  return ekychubGet(path, { image: input.imageUrl, orderid: input.orderid });
+}
+
+// ---------------------------------------------------------------------------
 // Unified verification provider interface
 // ---------------------------------------------------------------------------
 
@@ -305,4 +409,8 @@ export const ekychubVerification = {
   verifyCin,
   createDigilockerUrl,
   getDigilockerDocument,
+  aadhaarOtpInitiate,
+  aadhaarOtpVerify,
+  faceMatch,
+  faceRegister,
 } as const;

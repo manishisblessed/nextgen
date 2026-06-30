@@ -13,8 +13,10 @@ const ROLE_LABEL: Record<string, string> = {
   RETAILER: "Retailer",
   DISTRIBUTOR: "Distributor",
   MASTER_DISTRIBUTOR: "Master Distributor",
+  SUPER_DISTRIBUTOR: "Super Distributor",
   ADMIN: "Admin",
   SUPPORT: "Support",
+  MASTER_ADMIN: "Master Admin",
 };
 
 const menuItems = [

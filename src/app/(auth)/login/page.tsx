@@ -12,6 +12,7 @@ import {
   Store,
   Users,
   Network,
+  Crown,
   ArrowRight,
   AlertCircle
 } from "lucide-react";
@@ -19,14 +20,16 @@ import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
 import { LocationGate, type LocationData } from "@/components/auth/LocationGate";
+import { Turnstile, captchaConfigured } from "@/components/security/Turnstile";
 import { cn } from "@/lib/utils";
 
-type PublicRole = "retailer" | "distributor" | "master-distributor";
+type PublicRole = "retailer" | "distributor" | "master-distributor" | "super-distributor";
 
 const roleOptions: { id: PublicRole; label: string; icon: typeof Store; tagline: string }[] = [
   { id: "retailer", label: "Retailer", icon: Store, tagline: "Run a single shop" },
   { id: "distributor", label: "Distributor", icon: Users, tagline: "Manage retailers" },
-  { id: "master-distributor", label: "Master", icon: Network, tagline: "White-label & API" }
+  { id: "master-distributor", label: "Master Dist.", icon: Network, tagline: "White-label & API" },
+  { id: "super-distributor", label: "Super Dist.", icon: Crown, tagline: "Multi-state network" },
 ];
 
 export default function LoginPage() {
@@ -45,6 +48,7 @@ function LoginForm({ location }: { location: LocationData }) {
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [captchaToken, setCaptchaToken] = useState("");
 
   // 2FA state
   const [step, setStep] = useState<"credentials" | "2fa">("credentials");
@@ -68,6 +72,7 @@ function LoginForm({ location }: { location: LocationData }) {
           identifier: identifier.trim(),
           password,
           location: { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy },
+          captchaToken,
         }),
       });
 
@@ -163,10 +168,10 @@ function LoginForm({ location }: { location: LocationData }) {
             <Sparkles className="h-3.5 w-3.5" /> Unified portal
           </span>
           <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
-            One NextGenPay. <br /> Three powerful dashboards.
+            One NextGenPay. <br /> Four powerful dashboards.
           </h2>
           <p className="mt-3 text-white/85">
-            Retailer, distributor and master distributor — each with its own purpose-built workspace, KPIs and controls.
+            Retailer, distributor, master distributor and super distributor — each with its own purpose-built workspace, KPIs and controls.
           </p>
         </div>
 
@@ -198,7 +203,7 @@ function LoginForm({ location }: { location: LocationData }) {
           <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">
             I am a
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {roleOptions.map((r) => {
               const Icon = r.icon;
               const active = role === r.id;
@@ -216,7 +221,7 @@ function LoginForm({ location }: { location: LocationData }) {
                 >
                   <span
                     className={cn(
-                      "grid h-9 w-9 place-items-center rounded-lg",
+                      "grid h-9 w-9 shrink-0 place-items-center rounded-lg",
                       active
                         ? "bg-brand-600 text-white"
                         : "bg-ink-100 text-ink-700"
@@ -295,7 +300,14 @@ function LoginForm({ location }: { location: LocationData }) {
             Keep me signed in for 30 days
           </label>
 
-          <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          <Turnstile onToken={setCaptchaToken} className="flex justify-center" />
+
+          <Button
+            type="submit"
+            size="lg"
+            className="w-full"
+            disabled={loading || (captchaConfigured && !captchaToken)}
+          >
             {loading ? "Verifying..." : <>Continue <ArrowRight className="h-4 w-4" /></>}
           </Button>
         </form>

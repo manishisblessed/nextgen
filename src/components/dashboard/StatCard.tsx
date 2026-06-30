@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -8,7 +9,8 @@ export function StatCard({
   delta,
   trend = "up",
   icon: Icon,
-  accent = "brand"
+  accent = "brand",
+  href,
 }: {
   label: string;
   value: string;
@@ -16,6 +18,7 @@ export function StatCard({
   trend?: "up" | "down";
   icon: LucideIcon;
   accent?: "brand" | "accent" | "emerald" | "violet";
+  href?: string;
 }) {
   const accents: Record<string, string> = {
     brand: "from-brand-500 to-brand-700",
@@ -24,21 +27,24 @@ export function StatCard({
     violet: "from-violet-500 to-violet-700"
   };
 
-  return (
-    <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-sm">
+  const card = (
+    <div className={cn(
+      "rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all",
+      href && "cursor-pointer hover:border-brand-200 hover:shadow-md"
+    )}>
       <div className="flex items-start justify-between">
         <span
           className={cn(
-            "grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br text-white shadow-soft",
+            "grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br text-white shadow-soft",
             accents[accent]
           )}
         >
-          <Icon className="h-5 w-5" />
+          <Icon className="h-[18px] w-[18px]" />
         </span>
         {delta && (
           <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold",
+              "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
               trend === "up"
                 ? "bg-emerald-50 text-emerald-700"
                 : "bg-rose-50 text-rose-700"
@@ -53,10 +59,16 @@ export function StatCard({
           </span>
         )}
       </div>
-      <p className="mt-5 text-xs font-semibold uppercase tracking-widest text-ink-500">
+      <p className="mt-3 text-[11px] font-semibold uppercase tracking-widest text-ink-500">
         {label}
       </p>
-      <p className="mt-1 font-display text-2xl font-bold text-ink-900">{value}</p>
+      <p className="mt-0.5 font-display text-xl font-bold text-ink-900">{value}</p>
     </div>
   );
+
+  if (href) {
+    return <Link href={href}>{card}</Link>;
+  }
+
+  return card;
 }

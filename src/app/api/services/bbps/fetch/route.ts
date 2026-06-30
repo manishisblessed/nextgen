@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
-import { requireAuth, AuthError } from "@/lib/auth-server";
+import { requireAuth } from "@/lib/auth-server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -10,11 +12,16 @@ const Body = z.object({
   idempotencyKey: z.string().min(8)
 });
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   let user;
-  try { user = await requireAuth(); } catch (e) {
-    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+  try {
+    user = await requireAuth();
+    await enforceRateLimit(`bbps:fetch:${user.id}`, RATE_LIMITS.txnCreate);
+  } catch (e) {
+    return toErrorResponse(e);
   }
 
   const parsed = Body.safeParse(await req.json());

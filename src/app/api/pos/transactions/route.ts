@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth, AuthError } from "@/lib/auth-server";
+import { requireAuth } from "@/lib/auth-server";
 import { getPosTransactions } from "@/lib/partners/sameday-pos";
 import { flags } from "@/lib/env";
+import { scopePosTerminals } from "@/lib/pos/assignments";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
+
+export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +22,12 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
+  let user;
   try {
-    await requireAuth();
+    user = await requireAuth();
+    await enforceRateLimit(`pos:txn:${user.id}`, RATE_LIMITS.default);
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+    return toErrorResponse(e);
   }
 
   if (!flags.pos) {
@@ -39,6 +44,25 @@ export async function POST(req: Request) {
       { error: parsed.error.issues[0].message },
       { status: 400 }
     );
+  }
+
+  // Ownership: non-admins may only query terminals assigned to them/their
+  // downline. Prevents pulling the tenant-wide partner transaction feed.
+  const scope = await scopePosTerminals(user);
+  if (!scope.all) {
+    if (scope.tids.length === 0)
+      return NextResponse.json({ error: "No POS terminals are assigned to your account" }, { status: 403 });
+    if (parsed.data.terminal_id) {
+      if (!scope.tids.includes(parsed.data.terminal_id))
+        return NextResponse.json({ error: "You do not have access to that terminal" }, { status: 403 });
+    } else if (scope.tids.length === 1) {
+      parsed.data.terminal_id = scope.tids[0];
+    } else {
+      return NextResponse.json(
+        { error: "Select one of your terminals to view its transactions", terminals: scope.tids },
+        { status: 400 }
+      );
+    }
   }
 
   const result = await getPosTransactions(parsed.data);

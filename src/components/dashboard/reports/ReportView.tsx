@@ -1,0 +1,453 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Search,
+  RefreshCw,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+} from "lucide-react";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import { Sparkline } from "@/components/dashboard/Sparkline";
+import { ReportActions } from "@/components/dashboard/ReportActions";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Label } from "@/components/ui/Input";
+import { REPORTS } from "@/lib/reports/registry";
+import type { ReportColumnDef, Accent } from "@/lib/reports/registry";
+import type { ReportType, ReportResult } from "@/lib/reports/types";
+import type { ReportColumn } from "@/lib/reports";
+
+type Row = Record<string, unknown>;
+
+const ACCENT_TEXT: Record<Accent, string> = {
+  brand: "text-brand-700",
+  accent: "text-accent-700",
+  emerald: "text-emerald-700",
+  violet: "text-violet-700",
+};
+const ACCENT_BG: Record<Accent, string> = {
+  brand: "from-brand-500 to-brand-700",
+  accent: "from-accent-500 to-accent-600",
+  emerald: "from-emerald-500 to-emerald-700",
+  violet: "from-violet-500 to-violet-700",
+};
+const ACCENT_HEX: Record<Accent, string> = {
+  brand: "#185df5",
+  accent: "#f97606",
+  emerald: "#059669",
+  violet: "#7c3aed",
+};
+
+const ACRONYMS = new Set(["AEPS", "DMT", "UPI", "DTH", "PAN", "GST", "IMPS", "NEFT", "RTGS", "POS", "QR", "PG", "BBPS", "ID"]);
+function humanize(code: string): string {
+  return String(code)
+    .split("_")
+    .map((w) => (ACRONYMS.has(w) ? w : w.charAt(0) + w.slice(1).toLowerCase()))
+    .join(" ");
+}
+
+function inr2(n: number): string {
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function badgeVariant(raw: string): "success" | "warning" | "danger" | "brand" | "accent" | "default" {
+  const v = String(raw).toUpperCase().trim();
+  if (["SUCCESS", "APPROVED", "CREDIT", "ACTIVE", "SETTLED", "RECEIVED", "COMMISSION", "TOPUP", "REFUNDED"].includes(v)) return "success";
+  if (["FAILED", "REJECTED", "REVERSED", "DEBIT", "DECOMMISSIONED", "CANCELLED", "PENALTY"].includes(v)) return "danger";
+  if (["PENDING", "PENDING_APPROVAL", "PROCESSING", "INITIATED", "HOLD", "RECONCILING", "MAINTENANCE", "IN BANK", "INACTIVE"].includes(v)) return "warning";
+  if (["FUND_TRANSFER_IN", "DRAFT", "TRANSACTION"].includes(v)) return "brand";
+  if (["WITHDRAW", "FUND_TRANSFER_OUT", "FEE", "ADJUSTMENT", "PAYOUT"].includes(v)) return "accent";
+  return "default";
+}
+
+/** Display node for the on-screen table. */
+function displayCell(value: unknown, format?: ReportColumnDef["format"]) {
+  if (value === null || value === undefined || value === "") return <span className="text-ink-400">—</span>;
+  switch (format) {
+    case "money":
+      return typeof value === "number" ? <span className="font-semibold tabular-nums">{inr2(value)}</span> : <span>{String(value)}</span>;
+    case "int":
+      return typeof value === "number" ? <span className="tabular-nums">{value.toLocaleString("en-IN")}</span> : <span>{String(value)}</span>;
+    case "percent":
+      return typeof value === "number" ? <span className="tabular-nums">{value.toFixed(1)}%</span> : <span>{String(value)}</span>;
+    case "date":
+      return <span className="whitespace-nowrap text-ink-600">{toDateStr(value)}</span>;
+    case "datetime":
+      return <span className="whitespace-nowrap text-ink-600">{toDateTimeStr(value)}</span>;
+    case "badge":
+      return <Badge variant={badgeVariant(String(value))}>{humanize(String(value))}</Badge>;
+    case "mono":
+      return <span className="font-mono text-xs">{String(value)}</span>;
+    default:
+      return <span>{String(value)}</span>;
+  }
+}
+
+function toDateStr(value: unknown): string {
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function toDateTimeStr(value: unknown): string {
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** String for CSV/PDF export cells (numeric XLSX cells use the raw value). */
+function exportString(value: unknown, format?: ReportColumnDef["format"]): string {
+  if (value === null || value === undefined) return "";
+  switch (format) {
+    case "money":
+      return typeof value === "number" ? inr2(value) : String(value);
+    case "percent":
+      return typeof value === "number" ? `${value.toFixed(1)}%` : String(value);
+    case "date":
+      return toDateStr(value);
+    case "datetime":
+      return toDateTimeStr(value);
+    case "badge":
+      return humanize(String(value));
+    default:
+      return String(value);
+  }
+}
+
+function toColFormat(f?: ReportColumnDef["format"]): ReportColumn<Row>["format"] {
+  if (f === "money" || f === "int" || f === "date" || f === "datetime") return f;
+  return "text";
+}
+
+export function ReportView({ type }: { type: ReportType }) {
+  const config = REPORTS[type];
+  const f = config.filters;
+
+  const today = useMemo(() => new Date(), []);
+  const monthAgo = useMemo(() => new Date(today.getTime() - 30 * 86_400_000), [today]);
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+  const [from, setFrom] = useState(f.dateRange ? ymd(monthAgo) : "");
+  const [to, setTo] = useState(f.dateRange ? ymd(today) : "");
+  const [qInput, setQInput] = useState("");
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [service, setService] = useState("");
+  const [mode, setMode] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const [data, setData] = useState<ReportResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Debounce free-text search.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(qInput.trim());
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(t);
+  }, [qInput]);
+
+  const baseQuery = useCallback(() => {
+    const p = new URLSearchParams();
+    if (f.dateRange) {
+      if (from) p.set("from", from);
+      if (to) p.set("to", to);
+    }
+    if (q) p.set("q", q);
+    if (status) p.set("status", status);
+    if (service) p.set("service", service);
+    if (mode) p.set("mode", mode);
+    return p;
+  }, [f.dateRange, from, to, q, status, service, mode]);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const p = baseQuery();
+      p.set("page", String(page));
+      p.set("pageSize", String(pageSize));
+      const res = await fetch(`/api/reports/${type}?${p.toString()}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(typeof j.error === "string" ? j.error : "Failed to load report");
+      }
+      setData((await res.json()) as ReportResult);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load report");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [baseQuery, page, pageSize, type]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Full filtered dataset for exports (capped server-side), with a totals row.
+  const fetchAllRows = useCallback(async (): Promise<Row[]> => {
+    const p = baseQuery();
+    p.set("export", "1");
+    const res = await fetch(`/api/reports/${type}?${p.toString()}`);
+    if (!res.ok) return data?.rows ?? [];
+    const json = (await res.json()) as ReportResult;
+    const rows = [...json.rows];
+    if (json.totals && Object.keys(json.totals).length > 0) rows.push(json.totals as Row);
+    return rows;
+  }, [baseQuery, type, data]);
+
+  const exportColumns: ReportColumn<Row>[] = useMemo(
+    () =>
+      config.columns.map((c) => ({
+        key: c.key,
+        header: c.header,
+        format: toColFormat(c.format),
+        render: (row: Row) => exportString(row[c.key], c.format),
+      })),
+    [config.columns]
+  );
+
+  const rows = data?.rows ?? [];
+  const totals = data?.totals ?? {};
+  const hasTotals = Object.keys(totals).length > 0;
+  const totalRecords = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const startIdx = totalRecords === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endIdx = Math.min(page * pageSize, totalRecords);
+
+  const resetFilters = () => {
+    setFrom(f.dateRange ? ymd(monthAgo) : "");
+    setTo(f.dateRange ? ymd(today) : "");
+    setQInput("");
+    setQ("");
+    setStatus("");
+    setService("");
+    setMode("");
+    setPage(1);
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Reports"
+        title={config.title}
+        description={config.description}
+        actions={
+          <>
+            <ReportActions
+              filename={`${type}-report`}
+              title={`JMP NextGenPay · ${config.title}`}
+              subtitle={
+                f.dateRange && from && to ? `${toDateStr(from)} – ${toDateStr(to)}` : "All records"
+              }
+              columns={exportColumns}
+              rows={rows}
+              fetchRows={fetchAllRows}
+            />
+            <Button variant="outline" onClick={fetchData} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </>
+        }
+      />
+
+      {/* KPI cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {(data?.summary ?? []).map((s) => (
+          <div key={s.label} className="rounded-2xl border border-ink-100 bg-white p-5 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-ink-500">{s.label}</p>
+            <p className={`mt-1 font-display text-2xl font-bold ${ACCENT_TEXT[s.accent ?? config.accent]}`}>
+              {loading && !data ? "—" : s.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Trend sparkline */}
+      {data?.trend && data.trend.values.length > 1 && (
+        <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-widest text-ink-500">{data.trend.label}</p>
+            <span className={`h-2.5 w-2.5 rounded-full bg-gradient-to-br ${ACCENT_BG[config.accent]}`} />
+          </div>
+          <div className="mt-3">
+            <Sparkline values={data.trend.values} color={data.trend.color || ACCENT_HEX[config.accent]} height={70} />
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-ink-100 bg-white p-4 shadow-sm">
+        {f.dateRange && (
+          <>
+            <div>
+              <Label htmlFor="from">From</Label>
+              <Input id="from" type="date" value={from} max={to || undefined} onChange={(e) => { setFrom(e.target.value); setPage(1); }} className="w-44" />
+            </div>
+            <div>
+              <Label htmlFor="to">To</Label>
+              <Input id="to" type="date" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); setPage(1); }} className="w-44" />
+            </div>
+          </>
+        )}
+
+        {f.status && (
+          <div>
+            <Label htmlFor="status">{f.status.label}</Label>
+            <Select id="status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="w-44">
+              <option value="">All</option>
+              {f.status.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </div>
+        )}
+
+        {f.service && (
+          <div>
+            <Label htmlFor="service">{f.service.label}</Label>
+            <Select id="service" value={service} onChange={(e) => { setService(e.target.value); setPage(1); }} className="w-48">
+              <option value="">All</option>
+              {f.service.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </div>
+        )}
+
+        {f.mode && (
+          <div>
+            <Label htmlFor="mode">{f.mode.label}</Label>
+            <Select id="mode" value={mode} onChange={(e) => { setMode(e.target.value); setPage(1); }} className="w-40">
+              <option value="">All</option>
+              {f.mode.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </div>
+        )}
+
+        {f.search && (
+          <div className="min-w-[220px] flex-1">
+            <Label htmlFor="q">Search</Label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+              <Input id="q" value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder={f.search} className="pl-9" />
+            </div>
+          </div>
+        )}
+
+        <Button variant="outline" onClick={resetFilters}>Reset</Button>
+      </div>
+
+      {/* Note / errors */}
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+      {data?.note && !error && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <Info className="h-4 w-4 shrink-0" />
+          {data.note}
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="min-w-0 overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-100 px-5 py-4">
+          <h3 className="font-display text-base font-semibold text-ink-900">
+            {loading ? "Loading…" : `${totalRecords.toLocaleString("en-IN")} record${totalRecords === 1 ? "" : "s"}`}
+          </h3>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="pageSize" className="mb-0 text-xs text-ink-500">Rows</Label>
+            <Select id="pageSize" value={String(pageSize)} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="h-9 w-20">
+              {[20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+            </Select>
+          </div>
+        </div>
+
+        <div className="w-full overflow-x-auto">
+          <table className="w-full min-w-max text-sm">
+            <thead className="bg-ink-50/80 text-left text-[11px] uppercase tracking-wider text-ink-500">
+              <tr>
+                {config.columns.map((c) => (
+                  <th key={c.key} className={`whitespace-nowrap px-5 py-3 font-semibold ${c.align === "right" ? "text-right" : ""}`}>
+                    {c.header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-100 text-ink-800">
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={i}>
+                    {config.columns.map((c) => (
+                      <td key={c.key} className="px-5 py-3.5">
+                        <div className="h-3 w-20 animate-pulse rounded bg-ink-100" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={config.columns.length} className="px-5 py-14 text-center text-sm text-ink-500">
+                    No records match your filters.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((row, i) => (
+                  <tr key={i} className="transition-colors hover:bg-brand-50/40">
+                    {config.columns.map((c) => (
+                      <td key={c.key} className={`whitespace-nowrap px-5 py-3 ${c.align === "right" ? "text-right" : ""}`}>
+                        {displayCell(row[c.key], c.format)}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+            {!loading && rows.length > 0 && hasTotals && (
+              <tfoot>
+                <tr className="border-t-2 border-ink-200 bg-ink-50/60 font-semibold text-ink-900">
+                  {config.columns.map((c, idx) => {
+                    const tv = totals[c.key];
+                    return (
+                      <td key={c.key} className={`whitespace-nowrap px-5 py-3 ${c.align === "right" ? "text-right" : ""}`}>
+                        {tv === undefined
+                          ? idx === 0 && !("service" in totals || "date" in totals || "tid" in totals)
+                            ? "Total"
+                            : ""
+                          : c.format === "money" || c.format === "int" || c.format === "percent"
+                            ? displayCell(tv, c.format)
+                            : <span className="text-ink-700">{String(tv)}</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {!loading && totalRecords > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-100 px-5 py-3 text-sm text-ink-600">
+            <span>Showing {startIdx.toLocaleString("en-IN")}–{endIdx.toLocaleString("en-IN")} of {totalRecords.toLocaleString("en-IN")}</span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                <ChevronLeft className="h-4 w-4" /> Prev
+              </Button>
+              <span className="px-2 text-xs">Page {page} of {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
+                Next <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

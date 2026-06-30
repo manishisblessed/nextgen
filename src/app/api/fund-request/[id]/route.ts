@@ -1,13 +1,26 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { creditWallet, debitWallet, LedgerError } from "@/lib/ledger";
+import { toNumber } from "@/lib/money";
+import { isAdminRole } from "@/lib/security/ownership";
+import { assertKycCurrent, ReKycRequiredError } from "@/lib/security/kycGate";
+import { assertLivenessReady, LivenessRequiredError } from "@/lib/security/livenessGate";
+import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
 
-const PatchBody = z.object({
-  action: z.enum(["approve", "reject"]),
-  remarks: z.string().optional(),
-});
+const PatchBody = z
+  .object({
+    action: z.enum(["approve", "reject"]),
+    remarks: z.string().optional(),
+  })
+  .strict();
+
+/** Thrown when a concurrent approval already claimed this request. */
+class AlreadyProcessedError extends Error {}
+
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
 
 export async function PATCH(
   req: Request,
@@ -16,9 +29,15 @@ export async function PATCH(
   let user;
   try {
     user = await requireAuth();
+    await enforceRateLimit(`fund-request:decide:${user.id}`, RATE_LIMITS.fundRequestCreate);
   } catch (e) {
     if (e instanceof AuthError)
       return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    if (e instanceof RateLimitError)
+      return NextResponse.json(
+        { error: e.message, retryAfterSec: e.result.retryAfterSec },
+        { status: 429 }
+      );
     throw e;
   }
 
@@ -37,7 +56,9 @@ export async function PATCH(
   if (fundReq.status !== "PENDING")
     return NextResponse.json({ error: "Request already processed" }, { status: 409 });
 
-  const isAdmin = user.role === "ADMIN" || user.role === "SUPPORT";
+  // Admins (incl. MASTER_ADMIN) may decide any request; otherwise only the
+  // requester's direct parent in the hierarchy may approve/reject.
+  const isAdmin = isAdminRole(user.role);
   const isParent = fundReq.requester.parentId === user.id;
   if (!isAdmin && !isParent)
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -60,7 +81,7 @@ export async function PATCH(
         entity: "FundRequest",
         entityId: params.id,
         meta: {
-          amount: Number(fundReq.amount),
+          amount: toNumber(fundReq.amount),
           requesterId: fundReq.requesterId,
         },
       },
@@ -69,59 +90,28 @@ export async function PATCH(
     return NextResponse.json({ status: "REJECTED" });
   }
 
-  // Approve: atomic wallet transfer (approver → requester)
+  // Onboarding liveness + monthly Re-KYC gates — a network-tier approver moves
+  // their own wallet funds here, so block the money movement until both pass.
+  try {
+    await assertLivenessReady(user);
+    await assertKycCurrent(user);
+  } catch (e) {
+    if (e instanceof LivenessRequiredError)
+      return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
+    if (e instanceof ReKycRequiredError)
+      return NextResponse.json({ error: e.message, code: e.code, reKycDueAt: e.dueAt }, { status: e.statusCode });
+    throw e;
+  }
+
+  // Approve: atomic wallet transfer (approver → requester) through the ledger.
+  // The status is claimed with a conditional update inside the same transaction
+  // so two concurrent approvals can never both move money, and the ledger
+  // helpers row-lock + idempotency-key each movement so balances stay exact.
   try {
     await prisma.$transaction(async (tx) => {
-      const approver = await tx.user.findUniqueOrThrow({
-        where: { id: user.id },
-      });
-      const amount = Number(fundReq.amount);
-
-      if (Number(approver.walletBalance) < amount) {
-        throw new Error("INSUFFICIENT_BALANCE");
-      }
-
-      const approverAfter = Number(approver.walletBalance) - amount;
-      await tx.user.update({
-        where: { id: user.id },
-        data: { walletBalance: approverAfter },
-      });
-      await tx.walletTxn.create({
-        data: {
-          userId: user.id,
-          direction: "DEBIT",
-          reason: "FUND_TRANSFER_OUT",
-          amount: new Prisma.Decimal(amount),
-          balanceAfter: new Prisma.Decimal(approverAfter),
-          refType: "FundRequest",
-          refId: params.id,
-          note: `Fund transfer to ${fundReq.requester.name}`,
-        },
-      });
-
-      const requester = await tx.user.findUniqueOrThrow({
-        where: { id: fundReq.requesterId },
-      });
-      const requesterAfter = Number(requester.walletBalance) + amount;
-      await tx.user.update({
-        where: { id: fundReq.requesterId },
-        data: { walletBalance: requesterAfter },
-      });
-      await tx.walletTxn.create({
-        data: {
-          userId: fundReq.requesterId,
-          direction: "CREDIT",
-          reason: "FUND_TRANSFER_IN",
-          amount: new Prisma.Decimal(amount),
-          balanceAfter: new Prisma.Decimal(requesterAfter),
-          refType: "FundRequest",
-          refId: params.id,
-          note: `Fund request approved by ${user.name}`,
-        },
-      });
-
-      await tx.fundRequest.update({
-        where: { id: params.id },
+      // Claim the request — only the winner of the race proceeds.
+      const claim = await tx.fundRequest.updateMany({
+        where: { id: params.id, status: "PENDING" },
         data: {
           status: "APPROVED",
           approverId: user.id,
@@ -129,9 +119,42 @@ export async function PATCH(
           remarks: parsed.data.remarks ?? null,
         },
       });
+      if (claim.count === 0) throw new AlreadyProcessedError();
+
+      await debitWallet(
+        {
+          userId: user.id,
+          amount: fundReq.amount,
+          reason: "FUND_TRANSFER_OUT",
+          refType: "FundRequest",
+          refId: params.id,
+          note: `Fund transfer to ${fundReq.requester.name}`,
+          idempotencyKey: `fund-request:${params.id}:out`,
+        },
+        tx
+      );
+
+      await creditWallet(
+        {
+          userId: fundReq.requesterId,
+          amount: fundReq.amount,
+          reason: "FUND_TRANSFER_IN",
+          refType: "FundRequest",
+          refId: params.id,
+          note: `Fund request approved by ${user.name}`,
+          idempotencyKey: `fund-request:${params.id}:in`,
+        },
+        tx
+      );
     });
   } catch (e) {
-    if (e instanceof Error && e.message === "INSUFFICIENT_BALANCE") {
+    if (e instanceof AlreadyProcessedError) {
+      return NextResponse.json(
+        { error: "Request already processed" },
+        { status: 409 }
+      );
+    }
+    if (e instanceof LedgerError && e.code === "INSUFFICIENT_FUNDS") {
       return NextResponse.json(
         { error: "Insufficient wallet balance to approve this request" },
         { status: 400 }
@@ -147,7 +170,7 @@ export async function PATCH(
       entity: "FundRequest",
       entityId: params.id,
       meta: {
-        amount: Number(fundReq.amount),
+        amount: toNumber(fundReq.amount),
         requesterId: fundReq.requesterId,
       },
     },

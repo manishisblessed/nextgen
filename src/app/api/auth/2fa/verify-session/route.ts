@@ -9,6 +9,8 @@ import {
   verifyBackupCode,
   MAX_2FA_ATTEMPTS,
 } from "@/lib/two-factor";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { clientIp } from "@/lib/security/audit";
 
 const Body = z.object({
   tempToken: z.string().min(10),
@@ -33,10 +35,17 @@ function createSessionGrant(userId: string): string {
  * Web-specific: verifies 2FA code and returns a session grant token.
  * Frontend uses this grant to call signIn("token-login") and establish a NextAuth session.
  */
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+
+  const rl = await checkRateLimit(`2fa:ip:${clientIp(req)}`, RATE_LIMITS.twoFactor);
+  if (!rl.allowed)
+    return NextResponse.json({ error: "Too many attempts. Please try again later." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
 
   const { tempToken, code, type } = parsed.data;
 
@@ -110,7 +119,7 @@ export async function POST(req: Request) {
         entity: "User",
         entityId: userId,
         meta: { type, remainingAttempts: MAX_2FA_ATTEMPTS - recentAttempts - 1 },
-        ip: req.headers.get("x-forwarded-for") ?? undefined,
+        ip: clientIp(req),
       },
     });
 
@@ -129,7 +138,7 @@ export async function POST(req: Request) {
       action: "2fa.verified",
       entity: "User",
       entityId: userId,
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
 

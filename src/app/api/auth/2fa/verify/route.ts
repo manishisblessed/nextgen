@@ -9,6 +9,8 @@ import {
   verifyBackupCode,
   MAX_2FA_ATTEMPTS,
 } from "@/lib/two-factor";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { clientIp } from "@/lib/security/audit";
 
 const Body = z.object({
   tempToken: z.string().min(10),
@@ -27,10 +29,18 @@ const Body = z.object({
  * - Constant-time signature verification
  * - Backup codes are single-use
  */
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+
+  // IP-level throttle layered on top of the per-token attempt counter below.
+  const rl = await checkRateLimit(`2fa:ip:${clientIp(req)}`, RATE_LIMITS.twoFactor);
+  if (!rl.allowed)
+    return NextResponse.json({ error: "Too many attempts. Please try again later." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
 
   const { tempToken, code, type } = parsed.data;
 
@@ -56,6 +66,7 @@ export async function POST(req: Request) {
       status: true,
       walletBalance: true,
       allowedTabs: true,
+      disabledServices: true,
       twoFactorSecret: true,
       twoFactorBackupCodes: true,
     },
@@ -114,7 +125,7 @@ export async function POST(req: Request) {
         entity: "User",
         entityId: userId,
         meta: { type, remainingAttempts: MAX_2FA_ATTEMPTS - recentAttempts - 1 },
-        ip: req.headers.get("x-forwarded-for") ?? undefined,
+        ip: clientIp(req),
       },
     });
 
@@ -135,7 +146,7 @@ export async function POST(req: Request) {
       action: "2fa.verified",
       entity: "User",
       entityId: userId,
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
 
@@ -148,6 +159,7 @@ export async function POST(req: Request) {
     status: user.status,
     walletBalance: Number(user.walletBalance),
     allowedTabs: user.allowedTabs ?? [],
+    disabledServices: user.disabledServices ?? [],
     twoFactorEnabled: true,
   };
 

@@ -2,10 +2,15 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { clientIp } from "@/lib/security/audit";
+import { bumpTokenVersion } from "@/lib/security/session";
 
 const PatchBody = z.object({
   action: z.enum(["suspend", "activate"]),
-});
+}).strict();
+
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
 
 export async function PATCH(
   req: Request,
@@ -57,9 +62,12 @@ export async function PATCH(
       entity: "User",
       entityId: params.id,
       meta: { action, name: target.name },
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
+
+  // Suspend/activate is a privilege change → invalidate the target's sessions.
+  await bumpTokenVersion(params.id, { swallow: true });
 
   return NextResponse.json({ ok: true, subAdmin: updated });
 }
@@ -98,9 +106,11 @@ export async function DELETE(
       entity: "User",
       entityId: params.id,
       meta: { name: target.name },
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
+
+  await bumpTokenVersion(params.id, { swallow: true });
 
   return NextResponse.json({ ok: true });
 }

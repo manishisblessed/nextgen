@@ -11,6 +11,7 @@ import {
   Eye,
   ChevronDown,
   Search,
+  RefreshCw,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -51,6 +52,7 @@ export default function AdminInvitesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedInvite, setSelectedInvite] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<any>(null);
+  const [resending, setResending] = useState<string | null>(null);
 
   const fetchInvites = useCallback(async () => {
     setLoading(true);
@@ -95,12 +97,35 @@ export default function AdminInvitesPage() {
     }
   }
 
+  async function handleResend(id: string) {
+    setResending(id);
+    try {
+      const res = await fetch(`/api/admin/invite/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resend" }),
+      });
+      const data = await res.json();
+      if (res.ok && data.emailSent) {
+        alert("Onboarding email resent successfully!");
+      } else if (res.ok && !data.emailSent) {
+        alert("Invite found but email delivery failed. Please check email provider settings.");
+      } else {
+        alert(data.error || "Failed to resend invite");
+      }
+    } catch {
+      alert("Network error — could not resend invite");
+    } finally {
+      setResending(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Admin"
         title="Onboarding Invites"
-        description="Create and manage onboarding invites for Master Distributors, Distributors, and Retailers."
+        description="Create and manage onboarding invites for Super Distributors. SDs, MDs, and Distributors onboard their own downline."
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -185,6 +210,20 @@ export default function AdminInvitesPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {inv.status === "PENDING" && (
+                        <button
+                          onClick={() => handleResend(inv.id)}
+                          disabled={resending === inv.id}
+                          title="Resend onboarding email"
+                          className="rounded-lg p-1.5 text-brand-600 hover:bg-brand-50 disabled:opacity-50"
+                        >
+                          {resending === inv.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => viewDetail(inv.id)}
                         className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-100 hover:text-ink-900"
@@ -230,8 +269,7 @@ function CreateInviteForm({
     phone: "",
     email: "",
     name: "",
-    role: "RETAILER",
-    parentId: "",
+    role: "SUPER_DISTRIBUTOR",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -251,7 +289,6 @@ function CreateInviteForm({
         email: form.email,
         name: form.name || undefined,
         role: form.role,
-        parentId: form.parentId || undefined,
       }),
     });
 
@@ -319,18 +356,11 @@ function CreateInviteForm({
             value={form.role}
             onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
           >
-            <option value="RETAILER">Retailer</option>
-            <option value="DISTRIBUTOR">Distributor</option>
-            <option value="MASTER_DISTRIBUTOR">Master Distributor</option>
+            <option value="SUPER_DISTRIBUTOR">Super Distributor</option>
           </Select>
-        </div>
-        <div className="md:col-span-2">
-          <Label>Parent ID (Map under — optional)</Label>
-          <Input
-            value={form.parentId}
-            onChange={(e) => setForm((f) => ({ ...f, parentId: e.target.value }))}
-            placeholder="User ID of parent MD/Distributor"
-          />
+          <p className="mt-1 text-xs text-ink-500">
+            Admins can only onboard Super Distributors. Other roles are onboarded by their upline.
+          </p>
         </div>
         <div className="flex items-center gap-3 md:col-span-2">
           <Button type="submit" disabled={submitting}>

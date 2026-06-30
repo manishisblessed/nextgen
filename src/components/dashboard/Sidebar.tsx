@@ -9,6 +9,7 @@ import { Logo } from "@/components/layout/Logo";
 import { cn } from "@/lib/utils";
 import { toDisplayRole, type Role } from "@/lib/auth";
 import { navByRole, type NavGroup } from "@/lib/roles";
+import { SERVICE_KEY_TO_HREF } from "@/lib/services/catalog";
 
 export function Sidebar({
   open,
@@ -26,24 +27,49 @@ export function Sidebar({
   }, [session]);
 
   const allowedTabs: string[] = (session?.user as any)?.allowedTabs ?? [];
+  const disabledServices: string[] = (session?.user as any)?.disabledServices ?? [];
+
+  const disabledHrefs = useMemo(() => {
+    const hrefs = new Set<string>();
+    for (const key of disabledServices) {
+      const href = SERVICE_KEY_TO_HREF[key];
+      if (href) hrefs.add(href);
+    }
+    return hrefs;
+  }, [disabledServices]);
 
   const groups: NavGroup[] = useMemo(() => {
-    const base = navByRole[role];
-    if (role !== "admin" && role !== "sub-admin") return base;
-    if (allowedTabs.length === 0) return base;
+    let base = navByRole[role];
 
-    const prefix = role === "admin" ? "/dashboard/admin/" : "/dashboard/sub-admin/";
-    return base
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((item) => {
-          if (!item.href.startsWith(prefix)) return true;
-          const slug = item.href.replace(prefix, "");
-          return allowedTabs.includes(slug);
-        }),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [role, allowedTabs]);
+    // Admin/sub-admin: filter by allowedTabs
+    if ((role === "admin" || role === "sub-admin") && allowedTabs.length > 0) {
+      const prefix = role === "admin" ? "/dashboard/admin/" : "/dashboard/sub-admin/";
+      base = base
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => {
+            if (!item.href.startsWith(prefix)) return true;
+            const slug = item.href.replace(prefix, "");
+            return allowedTabs.includes(slug);
+          }),
+        }))
+        .filter((group) => group.items.length > 0);
+    }
+
+    // Network roles (RT/DT/MD/SD): filter out disabled services
+    if (disabledHrefs.size > 0) {
+      base = base
+        .map((group) => ({
+          ...group,
+          items: group.items.filter(
+            (item) => !disabledHrefs.has(item.href)
+          ),
+        }))
+        .filter((group) => group.items.length > 0);
+    }
+
+    return base;
+  }, [role, allowedTabs, disabledHrefs]);
 
   return (
     <>

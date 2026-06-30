@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server";
-import { requireAuth, AuthError } from "@/lib/auth-server";
+import { requireRole } from "@/lib/auth-server";
 import { getPosMachines } from "@/lib/partners/sameday-pos";
 import { flags } from "@/lib/env";
+import { toErrorResponse } from "@/lib/security/apiErrors";
+
+export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Raw partner (tenant-wide) machine inventory. This is the unscoped fleet feed,
+ * so it is restricted to admins. End users get their assigned terminals from
+ * the ownership-scoped `/api/pos/my-machines`.
+ */
 export async function GET(req: Request) {
   try {
-    await requireAuth();
+    await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+    return toErrorResponse(e);
   }
 
   if (!flags.pos) {

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Download, FileText, FileSpreadsheet, X } from "lucide-react";
+import { Eye, Download, FileText, FileSpreadsheet, Sheet, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/lib/useAuth";
 import {
   downloadCSV,
   downloadPDF,
+  downloadXLSX,
   type ReportColumn,
   cellValue
 } from "@/lib/reports";
@@ -20,10 +21,17 @@ type Props<T> = {
   rows: T[];
   /** Optional secondary line under the report title in PDF / preview. */
   subtitle?: string;
+  /**
+   * Optional async provider for the FULL filtered dataset. When supplied, the
+   * CSV/PDF/XLSX buttons export every matching row (server-side, ownership
+   * scoped) instead of only the current page. The on-screen preview still uses
+   * `rows` for a fast peek.
+   */
+  fetchRows?: () => Promise<T[]>;
 };
 
 /**
- * Three-button toolbar — View, CSV, PDF — that any report-style page can
+ * Four-button toolbar — View, CSV, Excel, PDF — that any report-style page can
  * drop into its `<PageHeader actions>` slot.
  *
  * Access is implicit: a user can only see this component if they were
@@ -35,43 +43,62 @@ export function ReportActions<T>({
   title,
   columns,
   rows,
-  subtitle
+  subtitle,
+  fetchRows
 }: Props<T>) {
   const { session } = useAuth();
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<null | "csv" | "xlsx" | "pdf">(null);
 
   const generatedFor = session
     ? `${session.name} (${session.role}${session.userCode ? " · " + session.userCode : ""})`
     : undefined;
 
+  async function resolveRows(): Promise<T[]> {
+    if (!fetchRows) return rows;
+    return await fetchRows();
+  }
+
+  async function doExport(kind: "csv" | "xlsx" | "pdf") {
+    try {
+      setBusy(kind);
+      const data = await resolveRows();
+      if (kind === "csv") downloadCSV(filename, data, columns);
+      else if (kind === "xlsx") await downloadXLSX(filename, data, columns, { title, subtitle });
+      else downloadPDF(title, data, columns, { generatedFor, subtitle });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <>
-      <Button
-        variant="outline"
-        size="md"
-        onClick={() => setOpen(true)}
-        title="Preview the report"
-      >
+      <Button variant="outline" size="md" onClick={() => setOpen(true)} title="Preview the report">
         <Eye className="h-4 w-4" />
         View
       </Button>
       <Button
         variant="outline"
         size="md"
-        onClick={() => downloadCSV(filename, rows, columns)}
+        onClick={() => doExport("csv")}
+        disabled={busy !== null}
         title="Download as CSV"
       >
-        <FileSpreadsheet className="h-4 w-4" />
+        {busy === "csv" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
         CSV
       </Button>
       <Button
+        variant="outline"
         size="md"
-        onClick={() =>
-          downloadPDF(title, rows, columns, { generatedFor, subtitle })
-        }
-        title="Open print-ready PDF"
+        onClick={() => doExport("xlsx")}
+        disabled={busy !== null}
+        title="Download as Excel (.xlsx)"
       >
-        <FileText className="h-4 w-4" />
+        {busy === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sheet className="h-4 w-4" />}
+        Excel
+      </Button>
+      <Button size="md" onClick={() => doExport("pdf")} disabled={busy !== null} title="Open print-ready PDF">
+        {busy === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
         PDF
       </Button>
 
@@ -83,10 +110,10 @@ export function ReportActions<T>({
           columns={columns}
           rows={rows}
           onClose={() => setOpen(false)}
-          onDownloadCsv={() => downloadCSV(filename, rows, columns)}
-          onDownloadPdf={() =>
-            downloadPDF(title, rows, columns, { generatedFor, subtitle })
-          }
+          onDownloadCsv={() => doExport("csv")}
+          onDownloadXlsx={() => doExport("xlsx")}
+          onDownloadPdf={() => doExport("pdf")}
+          busy={busy}
         />
       )}
     </>
@@ -101,7 +128,9 @@ function PreviewDialog<T>({
   rows,
   onClose,
   onDownloadCsv,
-  onDownloadPdf
+  onDownloadXlsx,
+  onDownloadPdf,
+  busy
 }: {
   title: string;
   subtitle?: string;
@@ -110,7 +139,9 @@ function PreviewDialog<T>({
   rows: T[];
   onClose: () => void;
   onDownloadCsv: () => void;
+  onDownloadXlsx: () => void;
   onDownloadPdf: () => void;
+  busy: null | "csv" | "xlsx" | "pdf";
 }) {
   return (
     <div
@@ -152,10 +183,7 @@ function PreviewDialog<T>({
             <thead className="sticky top-0 bg-ink-50/80 text-left text-xs uppercase tracking-wider text-ink-500 backdrop-blur">
               <tr>
                 {columns.map((c) => (
-                  <th
-                    key={String(c.key)}
-                    className="px-5 py-3 font-semibold"
-                  >
+                  <th key={String(c.key)} className="px-5 py-3 font-semibold">
                     {c.header}
                   </th>
                 ))}
@@ -175,9 +203,7 @@ function PreviewDialog<T>({
                 rows.map((row, i) => (
                   <tr
                     key={
-                      ((row as { id?: string | number }).id as
-                        | string
-                        | number) ?? i
+                      ((row as { id?: string | number }).id as string | number) ?? i
                     }
                     className="hover:bg-ink-50/40"
                   >
@@ -194,11 +220,14 @@ function PreviewDialog<T>({
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-ink-100 bg-ink-50/40 px-6 py-3">
-          <Button variant="outline" size="md" onClick={onDownloadCsv}>
-            <FileSpreadsheet className="h-4 w-4" /> Download CSV
+          <Button variant="outline" size="md" onClick={onDownloadCsv} disabled={busy !== null}>
+            {busy === "csv" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />} CSV
           </Button>
-          <Button size="md" onClick={onDownloadPdf}>
-            <Download className="h-4 w-4" /> Download PDF
+          <Button variant="outline" size="md" onClick={onDownloadXlsx} disabled={busy !== null}>
+            {busy === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sheet className="h-4 w-4" />} Excel
+          </Button>
+          <Button size="md" onClick={onDownloadPdf} disabled={busy !== null}>
+            {busy === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF
           </Button>
         </div>
       </div>

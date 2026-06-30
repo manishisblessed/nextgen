@@ -10,6 +10,7 @@ export type Role =
   | "master-admin"
   | "admin"
   | "sub-admin"
+  | "super-distributor"
   | "master-distributor"
   | "distributor"
   | "retailer";
@@ -22,6 +23,7 @@ export type DbRole =
   | "MASTER_ADMIN"
   | "ADMIN"
   | "SUPPORT"
+  | "SUPER_DISTRIBUTOR"
   | "MASTER_DISTRIBUTOR"
   | "DISTRIBUTOR"
   | "RETAILER";
@@ -44,6 +46,7 @@ export function toDisplayRole(role: DbRole | string): Role {
     case "MASTER_ADMIN": return "master-admin";
     case "ADMIN": return "admin";
     case "SUPPORT": return "sub-admin";
+    case "SUPER_DISTRIBUTOR": return "super-distributor";
     case "MASTER_DISTRIBUTOR": return "master-distributor";
     case "DISTRIBUTOR": return "distributor";
     case "RETAILER": return "retailer";
@@ -57,6 +60,7 @@ export function toDbRole(displayRole: Role): DbRole {
     case "master-admin": return "MASTER_ADMIN";
     case "admin": return "ADMIN";
     case "sub-admin": return "SUPPORT";
+    case "super-distributor": return "SUPER_DISTRIBUTOR";
     case "master-distributor": return "MASTER_DISTRIBUTOR";
     case "distributor": return "DISTRIBUTOR";
     case "retailer": return "RETAILER";
@@ -107,6 +111,12 @@ export const roleMeta: Record<
     tagline: "Manage retailers, slabs and fund requests",
     accent: "from-brand-500 to-violet-500",
     pillar: "network"
+  },
+  "super-distributor": {
+    label: "Super Distributor",
+    tagline: "Regional network head — onboard & manage master distributors",
+    accent: "from-rose-500 to-orange-500",
+    pillar: "enterprise"
   },
   "master-distributor": {
     label: "Master Distributor",

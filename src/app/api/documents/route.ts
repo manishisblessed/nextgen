@@ -24,6 +24,9 @@ const Body = z.object({
   height: z.number().int().optional()
 });
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   let user;
   try {

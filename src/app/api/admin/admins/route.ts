@@ -3,6 +3,9 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { clientIp } from "@/lib/security/audit";
+
+export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
@@ -109,7 +112,7 @@ export async function POST(req: Request) {
       entity: "User",
       entityId: admin.id,
       meta: { name, email, phone, allowedTabs },
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
 

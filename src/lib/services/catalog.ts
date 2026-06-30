@@ -1,0 +1,251 @@
+// =====================================================================
+// Service route catalog — single source of truth for the toggleable rails
+// that power the On/Off Services panel. Pure data + a seed helper; this file
+// must stay free of runtime side-effects so it is safely importable from the
+// Prisma seed (`prisma/seed.ts`, run via tsx) AND from API/guard code.
+// =====================================================================
+
+import type { PrismaClient } from "@prisma/client";
+
+export type ServiceRouteType = "SERVICE" | "CONFIG" | "SETTING";
+
+export type ServiceRouteKind =
+  | "PG"
+  | "POS"
+  | "BBPS"
+  | "PAYOUT"
+  | "QR"
+  | "UPI"
+  | "RECHARGE"
+  | "AEPS"
+  | "DMT"
+  | "TRAVEL"
+  | "OTHER";
+
+export type ServiceRouteSeed = {
+  /** Machine key used by the guard (assertServiceEnabled). Stable forever. */
+  key: string;
+  name: string;
+  type: ServiceRouteType;
+  kind: ServiceRouteKind;
+  provider?: string | null;
+  enabled: boolean;
+  note?: string | null;
+  sortOrder: number;
+};
+
+/**
+ * Canonical machine keys consumed by the server guard. Reference these
+ * constants in money/feature routes instead of hardcoding strings so a rename
+ * is a single edit.
+ */
+export const SERVICE_KEYS = {
+  PAYOUT: "payout_bulkpe",
+  PG: "pg_razorpay",
+  POS: "pos_sameday",
+  QR: "qr_dynamic",
+  UPI: "upi_collect",
+  DMT: "dmt_imps",
+  AEPS: "aeps_withdraw",
+  RECHARGE: "recharge_mobile",
+  BBPS: "bbps_billpay",
+  TRAVEL: "travel_booking",
+  VERIFICATION: "verify_ekychub",
+  VIRTUAL_ACCOUNT: "virtual_account",
+} as const;
+
+export type ServiceKey = (typeof SERVICE_KEYS)[keyof typeof SERVICE_KEYS];
+
+/**
+ * Maps service keys to sidebar nav hrefs. Used by the Sidebar to hide disabled
+ * services for network users (RT/DT/MD/SD).
+ */
+export const SERVICE_KEY_TO_HREF: Record<string, string> = {
+  [SERVICE_KEYS.PG]: "/dashboard/pg",
+  [SERVICE_KEYS.POS]: "/dashboard/pos",
+  [SERVICE_KEYS.QR]: "/dashboard/qr",
+  [SERVICE_KEYS.PAYOUT]: "/dashboard/payout",
+  [SERVICE_KEYS.AEPS]: "/dashboard/aadhaar-pay",
+  [SERVICE_KEYS.UPI]: "/dashboard/upi",
+  [SERVICE_KEYS.RECHARGE]: "/dashboard/recharge/mobile",
+  [SERVICE_KEYS.BBPS]: "/dashboard/bill-pay/electricity",
+  [SERVICE_KEYS.DMT]: "/dashboard/money-transfer",
+  [SERVICE_KEYS.TRAVEL]: "/dashboard/travel/flight",
+  [SERVICE_KEYS.VIRTUAL_ACCOUNT]: "/dashboard/virtual-account",
+};
+
+/**
+ * The known rails seeded on a fresh DB. Re-seeding NEVER overrides an admin's
+ * `enabled`/`note` choices (see {@link seedServiceRoutes}); it only backfills
+ * presentation metadata and inserts missing rows.
+ */
+export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
+  {
+    key: SERVICE_KEYS.PAYOUT,
+    name: "Payout (BulkPe)",
+    type: "SERVICE",
+    kind: "PAYOUT",
+    provider: "BULKPE",
+    enabled: true,
+    note: "Bank / UPI disbursals via BulkPe. Turning this off blocks new payout submissions immediately.",
+    sortOrder: 10,
+  },
+  {
+    key: SERVICE_KEYS.PG,
+    name: "Payment Gateway",
+    type: "SERVICE",
+    kind: "PG",
+    provider: "RAZORPAY",
+    enabled: true,
+    note: "Card / netbanking collections via the payment gateway.",
+    sortOrder: 20,
+  },
+  {
+    key: SERVICE_KEYS.POS,
+    name: "POS Terminals",
+    type: "SERVICE",
+    kind: "POS",
+    provider: "SAMEDAY",
+    enabled: true,
+    note: "Same Day Solution POS fleet onboarding & settlements.",
+    sortOrder: 30,
+  },
+  {
+    key: SERVICE_KEYS.QR,
+    name: "QR Payments",
+    type: "SERVICE",
+    kind: "QR",
+    provider: "NPCI",
+    enabled: true,
+    note: "Static / dynamic UPI QR collections.",
+    sortOrder: 40,
+  },
+  {
+    key: SERVICE_KEYS.UPI,
+    name: "UPI Collect",
+    type: "SERVICE",
+    kind: "UPI",
+    provider: null,
+    enabled: true,
+    note: "Collect requests sent to a customer VPA.",
+    sortOrder: 50,
+  },
+  {
+    key: SERVICE_KEYS.DMT,
+    name: "Money Transfer (DMT)",
+    type: "SERVICE",
+    kind: "DMT",
+    provider: null,
+    enabled: true,
+    note: "Domestic money transfer (IMPS / NEFT / RTGS).",
+    sortOrder: 60,
+  },
+  {
+    key: SERVICE_KEYS.AEPS,
+    name: "AePS / Aadhaar Pay",
+    type: "SERVICE",
+    kind: "AEPS",
+    provider: null,
+    enabled: true,
+    note: "Aadhaar-enabled cash withdrawal & balance enquiry.",
+    sortOrder: 70,
+  },
+  {
+    key: SERVICE_KEYS.RECHARGE,
+    name: "Recharges",
+    type: "SERVICE",
+    kind: "RECHARGE",
+    provider: null,
+    enabled: true,
+    note: "Mobile / DTH / broadband recharges.",
+    sortOrder: 80,
+  },
+  {
+    key: SERVICE_KEYS.BBPS,
+    name: "Bill Payments (BBPS)",
+    type: "SERVICE",
+    kind: "BBPS",
+    provider: "BILLAVENUE",
+    enabled: true,
+    note: "BBPS utility bill payments across categories.",
+    sortOrder: 90,
+  },
+  {
+    key: SERVICE_KEYS.TRAVEL,
+    name: "Travel",
+    type: "SERVICE",
+    kind: "TRAVEL",
+    provider: null,
+    enabled: true,
+    note: "Flight / hotel / bus / train bookings.",
+    sortOrder: 100,
+  },
+  {
+    key: SERVICE_KEYS.VERIFICATION,
+    name: "eKYC Verification",
+    type: "CONFIG",
+    kind: "OTHER",
+    provider: "EKYCHUB",
+    enabled: true,
+    note: "PAN / Aadhaar / bank verification via eKYC Hub.",
+    sortOrder: 110,
+  },
+  {
+    key: SERVICE_KEYS.VIRTUAL_ACCOUNT,
+    name: "Virtual Account",
+    type: "SERVICE",
+    kind: "OTHER",
+    provider: null,
+    enabled: true,
+    note: "Per-user virtual collection accounts.",
+    sortOrder: 120,
+  },
+];
+
+/**
+ * Idempotently seed the known rails. Re-running is safe: admin-controlled
+ * fields (`enabled`, `note`) are preserved on existing rows — only metadata
+ * (name/type/kind/provider/sortOrder) is refreshed, and missing rows inserted.
+ *
+ * Accepts a Prisma client so it can run both from the Prisma seed (its own
+ * `new PrismaClient()`) and from an API route (the shared lazy proxy).
+ */
+export async function seedServiceRoutes(
+  client: PrismaClient
+): Promise<{ created: number; updated: number }> {
+  let created = 0;
+  let updated = 0;
+
+  for (const r of KNOWN_SERVICE_ROUTES) {
+    const existing = await client.serviceRoute.findUnique({
+      where: { key: r.key },
+      select: { id: true },
+    });
+
+    await client.serviceRoute.upsert({
+      where: { key: r.key },
+      update: {
+        name: r.name,
+        type: r.type,
+        kind: r.kind,
+        provider: r.provider ?? null,
+        sortOrder: r.sortOrder,
+      },
+      create: {
+        key: r.key,
+        name: r.name,
+        type: r.type,
+        kind: r.kind,
+        provider: r.provider ?? null,
+        enabled: r.enabled,
+        note: r.note ?? null,
+        sortOrder: r.sortOrder,
+      },
+    });
+
+    if (existing) updated++;
+    else created++;
+  }
+
+  return { created, updated };
+}

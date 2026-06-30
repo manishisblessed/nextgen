@@ -8,6 +8,9 @@ const PatchBody = z.object({
   reason: z.string().optional(),
 });
 
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
 export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }

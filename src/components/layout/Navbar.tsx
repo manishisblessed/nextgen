@@ -52,9 +52,7 @@ export function Navbar() {
         transition={{ duration: reduce ? 0 : 0.35, ease: easeOut }}
         className="container-x flex items-center justify-between gap-6"
       >
-        <Link href="/" className="transition-transform hover:scale-[1.02]">
-          <Logo />
-        </Link>
+        <Logo className="transition-transform hover:scale-[1.02]" />
 
         <nav className="hidden lg:flex">
           <ul className="flex items-center gap-1">

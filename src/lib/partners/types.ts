@@ -88,7 +88,7 @@ export interface UpiProvider {
 
 // ---------- Payouts ----------
 export interface PayoutInput extends IdempotencyContext {
-  mode: "IMPS" | "NEFT" | "UPI";
+  mode: "IMPS" | "NEFT" | "RTGS" | "UPI";
   amount: Money;
   beneficiary: { name: string; accountNumber?: string; ifsc?: string; vpa?: string };
   purpose: string;
@@ -101,7 +101,19 @@ export interface PayoutOutput {
 export interface PayoutProvider {
   name: string;
   payout(input: PayoutInput): Promise<PartnerResult<PayoutOutput>>;
-  status(payoutId: string): Promise<PartnerResult<{ status: PayoutOutput["status"]; utr?: string }>>;
+  /**
+   * Poll the terminal state of a payout. Accepts the provider txn id when
+   * known, otherwise our reference_id (providers like BulkPe support lookup by
+   * either), so the reconciler can recover even if the initiate call's id was
+   * never persisted.
+   */
+  status(payoutIdOrReference: string): Promise<PartnerResult<{ status: PayoutOutput["status"]; utr?: string }>>;
+  /**
+   * Optional: fetch the provider's current wallet/float balance (rupees).
+   * Used to surface live "Vendor Balances" on the admin dashboard. Best-effort
+   * — callers must tolerate this being absent or failing.
+   */
+  fetchBalance?(): Promise<PartnerResult<number>>;
 }
 
 // ---------- BBPS ----------
@@ -247,6 +259,13 @@ export interface SmsProvider {
   name: string;
   sendOtp(input: { phone: string; otp: string; templateId?: string }): Promise<PartnerResult<{ messageId: string }>>;
   sendTransactional(input: { phone: string; templateId: string; variables: Record<string, string> }): Promise<PartnerResult<{ messageId: string }>>;
+}
+
+// ---------- Managed OTP (Twilio Verify) ----------
+export interface OtpVerifyProvider {
+  name: string;
+  sendVerification(input: { to: string; channel: "sms" | "email" | "whatsapp" }): Promise<PartnerResult<{ sid: string; status: string }>>;
+  checkVerification(input: { to: string; code: string }): Promise<PartnerResult<{ sid: string; status: string; valid: boolean }>>;
 }
 
 // ---------- Email ----------

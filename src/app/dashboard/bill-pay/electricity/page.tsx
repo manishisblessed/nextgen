@@ -2,6 +2,8 @@ import { Lightbulb } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { BillForm } from "@/components/dashboard/BillForm";
 
+export const dynamic = "force-dynamic";
+
 export default function ElectricityBillPage() {
   return (
     <div className="mx-auto max-w-3xl">

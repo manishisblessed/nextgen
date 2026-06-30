@@ -3,6 +3,9 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { clientIp } from "@/lib/security/audit";
+
+export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +14,7 @@ const CreateUserBody = z.object({
   email: z.string().email(),
   phone: z.string().min(10).max(15),
   password: z.string().min(6).max(72),
-  role: z.enum(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR"]),
+  role: z.enum(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]),
   shopName: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
@@ -90,7 +93,7 @@ export async function POST(req: Request) {
       entity: "User",
       entityId: user.id,
       meta: { role, email, phone, createdBy: admin.email },
-      ip: req.headers.get("x-forwarded-for") ?? undefined,
+      ip: clientIp(req),
     },
   });
 
@@ -114,6 +117,7 @@ export async function GET(req: Request) {
         retailer: "RETAILER",
         distributor: "DISTRIBUTOR",
         "master-distributor": "MASTER_DISTRIBUTOR",
+        "super-distributor": "SUPER_DISTRIBUTOR",
         admin: "ADMIN",
         "master-admin": "MASTER_ADMIN",
       };
@@ -188,6 +192,7 @@ export async function GET(req: Request) {
         RETAILER: "retailer",
         DISTRIBUTOR: "distributor",
         MASTER_DISTRIBUTOR: "master-distributor",
+        SUPER_DISTRIBUTOR: "super-distributor",
         ADMIN: "admin",
         MASTER_ADMIN: "master-admin",
         SUPPORT: "sub-admin",
