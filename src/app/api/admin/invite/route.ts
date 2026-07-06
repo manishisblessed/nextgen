@@ -92,9 +92,11 @@ export async function POST(req: Request) {
   const appUrl = env.NEXT_PUBLIC_APP_URL;
   const onboardingLink = `${appUrl}/onboard?token=${invite.token}`;
 
+  let emailSent = false;
+  let emailError: string | undefined;
   try {
     const emailProvider = getPartner("email");
-    await emailProvider.send({
+    const result = await emailProvider.send({
       from: process.env.EMAIL_FROM_INFO || process.env.EMAIL_FROM,
       to: email,
       subject: "NextGenPay — Complete your registration",
@@ -108,8 +110,11 @@ export async function POST(req: Request) {
         <p>— Team NextGenPay</p>
       `,
     });
-  } catch {
-    // Email failure shouldn't block invite creation
+    emailSent = result.ok;
+    if (!result.ok) emailError = `${result.code}: ${result.message}`;
+  } catch (e) {
+    // Email failure shouldn't block invite creation, but we surface the reason.
+    emailError = (e as Error).message;
   }
 
   try {
@@ -129,13 +134,18 @@ export async function POST(req: Request) {
       action: "invite.created",
       entity: "Invite",
       entityId: invite.id,
-      meta: { phone, email, role, parentId },
+      meta: { phone, email, role, parentId, emailSent, emailError },
       ip: clientIp(req),
     },
   });
 
   return NextResponse.json(
-    { ok: true, invite: { id: invite.id, token: invite.token, onboardingLink } },
+    {
+      ok: true,
+      invite: { id: invite.id, token: invite.token, onboardingLink },
+      emailSent,
+      ...(emailError ? { emailError } : {}),
+    },
     { status: 201 }
   );
 }

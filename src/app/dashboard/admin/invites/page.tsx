@@ -109,7 +109,11 @@ export default function AdminInvitesPage() {
       if (res.ok && data.emailSent) {
         alert("Onboarding email resent successfully!");
       } else if (res.ok && !data.emailSent) {
-        alert("Invite found but email delivery failed. Please check email provider settings.");
+        alert(
+          data.emailError
+            ? `Email delivery failed: ${data.emailError}`
+            : "Invite found but email delivery failed. Please check email provider settings."
+        );
       } else {
         alert(data.error || "Failed to resend invite");
       }
@@ -300,7 +304,14 @@ function CreateInviteForm({
       return;
     }
 
-    setSuccess(`Invite sent! Link: ${data.invite.onboardingLink}`);
+    if (data.emailSent === false) {
+      setError(
+        data.emailError
+          ? `Invite created, but email delivery failed: ${data.emailError}`
+          : "Invite created, but email delivery failed. Please check email provider settings."
+      );
+    }
+    setSuccess(`Invite created! Link: ${data.invite.onboardingLink}`);
     setTimeout(onCreated, 2000);
   }
 

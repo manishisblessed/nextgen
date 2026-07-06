@@ -52,6 +52,7 @@ export async function PATCH(
     const appUrl = env.NEXT_PUBLIC_APP_URL;
     const onboardingLink = `${appUrl}/onboard?token=${invite.token}`;
     let emailSent = false;
+    let emailError: string | undefined;
 
     try {
       const emailProvider = getPartner("email");
@@ -70,8 +71,9 @@ export async function PATCH(
         `,
       });
       emailSent = result.ok;
-    } catch {
-      emailSent = false;
+      if (!result.ok) emailError = `${result.code}: ${result.message}`;
+    } catch (e) {
+      emailError = (e as Error).message;
     }
 
     await prisma.auditLog.create({
@@ -80,7 +82,7 @@ export async function PATCH(
         action: "invite.resent",
         entity: "Invite",
         entityId: id,
-        meta: { email: invite.email, emailSent },
+        meta: { email: invite.email, emailSent, emailError },
         ip: clientIp(req),
       },
     });
@@ -88,9 +90,10 @@ export async function PATCH(
     return NextResponse.json({
       ok: true,
       emailSent,
+      ...(emailError ? { emailError } : {}),
       message: emailSent
         ? "Onboarding email resent successfully"
-        : "Failed to send email — please check email provider configuration",
+        : `Failed to send email${emailError ? ` — ${emailError}` : " — please check email provider configuration"}`,
     });
   }
 
