@@ -43,6 +43,7 @@ declare module "next-auth/jwt" {
 }
 
 export const authOptions: NextAuthOptions = {
+  debug: process.env.NODE_ENV !== "production",
   // Short JWT lifetime for a finance portal; combined with the per-request
   // tokenVersion check this bounds how long any leaked/replayed cookie is usable.
   session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
@@ -171,11 +172,16 @@ export const authOptions: NextAuthOptions = {
         token.allowedTabs = (user as any).allowedTabs ?? [];
         token.enabledServices = (user as any).enabledServices ?? [];
         token.twoFactorEnabled = (user as any).twoFactorEnabled ?? false;
-        const seed = await prisma.user.findUnique({
-          where: { id: user.id },
-          select: { tokenVersion: true },
-        });
-        token.tokenVersion = seed?.tokenVersion ?? 0;
+        try {
+          const seed = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { tokenVersion: true },
+          });
+          token.tokenVersion = seed?.tokenVersion ?? 0;
+        } catch (err) {
+          console.error("[auth] jwt callback: DB error seeding tokenVersion", err);
+          token.tokenVersion = 0;
+        }
         return token;
       }
 
@@ -183,31 +189,39 @@ export const authOptions: NextAuthOptions = {
       //    changes and forced sign-outs take effect immediately, and reject any
       //    token whose version != the user's current tokenVersion (replay /
       //    stolen-cookie defense).
+      //
+      //    If the DB is temporarily unreachable, return the stale token so the
+      //    session endpoint doesn't 500 on every page load — the next successful
+      //    check will catch up.
       if (token.id) {
-        const fresh = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          select: {
-            tokenVersion: true,
-            twoFactorEnabled: true,
-            walletBalance: true,
-            status: true,
-            role: true,
-            enabledServices: true,
-          },
-        });
-        if (
-          !fresh ||
-          fresh.status === "CLOSED" ||
-          (token.tokenVersion ?? -1) !== fresh.tokenVersion
-        ) {
-          return {} as typeof token;
+        try {
+          const fresh = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: {
+              tokenVersion: true,
+              twoFactorEnabled: true,
+              walletBalance: true,
+              status: true,
+              role: true,
+              enabledServices: true,
+            },
+          });
+          if (
+            !fresh ||
+            fresh.status === "CLOSED" ||
+            (token.tokenVersion ?? -1) !== fresh.tokenVersion
+          ) {
+            return {} as typeof token;
+          }
+          token.tokenVersion = fresh.tokenVersion;
+          token.twoFactorEnabled = fresh.twoFactorEnabled;
+          token.walletBalance = Number(fresh.walletBalance);
+          token.status = fresh.status;
+          token.role = fresh.role;
+          token.enabledServices = fresh.enabledServices;
+        } catch (err) {
+          console.error("[auth] jwt callback: DB error refreshing token, using stale data", err);
         }
-        token.tokenVersion = fresh.tokenVersion;
-        token.twoFactorEnabled = fresh.twoFactorEnabled;
-        token.walletBalance = Number(fresh.walletBalance);
-        token.status = fresh.status;
-        token.role = fresh.role;
-        token.enabledServices = fresh.enabledServices;
       }
 
       return token;

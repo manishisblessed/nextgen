@@ -75,121 +75,129 @@ export async function POST(req: Request) {
     return toErrorResponse(e);
   }
 
-  const user = await prisma.user.findFirst({
-    where: { OR: [{ email: normalized }, { phone: normalized }], deletedAt: null },
-  });
-
-  const valid = user ? await bcrypt.compare(password, user.passwordHash) : false;
-
-  if (!user || !valid) {
-    const { failedCount, locked, lockedUntil } = await recordFailedLogin(normalized, ip);
-    await logSecurityEvent({
-      action: "auth.login_failed",
-      severity: locked ? "danger" : "warn",
-      userId: user?.id ?? null,
-      entity: "User",
-      entityId: user?.id ?? null,
-      ip,
-      userAgent,
-      meta: { identifier: normalized, failedCount, locked, lockedUntil: lockedUntil?.toISOString() ?? null },
+  try {
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ email: normalized }, { phone: normalized }], deletedAt: null },
     });
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
-  }
 
-  if (user.status === "CLOSED") {
+    const valid = user ? await bcrypt.compare(password, user.passwordHash) : false;
+
+    if (!user || !valid) {
+      const { failedCount, locked, lockedUntil } = await recordFailedLogin(normalized, ip);
+      await logSecurityEvent({
+        action: "auth.login_failed",
+        severity: locked ? "danger" : "warn",
+        userId: user?.id ?? null,
+        entity: "User",
+        entityId: user?.id ?? null,
+        ip,
+        userAgent,
+        meta: { identifier: normalized, failedCount, locked, lockedUntil: lockedUntil?.toISOString() ?? null },
+      });
+      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    }
+
+    if (user.status === "CLOSED") {
+      await logSecurityEvent({
+        action: "auth.login_blocked",
+        severity: "warn",
+        userId: user.id,
+        entity: "User",
+        entityId: user.id,
+        ip,
+        userAgent,
+        meta: { reason: "account_closed" },
+      });
+      return NextResponse.json({ error: "Account has been closed" }, { status: 403 });
+    }
+
+    // Successful credential check — clear lockout counter.
+    const priorFailures = await recentFailureCount(normalized);
+    await recordSuccessfulLogin(normalized);
+
+    // Anomaly detection against the user's last known login context.
+    const anomalies = detectLoginAnomalies({
+      lastLoginLat: user.lastLoginLat,
+      lastLoginLng: user.lastLoginLng,
+      lastLoginAt: user.lastLoginAt,
+      knownDevices: user.knownDevices ?? [],
+      lat: location.lat,
+      lng: location.lng,
+      userAgent,
+      recentFailures: priorFailures,
+    });
+
+    const device = deviceHash(userAgent);
+    const knownDevices = Array.from(new Set([...(user.knownDevices ?? []), device])).slice(-10);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginLat: location.lat,
+        lastLoginLng: location.lng,
+        lastLoginAt: new Date(),
+        lastLoginIp: ip,
+        lastLoginUserAgent: userAgent.slice(0, 512),
+        knownDevices,
+      },
+    });
+
     await logSecurityEvent({
-      action: "auth.login_blocked",
-      severity: "warn",
+      action: "auth.login",
+      severity: anomalies.flagged ? "danger" : "info",
       userId: user.id,
       entity: "User",
       entityId: user.id,
       ip,
       userAgent,
-      meta: { reason: "account_closed" },
+      meta: {
+        lat: location.lat,
+        lng: location.lng,
+        accuracy: location.accuracy,
+        anomalies,
+      },
     });
-    return NextResponse.json({ error: "Account has been closed" }, { status: 403 });
-  }
 
-  // Successful credential check — clear lockout counter.
-  const priorFailures = await recentFailureCount(normalized);
-  await recordSuccessfulLogin(normalized);
+    // 2FA is mandatory for all users.
+    if (user.twoFactorEnabled && user.twoFactorSecret) {
+      const tempToken = createTempToken(user.id);
+      return NextResponse.json({
+        ok: true,
+        needs2FA: true,
+        needsSetup: false,
+        tempToken,
+        user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      });
+    }
 
-  // Anomaly detection against the user's last known login context.
-  const anomalies = detectLoginAnomalies({
-    lastLoginLat: user.lastLoginLat,
-    lastLoginLng: user.lastLoginLng,
-    lastLoginAt: user.lastLoginAt,
-    knownDevices: user.knownDevices ?? [],
-    lat: location.lat,
-    lng: location.lng,
-    userAgent,
-    recentFailures: priorFailures,
-  });
+    // 2FA NOT configured — issue a limited session for setup only.
+    const sessionUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+      walletBalance: Number(user.walletBalance),
+      allowedTabs: user.allowedTabs ?? [],
+      enabledServices: user.enabledServices ?? [],
+      twoFactorEnabled: user.twoFactorEnabled,
+    };
 
-  const device = deviceHash(userAgent);
-  const knownDevices = Array.from(new Set([...(user.knownDevices ?? []), device])).slice(-10);
+    const token = createMobileToken(sessionUser);
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      lastLoginLat: location.lat,
-      lastLoginLng: location.lng,
-      lastLoginAt: new Date(),
-      lastLoginIp: ip,
-      lastLoginUserAgent: userAgent.slice(0, 512),
-      knownDevices,
-    },
-  });
-
-  await logSecurityEvent({
-    action: "auth.login",
-    severity: anomalies.flagged ? "danger" : "info",
-    userId: user.id,
-    entity: "User",
-    entityId: user.id,
-    ip,
-    userAgent,
-    meta: {
-      lat: location.lat,
-      lng: location.lng,
-      accuracy: location.accuracy,
-      anomalies,
-    },
-  });
-
-  // 2FA is mandatory for all users.
-  if (user.twoFactorEnabled && user.twoFactorSecret) {
-    const tempToken = createTempToken(user.id);
     return NextResponse.json({
       ok: true,
-      needs2FA: true,
-      needsSetup: false,
-      tempToken,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      needs2FA: false,
+      needsSetup: true,
+      token,
+      user: sessionUser,
     });
+  } catch (err) {
+    console.error("[auth/login] Unhandled error:", err);
+    return NextResponse.json(
+      { error: "Internal server error. Please try again." },
+      { status: 500 }
+    );
   }
-
-  // 2FA NOT configured — issue a limited session for setup only.
-  const sessionUser = {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone,
-    role: user.role,
-    status: user.status,
-    walletBalance: Number(user.walletBalance),
-    allowedTabs: user.allowedTabs ?? [],
-    enabledServices: user.enabledServices ?? [],
-    twoFactorEnabled: user.twoFactorEnabled,
-  };
-
-  const token = createMobileToken(sessionUser);
-
-  return NextResponse.json({
-    ok: true,
-    needs2FA: false,
-    needsSetup: true,
-    token,
-    user: sessionUser,
-  });
 }

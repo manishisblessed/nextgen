@@ -43,106 +43,114 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
 
-  const rl = await checkRateLimit(`2fa:ip:${clientIp(req)}`, RATE_LIMITS.twoFactor);
-  if (!rl.allowed)
-    return NextResponse.json({ error: "Too many attempts. Please try again later." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
+  try {
+    const rl = await checkRateLimit(`2fa:ip:${clientIp(req)}`, RATE_LIMITS.twoFactor);
+    if (!rl.allowed)
+      return NextResponse.json({ error: "Too many attempts. Please try again later." }, { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
 
-  const { tempToken, code, type } = parsed.data;
+    const { tempToken, code, type } = parsed.data;
 
-  const tokenPayload = verifyTempToken(tempToken);
-  if (!tokenPayload) {
-    return NextResponse.json(
-      { error: "Session expired. Please log in again." },
-      { status: 401 }
-    );
-  }
-
-  const userId = tokenPayload.sub;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      status: true,
-      twoFactorSecret: true,
-      twoFactorBackupCodes: true,
-    },
-  });
-
-  if (!user || !user.twoFactorSecret) {
-    return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-  }
-
-  if (user.status === "CLOSED") {
-    return NextResponse.json({ error: "Account closed" }, { status: 403 });
-  }
-
-  // Rate limiting
-  const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
-  const recentAttempts = await prisma.auditLog.count({
-    where: {
-      userId,
-      action: "2fa.attempt_failed",
-      createdAt: { gte: threeMinAgo },
-    },
-  });
-
-  if (recentAttempts >= MAX_2FA_ATTEMPTS) {
-    return NextResponse.json(
-      { error: "Too many attempts. Please log in again." },
-      { status: 429 }
-    );
-  }
-
-  const secret = decryptSecret(user.twoFactorSecret);
-  let verified = false;
-
-  if (type === "totp") {
-    verified = verifyTotpCode(secret, code);
-  } else if (type === "backup") {
-    const result = await verifyBackupCode(code, user.twoFactorBackupCodes);
-    if (result.valid) {
-      verified = true;
-      const updatedCodes = [...user.twoFactorBackupCodes];
-      updatedCodes[result.index] = "";
-      await prisma.user.update({
-        where: { id: userId },
-        data: { twoFactorBackupCodes: updatedCodes },
-      });
+    const tokenPayload = verifyTempToken(tempToken);
+    if (!tokenPayload) {
+      return NextResponse.json(
+        { error: "Session expired. Please log in again." },
+        { status: 401 }
+      );
     }
-  }
 
-  if (!verified) {
+    const userId = tokenPayload.sub;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        status: true,
+        twoFactorSecret: true,
+        twoFactorBackupCodes: true,
+      },
+    });
+
+    if (!user || !user.twoFactorSecret) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    if (user.status === "CLOSED") {
+      return NextResponse.json({ error: "Account closed" }, { status: 403 });
+    }
+
+    // Rate limiting
+    const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
+    const recentAttempts = await prisma.auditLog.count({
+      where: {
+        userId,
+        action: "2fa.attempt_failed",
+        createdAt: { gte: threeMinAgo },
+      },
+    });
+
+    if (recentAttempts >= MAX_2FA_ATTEMPTS) {
+      return NextResponse.json(
+        { error: "Too many attempts. Please log in again." },
+        { status: 429 }
+      );
+    }
+
+    const secret = decryptSecret(user.twoFactorSecret);
+    let verified = false;
+
+    if (type === "totp") {
+      verified = verifyTotpCode(secret, code);
+    } else if (type === "backup") {
+      const result = await verifyBackupCode(code, user.twoFactorBackupCodes);
+      if (result.valid) {
+        verified = true;
+        const updatedCodes = [...user.twoFactorBackupCodes];
+        updatedCodes[result.index] = "";
+        await prisma.user.update({
+          where: { id: userId },
+          data: { twoFactorBackupCodes: updatedCodes },
+        });
+      }
+    }
+
+    if (!verified) {
+      await prisma.auditLog.create({
+        data: {
+          userId,
+          action: "2fa.attempt_failed",
+          entity: "User",
+          entityId: userId,
+          meta: { type, remainingAttempts: MAX_2FA_ATTEMPTS - recentAttempts - 1 },
+          ip: clientIp(req),
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: "Invalid code.",
+          remainingAttempts: Math.max(0, MAX_2FA_ATTEMPTS - recentAttempts - 1),
+        },
+        { status: 401 }
+      );
+    }
+
     await prisma.auditLog.create({
       data: {
         userId,
-        action: "2fa.attempt_failed",
+        action: "2fa.verified",
         entity: "User",
         entityId: userId,
-        meta: { type, remainingAttempts: MAX_2FA_ATTEMPTS - recentAttempts - 1 },
         ip: clientIp(req),
       },
     });
 
+    const grant = createSessionGrant(user.id);
+
+    return NextResponse.json({ ok: true, grant });
+  } catch (err) {
+    console.error("[auth/2fa/verify-session] Unhandled error:", err);
     return NextResponse.json(
-      {
-        error: "Invalid code.",
-        remainingAttempts: Math.max(0, MAX_2FA_ATTEMPTS - recentAttempts - 1),
-      },
-      { status: 401 }
+      { error: "Internal server error. Please try again." },
+      { status: 500 }
     );
   }
-
-  await prisma.auditLog.create({
-    data: {
-      userId,
-      action: "2fa.verified",
-      entity: "User",
-      entityId: userId,
-      ip: clientIp(req),
-    },
-  });
-
-  const grant = createSessionGrant(user.id);
-
-  return NextResponse.json({ ok: true, grant });
 }
