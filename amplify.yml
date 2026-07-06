@@ -5,7 +5,10 @@ applications:
       phases:
         preBuild:
           commands:
-            - npm ci --cache .npm --prefer-offline
+            # --include=dev forces devDependencies to install even though
+            # NODE_ENV=production is set (npm ci skips devDeps otherwise).
+            # Build-time tooling (typescript, @types/*, eslint) lives there.
+            - npm ci --cache .npm --prefer-offline --include=dev
             - npx prisma generate
         build:
           commands:
