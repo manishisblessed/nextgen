@@ -3,9 +3,12 @@ import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
 import { hmac } from "@/lib/crypto";
-import { requireAuth, AuthError } from "@/lib/auth-server";
-import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
-import { assertLivenessReady, LivenessRequiredError } from "@/lib/security/livenessGate";
+import { requireAuth } from "@/lib/auth-server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { assertLivenessReady } from "@/lib/security/livenessGate";
+import { requireTxnPin } from "@/lib/security/txnPin";
+import { clientIp } from "@/lib/security/audit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 
 const Body = z.object({
   applicantName: z.string().min(2),
@@ -33,11 +36,10 @@ export async function POST(req: Request) {
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
+    // Transaction PIN — required on every money-moving action (x-txn-pin header).
+    await requireTxnPin(user, req, { action: "pan.apply", ip: clientIp(req), userAgent: req.headers.get("user-agent") });
   } catch (e) {
-    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    if (e instanceof LivenessRequiredError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
-    if (e instanceof RateLimitError) return NextResponse.json({ error: e.message, retryAfterSec: e.result.retryAfterSec }, { status: 429 });
-    throw e;
+    return toErrorResponse(e);
   }
 
   const parsed = Body.safeParse(await req.json());
@@ -46,18 +48,22 @@ export async function POST(req: Request) {
   const partner = getPartner("pan");
   const aadhaarRef = hmac(parsed.data.aadhaar);
 
-  const result = await runTransaction({
-    userId: user.id,
-    service: "PAN_CARD",
-    amount: 107,
-    commission: 30,
-    idempotencyKey: parsed.data.idempotencyKey,
-    customer: parsed.data.applicantName,
-    operator: "NSDL",
-    partner: partner.name,
-    request: { ...parsed.data, aadhaar: undefined, aadhaarRef },
-    call: () => partner.apply({ userId: user.id, ...parsed.data, aadhaarRef })
-  });
+  try {
+    const result = await runTransaction({
+      userId: user.id,
+      service: "PAN_CARD",
+      amount: 107,
+      commission: 30,
+      idempotencyKey: parsed.data.idempotencyKey,
+      customer: parsed.data.applicantName,
+      operator: "NSDL",
+      partner: partner.name,
+      request: { ...parsed.data, aadhaar: undefined, aadhaarRef },
+      call: () => partner.apply({ userId: user.id, ...parsed.data, aadhaarRef })
+    });
 
-  return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+    return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 }

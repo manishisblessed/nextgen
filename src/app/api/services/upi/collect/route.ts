@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     user = await requireAuth();
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
-    await assertServiceEnabled(SERVICE_KEYS.UPI, { name: "UPI Collect" });
+    await assertServiceEnabled(SERVICE_KEYS.UPI, { name: "UPI Collect", userId: user.id, role: user.role });
     await enforceRateLimit(`upi:collect:${user.id}`, RATE_LIMITS.txnCreate);
   } catch (e) {
     return toErrorResponse(e);

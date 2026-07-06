@@ -3,6 +3,9 @@ import { nanoid } from "nanoid";
 import { prisma } from "../db";
 import { creditWallet, debitWallet, LedgerError } from "../ledger";
 import { add, gt, round } from "../money";
+import { assertTransactionRisk } from "../risk/engine";
+import { assertAccountActive } from "../security/accountGate";
+import { emitWebhookEvent } from "../platform/webhooks";
 import type { PartnerResult } from "../partners/types";
 
 /**
@@ -71,6 +74,22 @@ export async function runTransaction<TIn, TOut>(
       };
     }
   }
+
+  // 1a. Account status gate — a SUSPENDED/CLOSED account (admin or distributor
+  //     action) cannot start NEW money movements. Checked fresh from the DB so
+  //     a suspension bites even for sessions minted before it. Throws
+  //     AccountSuspendedError (403) which routes map via toErrorResponse.
+  await assertAccountActive(input.userId);
+
+  // 1b. Risk rules (velocity / daily caps) — evaluated on genuinely NEW
+  //     movements only (idempotent replays above are exempt). Throws RiskError
+  //     (403) which routes map via toErrorResponse.
+  await assertTransactionRisk({
+    userId: input.userId,
+    service: input.service,
+    amount: reserveAmount,
+    ip: input.ip,
+  });
 
   // 2. Reserve money up front via the ledger (row-locked DEBIT).
   let txn;
@@ -157,6 +176,14 @@ export async function runTransaction<TIn, TOut>(
         },
       });
     });
+    // Partner webhook (best-effort; never blocks settlement).
+    void emitWebhookEvent(input.userId, "txn.success", {
+      refId,
+      service: input.service,
+      amount: input.amount,
+      customer: input.customer ?? null,
+      operator: input.operator ?? null,
+    });
     return { status: "SUCCESS", refId, data: result.data };
   }
 
@@ -191,6 +218,15 @@ export async function runTransaction<TIn, TOut>(
         meta: { refId, code: result.code, message: result.message },
       },
     });
+  });
+
+  // Partner webhook (best-effort).
+  void emitWebhookEvent(input.userId, "txn.failed", {
+    refId,
+    service: input.service,
+    amount: input.amount,
+    code: result.code ?? null,
+    message: result.message ?? null,
   });
 
   return { status: "FAILED", refId, error: result.message };

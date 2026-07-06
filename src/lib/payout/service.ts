@@ -5,6 +5,7 @@ import { decryptField } from "@/lib/crypto/fieldEncryption";
 import { toNumber } from "@/lib/money";
 import { getPartner } from "@/lib/partners";
 import { enqueue, QUEUES } from "@/lib/queue";
+import { emitWebhookEvent } from "@/lib/platform/webhooks";
 
 /**
  * Shared, provider-agnostic payout lifecycle logic. Used by the queue worker,
@@ -89,6 +90,16 @@ export async function finalizePayoutSuccess(
       meta: { utr: data.utr ?? null, totalDebit: toNumber(row.totalDebit) },
     },
   });
+  // Partner webhook (best-effort; never blocks finalization).
+  void emitWebhookEvent(row.userId, "payout.success", {
+    payoutId: row.id,
+    amount: toNumber(row.amount),
+    totalDebit: toNumber(row.totalDebit),
+    mode: row.mode,
+    beneficiaryName: row.beneficiaryName,
+    accountLast4: row.accountLast4,
+    utr: data.utr ?? null,
+  });
   return { finalized: true };
 }
 
@@ -127,6 +138,16 @@ export async function finalizePayoutFailure(
         entityId: row.id,
         meta: { reason: data.failureReason ?? null, totalDebit: toNumber(row.totalDebit) },
       },
+    });
+    // Partner webhook (best-effort).
+    void emitWebhookEvent(row.userId, "payout.failed", {
+      payoutId: row.id,
+      amount: toNumber(row.amount),
+      totalDebit: toNumber(row.totalDebit),
+      mode: row.mode,
+      beneficiaryName: row.beneficiaryName,
+      accountLast4: row.accountLast4,
+      reason: data.failureReason ?? null,
     });
   }
   return { finalized };

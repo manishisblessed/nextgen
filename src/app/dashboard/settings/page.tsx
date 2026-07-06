@@ -1,6 +1,7 @@
 "use client";
 
-import { Settings, Bell, ShieldCheck, KeyRound, Smartphone, Mail } from "lucide-react";
+import Link from "next/link";
+import { Settings, Bell, ShieldCheck, KeyRound, Mail, Lock, ChevronRight } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 
 const groups = [
@@ -70,6 +71,27 @@ export default function SettingsPage() {
             </div>
           );
         })}
+
+        <Link
+          href="/dashboard/settings/txn-pin"
+          className="flex items-center justify-between rounded-2xl border border-brand-200 bg-gradient-to-r from-brand-50/70 to-white p-6 transition hover:border-brand-300 hover:shadow-soft"
+        >
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-700">
+              <Lock className="h-4 w-4" />
+            </span>
+            <div>
+              <h3 className="font-display text-base font-semibold text-ink-900">
+                Transaction PIN
+              </h3>
+              <p className="mt-1 text-xs text-ink-500">
+                The 4-digit PIN that confirms every payment — bill pay, recharge,
+                transfers and payouts. Set it up or change it here.
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="h-5 w-5 shrink-0 text-ink-400" />
+        </Link>
 
         <div className="rounded-2xl border border-ink-100 bg-white p-6">
           <h3 className="font-display text-base font-semibold text-ink-900">

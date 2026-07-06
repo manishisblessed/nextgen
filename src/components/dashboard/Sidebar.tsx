@@ -9,7 +9,8 @@ import { Logo } from "@/components/layout/Logo";
 import { cn } from "@/lib/utils";
 import { toDisplayRole, type Role } from "@/lib/auth";
 import { navByRole, type NavGroup } from "@/lib/roles";
-import { SERVICE_KEY_TO_HREF } from "@/lib/services/catalog";
+import { hrefToServiceKey } from "@/lib/services/catalog";
+import { useEffectiveServices } from "@/hooks/useEffectiveServices";
 
 export function Sidebar({
   open,
@@ -26,50 +27,60 @@ export function Sidebar({
     return toDisplayRole(session.user.role as any);
   }, [session]);
 
-  const allowedTabs: string[] = (session?.user as any)?.allowedTabs ?? [];
-  const disabledServices: string[] = (session?.user as any)?.disabledServices ?? [];
+  const allowedTabs: string[] = useMemo(
+    () => (session?.user as any)?.allowedTabs ?? [],
+    [session]
+  );
 
-  const disabledHrefs = useMemo(() => {
-    const hrefs = new Set<string>();
-    for (const key of disabledServices) {
-      const href = SERVICE_KEY_TO_HREF[key];
-      if (href) hrefs.add(href);
-    }
-    return hrefs;
-  }, [disabledServices]);
+  const isStaff = role === "master-admin" || role === "admin" || role === "sub-admin";
+
+  // Effective services (globally enabled AND enabled per-user). Null while
+  // loading — service links stay hidden until the allowlist is known.
+  const effectiveServices = useEffectiveServices();
 
   const groups: NavGroup[] = useMemo(() => {
     let base = navByRole[role];
 
-    // Admin/sub-admin: filter by allowedTabs
+    // Admin/sub-admin: filter workspace tabs by allowedTabs. Tab links may sit
+    // under /dashboard/admin/, /dashboard/master-admin/ or /dashboard/sub-admin/
+    // depending on the nav — match by slug regardless of prefix.
     if ((role === "admin" || role === "sub-admin") && allowedTabs.length > 0) {
-      const prefix = role === "admin" ? "/dashboard/admin/" : "/dashboard/sub-admin/";
+      const prefixes = [
+        "/dashboard/admin/",
+        "/dashboard/master-admin/",
+        "/dashboard/sub-admin/",
+      ];
       base = base
         .map((group) => ({
           ...group,
           items: group.items.filter((item) => {
-            if (!item.href.startsWith(prefix)) return true;
-            const slug = item.href.replace(prefix, "");
+            const prefix = prefixes.find((p) => item.href.startsWith(p));
+            if (!prefix) return true;
+            const slug = item.href.slice(prefix.length).split("/")[0];
             return allowedTabs.includes(slug);
           }),
         }))
         .filter((group) => group.items.length > 0);
     }
 
-    // Network roles (RT/DT/MD/SD): filter out disabled services
-    if (disabledHrefs.size > 0) {
+    // Network roles (RT/DT/MD/SD): show only services that are enabled both
+    // globally and for this user (default-disabled allowlist).
+    if (!isStaff) {
+      const allowed = effectiveServices ?? new Set<string>();
       base = base
         .map((group) => ({
           ...group,
-          items: group.items.filter(
-            (item) => !disabledHrefs.has(item.href)
-          ),
+          items: group.items.filter((item) => {
+            const key = hrefToServiceKey(item.href);
+            if (!key) return true;
+            return allowed.has(key);
+          }),
         }))
         .filter((group) => group.items.length > 0);
     }
 
     return base;
-  }, [role, allowedTabs, disabledHrefs]);
+  }, [role, allowedTabs, isStaff, effectiveServices]);
 
   return (
     <>

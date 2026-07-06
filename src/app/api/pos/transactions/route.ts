@@ -6,6 +6,8 @@ import { flags } from "@/lib/env";
 import { scopePosTerminals } from "@/lib/pos/assignments";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
+import { assertServiceEnabled } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 
 export const fetchCache = "force-no-store";
 
@@ -25,6 +27,8 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    // Admin kill-switch + per-user allowlist (default-disabled) for this rail.
+    await assertServiceEnabled(SERVICE_KEYS.POS, { name: "POS Terminals", userId: user.id, role: user.role });
     await enforceRateLimit(`pos:txn:${user.id}`, RATE_LIMITS.default);
   } catch (e) {
     return toErrorResponse(e);

@@ -14,6 +14,8 @@ const CreateBody = z.object({
   email: z.string().email(),
   phone: z.string().min(10).max(15),
   password: z.string().min(8),
+  // Tab slugs this sub-admin may access. Empty/omitted = full sub-admin menu.
+  allowedTabs: z.array(z.string()).optional(),
 });
 
 export async function GET(req: Request) {
@@ -46,6 +48,7 @@ export async function GET(req: Request) {
       email: true,
       phone: true,
       status: true,
+      allowedTabs: true,
       twoFactorEnabled: true,
       createdAt: true,
     },
@@ -69,7 +72,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { name, email, phone, password } = parsed.data;
+  const { name, email, phone, password, allowedTabs } = parsed.data;
 
   const existing = await prisma.user.findFirst({
     where: { OR: [{ email: email.toLowerCase() }, { phone }], deletedAt: null },
@@ -92,6 +95,7 @@ export async function POST(req: Request) {
       role: "SUPPORT",
       status: "ACTIVE",
       parentId: user.id,
+      allowedTabs: allowedTabs ?? [],
     },
     select: {
       id: true,
@@ -99,6 +103,7 @@ export async function POST(req: Request) {
       email: true,
       phone: true,
       status: true,
+      allowedTabs: true,
       twoFactorEnabled: true,
       createdAt: true,
     },
@@ -110,7 +115,7 @@ export async function POST(req: Request) {
       action: "sub-admin.created",
       entity: "User",
       entityId: subAdmin.id,
-      meta: { name, email, phone },
+      meta: { name, email, phone, allowedTabs: allowedTabs ?? [] },
       ip: clientIp(req),
     },
   });

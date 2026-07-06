@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
-import { RefreshCw, Sparkles } from "lucide-react";
+import { Award, RefreshCw, Sparkles } from "lucide-react";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { type Role } from "@/lib/auth";
 import { useAuth } from "@/lib/useAuth";
@@ -80,6 +80,12 @@ export default function CommissionsPage() {
               ]}
               rows={slabs}
             />
+            <a href="/api/commissions/certificate" target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" title="Download this financial year's commission certificate (PDF)">
+                <Award className="h-4 w-4" />
+                Certificate
+              </Button>
+            </a>
             <Button variant="outline" onClick={fetchSlabs} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>

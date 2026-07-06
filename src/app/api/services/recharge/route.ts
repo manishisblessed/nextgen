@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
-import { requireAuth, AuthError } from "@/lib/auth-server";
-import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
-import { assertLivenessReady, LivenessRequiredError } from "@/lib/security/livenessGate";
+import { requireAuth } from "@/lib/auth-server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { assertLivenessReady } from "@/lib/security/livenessGate";
+import { requireTxnPin } from "@/lib/security/txnPin";
+import { clientIp } from "@/lib/security/audit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
+import { assertServiceEnabled } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { percentOf, round, toNumber } from "@/lib/money";
 
 const Body = z.object({
@@ -25,34 +30,39 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    // Admin kill-switch + per-user allowlist (default-disabled) for this rail.
+    await assertServiceEnabled(SERVICE_KEYS.RECHARGE, { name: "Recharges", userId: user.id, role: user.role });
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
+    // Transaction PIN — required on every money-moving action (x-txn-pin header).
+    await requireTxnPin(user, req, { action: "recharge", ip: clientIp(req), userAgent: req.headers.get("user-agent") });
   } catch (e) {
-    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    if (e instanceof LivenessRequiredError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
-    if (e instanceof RateLimitError) return NextResponse.json({ error: e.message, retryAfterSec: e.result.retryAfterSec }, { status: 429 });
-    throw e;
+    return toErrorResponse(e);
   }
 
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const partner = getPartner("recharge");
-  const result = await runTransaction({
-    userId: user.id,
-    service: SERVICE[parsed.data.type],
-    amount: parsed.data.amount,
-    // Commission is computed server-side with Decimal money math (never floats,
-    // never from the request body): 3% of the order amount.
-    commission: toNumber(round(percentOf(parsed.data.amount, 3))),
-    idempotencyKey: parsed.data.idempotencyKey,
-    customer: parsed.data.number,
-    operator: parsed.data.operatorCode,
-    partner: partner.name,
-    request: parsed.data,
-    call: () => partner.recharge({ userId: user.id, ...parsed.data })
-  });
+  try {
+    const result = await runTransaction({
+      userId: user.id,
+      service: SERVICE[parsed.data.type],
+      amount: parsed.data.amount,
+      // Commission is computed server-side with Decimal money math (never floats,
+      // never from the request body): 3% of the order amount.
+      commission: toNumber(round(percentOf(parsed.data.amount, 3))),
+      idempotencyKey: parsed.data.idempotencyKey,
+      customer: parsed.data.number,
+      operator: parsed.data.operatorCode,
+      partner: partner.name,
+      request: parsed.data,
+      call: () => partner.recharge({ userId: user.id, ...parsed.data })
+    });
 
-  return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+    return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 }

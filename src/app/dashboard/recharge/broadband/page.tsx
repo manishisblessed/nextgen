@@ -14,6 +14,7 @@ export default function BroadbandPage() {
       />
       <RechargeForm
         serviceTitle="Broadband / OTT"
+        type="BROADBAND"
         numberLabel="Account / customer ID"
         numberPlaceholder="Enter account number"
         operators={["JioFiber", "Airtel Xstream", "BSNL", "ACT Fibernet", "Hathway", "Netflix", "Hotstar"]}

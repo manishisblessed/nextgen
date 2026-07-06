@@ -33,7 +33,7 @@ function pickMime(): { mime: string; contentType: "video/mp4" | "video/webm" } |
   return null;
 }
 
-export function LivenessVideoCapture({ onComplete }: { onComplete?: () => void }) {
+export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: () => void; apiPrefix?: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -84,7 +84,8 @@ export function LivenessVideoCapture({ onComplete }: { onComplete?: () => void }
       maxDurationSec: number;
     };
     try {
-      const res = await fetch("/api/kyc/video/initiate", {
+      const initiateUrl = apiPrefix ? `${apiPrefix}/video/initiate` : "/api/kyc/video/initiate";
+      const res = await fetch(initiateUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({ consent: true, contentType: picked.contentType }),
@@ -183,7 +184,8 @@ export function LivenessVideoCapture({ onComplete }: { onComplete?: () => void }
 
     setPhase("processing");
     try {
-      const res = await fetch("/api/kyc/video/complete", {
+      const completeUrl = apiPrefix ? `${apiPrefix}/video/complete` : "/api/kyc/video/complete";
+      const res = await fetch(completeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({

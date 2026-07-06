@@ -16,7 +16,7 @@
  * worker retry-safe.
  */
 import crypto from "crypto";
-import type { PartnerResult, PayoutInput, PayoutOutput, PayoutProvider } from "./types";
+import type { PartnerResult, PayoutInput, PayoutOutput, PayoutProvider, UpiProvider } from "./types";
 
 const DEFAULT_BASE = "https://api.bulkpe.in/client";
 
@@ -37,7 +37,8 @@ type BulkpeEnvelope<T> = {
   data?: T;
 };
 
-async function bulkpePost<T>(path: string, body: unknown): Promise<PartnerResult<T>> {
+/** Shared POST helper — also used by the BBPS adapter (bulkpe-bbps.ts). */
+export async function bulkpePost<T>(path: string, body: unknown): Promise<PartnerResult<T>> {
   try {
     const res = await fetch(`${baseUrl()}${path}`, {
       method: "POST",
@@ -183,6 +184,101 @@ export const bulkpePayout: PayoutProvider = {
 export function bulkpeConfigured(): boolean {
   return Boolean(process.env.BULKPE_TOKEN);
 }
+
+// ---------------------------------------------------------------------------
+// Simple PG (pg1*) — UPI collect / hosted checkout for wallet top-ups.
+//
+// Same bearer token as payouts. Every collect carries our referenceId so the
+// webhook / status poll can be matched back to the initiating Transaction.
+// ---------------------------------------------------------------------------
+
+/** Map BulkPe PG lifecycle strings to our coarse collect states. Exported for tests. */
+export function mapPgStatus(raw: string | undefined): "CREATED" | "PAID" | "FAILED" | "EXPIRED" {
+  switch ((raw || "").toUpperCase()) {
+    case "SUCCESS":
+    case "COMPLETED":
+    case "PAID":
+      return "PAID";
+    case "FAILED":
+    case "CANCELLED":
+    case "REJECTED":
+      return "FAILED";
+    case "EXPIRED":
+      return "EXPIRED";
+    default:
+      // CREATED | PENDING | INITIATED | unknown
+      return "CREATED";
+  }
+}
+
+type BulkpePgTxn = {
+  transactionId?: string;
+  transcation_id?: string;
+  transaction_id?: string;
+  referenceId?: string;
+  reference_id?: string;
+  status?: string;
+  paymentUrl?: string;
+  payment_url?: string;
+  url?: string;
+  link?: string;
+  upiIntent?: string;
+  intent?: string;
+  paidAt?: string;
+  updatedAt?: string;
+};
+
+function readPgOrderId(d: BulkpePgTxn, fallback: string): string {
+  return d.transactionId || d.transcation_id || d.transaction_id || d.referenceId || d.reference_id || fallback;
+}
+
+export const bulkpeUpi: UpiProvider = {
+  name: "BULKPE_PG",
+
+  async collect(input) {
+    const base = {
+      amount: input.amount,
+      redirectUrl: input.callbackUrl,
+      referenceId: input.idempotencyKey,
+      note: input.note || "Wallet top-up",
+    };
+    // With a payer VPA we push a UPI collect request to their app; without
+    // one we fall back to the hosted checkout page.
+    const r = input.vpa
+      ? await bulkpePost<BulkpePgTxn>("/pg1Upicollect", { ...base, vpa: input.vpa })
+      : await bulkpePost<BulkpePgTxn>("/pg1checkout", base);
+    if (!r.ok) return r;
+    const d = r.data ?? {};
+    return {
+      ok: true,
+      data: {
+        orderId: readPgOrderId(d, input.idempotencyKey),
+        paymentUrl: d.paymentUrl || d.payment_url || d.url || d.link,
+        upiIntent: d.upiIntent || d.intent,
+      },
+      partnerTxnId: readPgOrderId(d, input.idempotencyKey),
+      raw: r.raw,
+    };
+  },
+
+  async status(orderIdOrReference) {
+    // We always initiate with referenceId = our idempotency key (prefixed
+    // TXN/TOPUP); anything else is treated as a BulkPe transactionId.
+    const body = /^(TXN|TOPUP)/i.test(orderIdOrReference)
+      ? { referenceId: orderIdOrReference }
+      : { transactionId: orderIdOrReference };
+    const r = await bulkpePost<BulkpePgTxn>("/pg1CheckTxnStatus", body);
+    if (!r.ok) return r;
+    return {
+      ok: true,
+      data: {
+        status: mapPgStatus(r.data?.status),
+        paidAt: r.data?.paidAt || r.data?.updatedAt,
+      },
+      raw: r.raw,
+    };
+  },
+};
 
 /**
  * Verify a BulkPe webhook signature. Always run this before trusting the body.

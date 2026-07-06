@@ -17,9 +17,19 @@ import { services } from "@/lib/data";
 import { Button } from "@/components/ui/Button";
 import type { Session } from "@/lib/auth";
 import { formatINR, cn } from "@/lib/utils";
+import { hrefToServiceKey } from "@/lib/services/catalog";
+import { useEffectiveServices } from "@/hooks/useEffectiveServices";
 
 export function RetailerOverview({ session }: { session: Session }) {
-  const quickServices = services.slice(0, 8);
+  // Show only services enabled globally AND for this user (default-disabled).
+  const effectiveServices = useEffectiveServices();
+  const quickServices = services
+    .filter((s) => {
+      const key = hrefToServiceKey(s.href);
+      if (!key) return true;
+      return (effectiveServices ?? new Set<string>()).has(key);
+    })
+    .slice(0, 8);
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 12) return "Good morning";
@@ -143,6 +153,12 @@ export function RetailerOverview({ session }: { session: Session }) {
             View all
           </Link>
         </div>
+        {quickServices.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-ink-200 bg-ink-50/50 p-6 text-center text-sm text-ink-500">
+            No services are enabled for your account yet. Contact your admin to
+            get services activated.
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
           {quickServices.map((s) => {
             const Icon = s.icon;

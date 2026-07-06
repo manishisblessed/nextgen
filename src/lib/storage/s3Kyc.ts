@@ -30,6 +30,7 @@ import { env, requireEnv } from "../env";
 
 /** Object key prefix; one folder per user. */
 const KEY_PREFIX = "kyc-videos";
+const SELFIE_PREFIX = "kyc-selfies";
 
 /** Allowed upload content-types (mp4 from most browsers, webm from Chrome). */
 export const ALLOWED_VIDEO_CONTENT_TYPES = ["video/mp4", "video/webm"] as const;
@@ -171,4 +172,46 @@ export async function getKycVideoObjectBytes(key: string): Promise<Buffer> {
 /** Permanently delete the object (retention purge). Best-effort; logs nothing here. */
 export async function deleteKycVideoObject(key: string): Promise<void> {
   await client().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+}
+
+// ---------------------------------------------------------------------------
+// Selfie storage (reuses the same S3 bucket with a separate prefix)
+// ---------------------------------------------------------------------------
+
+export const ALLOWED_SELFIE_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+export type KycSelfieContentType = (typeof ALLOWED_SELFIE_CONTENT_TYPES)[number];
+
+export const KYC_SELFIE_MAX_BYTES = 5_242_880; // 5 MiB
+
+export function buildKycSelfieKey(userId: string): string {
+  return `${SELFIE_PREFIX}/${userId}/${randomUUID()}.jpg`;
+}
+
+export function isAllowedSelfieContentType(ct: string): ct is KycSelfieContentType {
+  return (ALLOWED_SELFIE_CONTENT_TYPES as readonly string[]).includes(ct);
+}
+
+export async function presignKycSelfiePut(input: {
+  userId: string;
+  contentType: KycSelfieContentType;
+}): Promise<PresignedPut> {
+  const key = buildKycSelfieKey(input.userId);
+  const cmd = new PutObjectCommand({
+    Bucket: bucket(),
+    Key: key,
+    ContentType: input.contentType,
+  });
+  const uploadUrl = await getSignedUrl(client(), cmd, { expiresIn: PUT_TTL_SEC });
+  return { uploadUrl, key, expiresInSec: PUT_TTL_SEC, contentType: input.contentType };
+}
+
+export async function headKycSelfieObject(key: string): Promise<KycObjectHead | null> {
+  return headKycVideoObject(key);
+}
+
+export async function presignKycSelfieGet(
+  key: string,
+  opts?: { expiresInSec?: number }
+): Promise<string> {
+  return presignKycVideoGet(key, opts);
 }

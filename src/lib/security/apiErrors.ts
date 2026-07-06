@@ -5,10 +5,17 @@ import { AccountLockedError } from "./lockout";
 import { CaptchaError } from "./captcha";
 import { BreachedPasswordError } from "./breachedPassword";
 import { StepUpError } from "./stepUp";
+import { TxnPinError } from "./txnPin";
 import { ReKycRequiredError } from "./kycGate";
 import { LivenessRequiredError } from "./livenessGate";
+import { AccountSuspendedError } from "./accountGate";
 import { IdempotencyInProgressError } from "../idempotency";
 import { ServiceDisabledError } from "../services/guard";
+import { RiskError } from "../risk/engine";
+import { TopupError } from "../wallet/topup";
+import { QrClaimError } from "../qr/claims";
+import { DisputeError } from "../disputes/service";
+import { ApiKeyError } from "../platform/apiKeys";
 import { securityLogger } from "../logger";
 
 /**
@@ -45,6 +52,12 @@ export function toErrorResponse(e: unknown): NextResponse {
       { status: e.statusCode }
     );
   }
+  if (e instanceof TxnPinError) {
+    return NextResponse.json(
+      { error: e.message, txnPin: true, code: e.code, ...(e.retryAfterSec ? { retryAfterSec: e.retryAfterSec } : {}) },
+      { status: e.statusCode, ...(e.retryAfterSec ? { headers: { "Retry-After": String(e.retryAfterSec) } } : {}) }
+    );
+  }
   if (e instanceof ReKycRequiredError) {
     return NextResponse.json(
       { error: e.message, code: e.code, reKycDueAt: e.dueAt },
@@ -57,11 +70,35 @@ export function toErrorResponse(e: unknown): NextResponse {
       { status: e.statusCode }
     );
   }
+  if (e instanceof AccountSuspendedError) {
+    return NextResponse.json(
+      { error: e.message, code: e.code },
+      { status: e.statusCode }
+    );
+  }
   if (e instanceof IdempotencyInProgressError) {
     return NextResponse.json({ error: e.message }, { status: e.statusCode });
   }
   if (e instanceof ServiceDisabledError) {
     return NextResponse.json({ error: e.message }, { status: e.statusCode });
+  }
+  if (e instanceof RiskError) {
+    return NextResponse.json(
+      { error: e.message, code: e.code, rule: e.rule },
+      { status: e.statusCode }
+    );
+  }
+  if (e instanceof TopupError) {
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
+  }
+  if (e instanceof QrClaimError) {
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
+  }
+  if (e instanceof DisputeError) {
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
+  }
+  if (e instanceof ApiKeyError) {
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
   }
 
   securityLogger.error({ action: "route.unhandled_error", err: String(e) });

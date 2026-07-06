@@ -1,7 +1,10 @@
 // =====================================================================
 // Server-side service guard. Money/feature routes call assertServiceEnabled()
-// to hard-gate a rail that an admin has switched OFF globally or per-user in
-// the On/Off Services panel. A disabled rail returns 503.
+// to hard-gate a rail. A rail is usable only when it is enabled globally
+// (On/Off Services panel) AND present in the user's `enabledServices`
+// allowlist (default-disabled; an admin must enable it per user). Staff roles
+// (SUPPORT/ADMIN/MASTER_ADMIN) bypass the per-user allowlist.
+// A blocked rail returns 503.
 // =====================================================================
 
 import { prisma } from "@/lib/db";
@@ -14,17 +17,27 @@ export class ServiceDisabledError extends Error {
   }
 }
 
+/** Staff roles bypass the per-user allowlist (they administer the rails). */
+const STAFF_ROLES = new Set(["SUPPORT", "ADMIN", "MASTER_ADMIN"]);
+
 export type ServiceGuardOptions = {
   /**
    * What to do when no ServiceRoute row exists for `key` (not yet seeded).
    * Defaults to `true` (fail-open) so a freshly deployed feature is not blocked
    * before the catalog is seeded. Pass `false` to fail-closed for new rails.
+   * Note: the per-user allowlist check still applies regardless.
    */
   defaultEnabled?: boolean;
   /** Friendly name used in the error message shown to the user. */
   name?: string;
-  /** Optional user ID to also check per-user disabled services. */
+  /** User ID whose `enabledServices` allowlist is checked. */
   userId?: string;
+  /**
+   * The caller's role (DB enum, e.g. "RETAILER", "ADMIN"). Staff roles skip
+   * the per-user allowlist check. When omitted, the role is looked up along
+   * with the allowlist.
+   */
+  role?: string;
 };
 
 /**
@@ -43,18 +56,23 @@ export async function isServiceEnabled(
 }
 
 /**
- * True if the service is disabled specifically for this user (admin toggled it off).
+ * True if the service is enabled for this user (in their allowlist, or the
+ * user holds a staff role). Does NOT consider the global switch.
  */
-export async function isServiceDisabledForUser(
+export async function isServiceEnabledForUser(
   key: string,
-  userId: string
+  userId: string,
+  role?: string
 ): Promise<boolean> {
+  if (role && STAFF_ROLES.has(role)) return true;
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { disabledServices: true },
+    select: { role: true, enabledServices: true },
   });
   if (!user) return false;
-  return user.disabledServices.includes(key);
+  if (STAFF_ROLES.has(user.role)) return true;
+  return user.enabledServices.includes(key);
 }
 
 /**
@@ -75,12 +93,40 @@ export async function assertServiceEnabled(
   }
 
   if (opts?.userId) {
-    const userDisabled = await isServiceDisabledForUser(key, opts.userId);
-    if (userDisabled) {
+    const userEnabled = await isServiceEnabledForUser(key, opts.userId, opts.role);
+    if (!userEnabled) {
       throw new ServiceDisabledError(
         key,
         `${opts?.name ?? "This service"} is not enabled for your account. Contact your admin.`
       );
     }
   }
+}
+
+/**
+ * Effective service keys for a user: globally-enabled rails intersected with
+ * the user's allowlist (staff roles get every globally-enabled rail). Used by
+ * the sidebar/overview to show only usable services.
+ */
+export async function getEffectiveServiceKeys(
+  userId: string,
+  role?: string
+): Promise<string[]> {
+  const routes = await prisma.serviceRoute.findMany({
+    where: { enabled: true, type: "SERVICE" },
+    select: { key: true },
+  });
+  const globallyOn = routes.map((r) => r.key);
+
+  if (role && STAFF_ROLES.has(role)) return globallyOn;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true, enabledServices: true },
+  });
+  if (!user) return [];
+  if (STAFF_ROLES.has(user.role)) return globallyOn;
+
+  const allowed = new Set(user.enabledServices);
+  return globallyOn.filter((k) => allowed.has(k));
 }

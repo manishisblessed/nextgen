@@ -1,0 +1,87 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import {
+  headKycVideoObject,
+  KYC_VIDEO_MAX_BYTES,
+  isAllowedVideoContentType,
+} from "@/lib/storage/s3Kyc";
+import crypto from "crypto";
+
+const Body = z.object({
+  key: z.string(),
+  uploadToken: z.string(),
+  contentType: z.string(),
+  durationSec: z.number().int().min(5).max(15),
+}).strict();
+
+export const fetchCache = "force-no-store";
+export const dynamic = "force-dynamic";
+
+function verifyUploadToken(token: string, inviteId: string, key: string): boolean {
+  const [b64, sig] = token.split(".");
+  if (!b64 || !sig) return false;
+  const secret = process.env.NEXTAUTH_SECRET || process.env.JWT_SECRET;
+  if (!secret) return false;
+  let payload: string;
+  try { payload = Buffer.from(b64, "base64").toString(); } catch { return false; }
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  if (sig.length !== expected.length) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  const parts = payload.split(":");
+  const exp = parseInt(parts[3], 10);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  return parts[0] === "onboard" && parts[1] === inviteId && parts[2] === key;
+}
+
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token } = await params;
+
+  const invite = await prisma.invite.findUnique({ where: { token } });
+  if (!invite) {
+    return NextResponse.json({ error: "Invalid invite" }, { status: 404 });
+  }
+
+  if (!["PENDING", "REGISTERED"].includes(invite.status)) {
+    return NextResponse.json({ error: "Invite is no longer active" }, { status: 400 });
+  }
+
+  const parsed = Body.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  if (!verifyUploadToken(parsed.data.uploadToken, invite.id, parsed.data.key)) {
+    return NextResponse.json({ error: "Invalid or expired upload token" }, { status: 403 });
+  }
+
+  const head = await headKycVideoObject(parsed.data.key);
+  if (!head) {
+    return NextResponse.json({ error: "Video upload not found in storage" }, { status: 404 });
+  }
+
+  if (head.contentLength > KYC_VIDEO_MAX_BYTES) {
+    return NextResponse.json({ error: "Video file is too large" }, { status: 413 });
+  }
+
+  await prisma.verificationResult.create({
+    data: {
+      inviteId: invite.id,
+      userId: invite.userId,
+      type: "ONBOARD_VIDEO",
+      orderid: `VID_${Date.now()}_${invite.id.slice(-6)}`,
+      status: "Uploaded",
+      requestPayload: {
+        key: parsed.data.key,
+        contentType: parsed.data.contentType,
+        durationSec: parsed.data.durationSec,
+        sizeBytes: head.contentLength,
+      },
+    },
+  });
+
+  return NextResponse.json({ ok: true });
+}

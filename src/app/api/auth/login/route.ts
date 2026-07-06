@@ -179,7 +179,7 @@ export async function POST(req: Request) {
     status: user.status,
     walletBalance: Number(user.walletBalance),
     allowedTabs: user.allowedTabs ?? [],
-    disabledServices: user.disabledServices ?? [],
+    enabledServices: user.enabledServices ?? [],
     twoFactorEnabled: user.twoFactorEnabled,
   };
 

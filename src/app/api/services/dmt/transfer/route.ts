@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getPartner } from "@/lib/partners";
 import { runTransaction } from "@/lib/services/transaction";
-import { requireAuth, AuthError } from "@/lib/auth-server";
-import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
-import { assertLivenessReady, LivenessRequiredError } from "@/lib/security/livenessGate";
+import { requireAuth } from "@/lib/auth-server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
+import { assertLivenessReady } from "@/lib/security/livenessGate";
+import { requireTxnPin } from "@/lib/security/txnPin";
+import { clientIp } from "@/lib/security/audit";
+import { toErrorResponse } from "@/lib/security/apiErrors";
+import { assertServiceEnabled } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { percentOf, round, lte, dec, toNumber } from "@/lib/money";
 
 const Body = z.object({
@@ -28,14 +33,15 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    // Admin kill-switch + per-user allowlist (default-disabled) for this rail.
+    await assertServiceEnabled(SERVICE_KEYS.DMT, { name: "Money Transfer", userId: user.id, role: user.role });
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
+    // Transaction PIN — required on every money-moving action (x-txn-pin header).
+    await requireTxnPin(user, req, { action: "dmt.transfer", ip: clientIp(req), userAgent: req.headers.get("user-agent") });
   } catch (e) {
-    if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    if (e instanceof LivenessRequiredError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
-    if (e instanceof RateLimitError) return NextResponse.json({ error: e.message, retryAfterSec: e.result.retryAfterSec }, { status: 429 });
-    throw e;
+    return toErrorResponse(e);
   }
   const userId = user.id;
   const parsed = Body.safeParse(await req.json());
@@ -51,19 +57,23 @@ export async function POST(req: Request) {
     return toNumber(lte(raw, cap) ? raw : cap);
   })();
 
-  const result = await runTransaction({
-    userId,
-    service: parsed.data.mode === "IMPS" ? "DMT_IMPS" : parsed.data.mode === "NEFT" ? "DMT_NEFT" : "DMT_RTGS",
-    amount: parsed.data.amount,
-    fee,
-    commission,
-    idempotencyKey: parsed.data.idempotencyKey,
-    customer: parsed.data.beneficiary.accountNumber.slice(-4),
-    operator: parsed.data.beneficiary.ifsc.slice(0, 4),
-    partner: dmt.name,
-    request: parsed.data,
-    call: () => dmt.transfer({ userId, ...parsed.data })
-  });
+  try {
+    const result = await runTransaction({
+      userId,
+      service: parsed.data.mode === "IMPS" ? "DMT_IMPS" : parsed.data.mode === "NEFT" ? "DMT_NEFT" : "DMT_RTGS",
+      amount: parsed.data.amount,
+      fee,
+      commission,
+      idempotencyKey: parsed.data.idempotencyKey,
+      customer: parsed.data.beneficiary.accountNumber.slice(-4),
+      operator: parsed.data.beneficiary.ifsc.slice(0, 4),
+      partner: dmt.name,
+      request: parsed.data,
+      call: () => dmt.transfer({ userId, ...parsed.data })
+    });
 
-  return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+    return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 }

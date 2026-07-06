@@ -14,6 +14,7 @@ export default function DthRechargePage() {
       />
       <RechargeForm
         serviceTitle="DTH Recharge"
+        type="DTH"
         numberLabel="Subscriber / VC number"
         numberPlaceholder="Enter customer ID"
         operators={["Tata Play", "Dish TV", "d2h", "Sun Direct", "Airtel Digital TV"]}

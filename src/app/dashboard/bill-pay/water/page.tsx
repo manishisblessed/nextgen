@@ -1,6 +1,6 @@
 import { Droplets } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
-import { BillForm } from "@/components/dashboard/BillForm";
+import { BbpsBillForm } from "@/components/dashboard/BbpsBillForm";
 
 export const dynamic = "force-dynamic";
 
@@ -12,17 +12,10 @@ export default function WaterBillPage() {
         title="Water Bill Payment"
         description="Pay municipal water bills across major cities in India."
       />
-      <BillForm
+      <BbpsBillForm
+        category="WATER"
         serviceTitle="Water"
         consumerLabel="K-number / Connection #"
-        billers={[
-          "Delhi Jal Board",
-          "BMC Mumbai",
-          "BWSSB Bengaluru",
-          "Chennai Metro Water",
-          "PHED Rajasthan",
-          "Hyderabad Water Board"
-        ]}
         refPrefix="WATR"
       />
     </div>

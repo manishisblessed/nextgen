@@ -75,6 +75,36 @@ export const SERVICE_KEY_TO_HREF: Record<string, string> = {
 };
 
 /**
+ * Dashboard route prefixes owned by each service key. Used to decide whether
+ * a nav link / quick tile belongs to a toggleable service (sub-routes like
+ * /dashboard/bill-pay/water map to BBPS via the /dashboard/bill-pay prefix).
+ */
+const SERVICE_HREF_PREFIXES: Array<[prefix: string, key: string]> = [
+  ["/dashboard/pg", SERVICE_KEYS.PG],
+  ["/dashboard/pos", SERVICE_KEYS.POS],
+  ["/dashboard/qr", SERVICE_KEYS.QR],
+  ["/dashboard/payout", SERVICE_KEYS.PAYOUT],
+  ["/dashboard/aadhaar-pay", SERVICE_KEYS.AEPS],
+  ["/dashboard/upi", SERVICE_KEYS.UPI],
+  ["/dashboard/recharge", SERVICE_KEYS.RECHARGE],
+  ["/dashboard/bill-pay", SERVICE_KEYS.BBPS],
+  ["/dashboard/money-transfer", SERVICE_KEYS.DMT],
+  ["/dashboard/travel", SERVICE_KEYS.TRAVEL],
+  ["/dashboard/virtual-account", SERVICE_KEYS.VIRTUAL_ACCOUNT],
+];
+
+/**
+ * Resolve a dashboard href to the service key that gates it, or null when the
+ * page is not service-gated (wallet, reports, settings, ...).
+ */
+export function hrefToServiceKey(href: string): string | null {
+  for (const [prefix, key] of SERVICE_HREF_PREFIXES) {
+    if (href === prefix || href.startsWith(`${prefix}/`)) return key;
+  }
+  return null;
+}
+
+/**
  * The known rails seeded on a fresh DB. Re-seeding NEVER overrides an admin's
  * `enabled`/`note` choices (see {@link seedServiceRoutes}); it only backfills
  * presentation metadata and inserts missing rows.
@@ -95,9 +125,9 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     name: "Payment Gateway",
     type: "SERVICE",
     kind: "PG",
-    provider: "RAZORPAY",
+    provider: "BULKPE",
     enabled: true,
-    note: "Card / netbanking collections via the payment gateway.",
+    note: "Hosted checkout / UPI collections (BulkPe Simple PG) — powers instant wallet top-ups.",
     sortOrder: 20,
   },
   {
@@ -165,9 +195,9 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     name: "Bill Payments (BBPS)",
     type: "SERVICE",
     kind: "BBPS",
-    provider: "BILLAVENUE",
+    provider: "SAMEDAY",
     enabled: true,
-    note: "BBPS utility bill payments across categories.",
+    note: "BBPS bill payments. Credit cards live via Same Day BBPS-2 (Pay2New); other categories pending an aggregator.",
     sortOrder: 90,
   },
   {

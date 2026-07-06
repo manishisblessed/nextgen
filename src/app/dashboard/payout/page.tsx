@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+import { TxnPinDialog } from "@/components/security/TxnPinDialog";
 import { formatINR } from "@/lib/utils";
 
 type PayoutMode = "IMPS" | "NEFT" | "RTGS" | "UPI";
@@ -284,6 +285,7 @@ function NewPayoutForm({
   const [vpa, setVpa] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
 
@@ -323,13 +325,19 @@ function NewPayoutForm({
     [quote, spendable]
   );
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (insufficient) {
       setError("Total debit exceeds your spendable balance.");
       return;
     }
+    // Confirm with the transaction PIN before anything moves.
+    setPinOpen(true);
+  }
+
+  /** Called by the PIN dialog. Returns an error string to keep it open, null on success. */
+  async function submitWithPin(pin: string): Promise<string | null> {
     setSubmitting(true);
     try {
       // Mint a single-use submit nonce so a captured/cached POST cannot be
@@ -344,6 +352,7 @@ function NewPayoutForm({
           "Content-Type": "application/json",
           "Idempotency-Key": idemKey.current,
           "x-submit-nonce": nonce,
+          "x-txn-pin": pin,
         },
         body: JSON.stringify({
           mode,
@@ -357,6 +366,10 @@ function NewPayoutForm({
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
+        // PIN problems stay inside the dialog with a fresh entry.
+        if (json.txnPin) {
+          return typeof json.error === "string" ? json.error : "PIN verification failed";
+        }
         const fieldErrors = json.error?.fieldErrors as Record<string, string[]> | undefined;
         const firstField = fieldErrors ? Object.values(fieldErrors)[0]?.[0] : undefined;
         const msg =
@@ -368,9 +381,13 @@ function NewPayoutForm({
         throw new Error(msg);
       }
       idemKey.current = crypto.randomUUID();
+      setPinOpen(false);
       onSubmitted();
+      return null;
     } catch (err) {
+      setPinOpen(false);
       setError(err instanceof Error ? err.message : "Failed to submit");
+      return null;
     } finally {
       setSubmitting(false);
     }
@@ -500,6 +517,16 @@ function NewPayoutForm({
           {submitting ? "Submitting…" : "Submit for approval"}
         </Button>
       </div>
+
+      <TxnPinDialog
+        open={pinOpen}
+        title="Confirm payout"
+        detail={`${mode} · ${beneficiaryName || "beneficiary"}`}
+        amount={quote?.totalDebit ?? amountNum}
+        busy={submitting}
+        onConfirm={submitWithPin}
+        onCancel={() => !submitting && setPinOpen(false)}
+      />
     </form>
   );
 }

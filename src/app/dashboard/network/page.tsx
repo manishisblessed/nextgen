@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, Filter, PackagePlus, RefreshCw } from "lucide-react";
+import { Search, Filter, PackagePlus, RefreshCw, ShieldCheck, ShieldOff, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
@@ -16,7 +16,7 @@ type NetworkUser = {
   id: string;
   name: string;
   shop: string;
-  role: "retailer" | "distributor" | "master-distributor";
+  role: "retailer" | "distributor" | "master-distributor" | "super-distributor";
   city: string;
   state: string;
   joined: string;
@@ -26,19 +26,58 @@ type NetworkUser = {
   retailers: number;
 };
 
+/** Labels for the direct downline each network tier manages. */
+const CHILD_META = {
+  "super-distributor": {
+    child: "master-distributor",
+    singular: "master distributor",
+    plural: "master distributors",
+    header: "Master Distributor",
+    eyebrow: "Network tree",
+    title: "Master distributors under you",
+    description:
+      "Direct master distributors. Override commissions, top-up wallets, freeze or graduate accounts.",
+    hasDownline: true,
+  },
+  "master-distributor": {
+    child: "distributor",
+    singular: "distributor",
+    plural: "distributors",
+    header: "Distributor",
+    eyebrow: "Network tree",
+    title: "Distributors under you",
+    description:
+      "Direct distributors. Override commissions, top-up wallets, freeze or graduate accounts.",
+    hasDownline: true,
+  },
+  distributor: {
+    child: "retailer",
+    singular: "retailer",
+    plural: "retailers",
+    header: "Retailer",
+    eyebrow: "My retailers",
+    title: "Retailers under you",
+    description:
+      "Retailers in your network. Approve fund requests, set commissions, and watch turnover.",
+    hasDownline: false,
+  },
+} as const;
+
 export default function NetworkPage() {
   const { session } = useAuth();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const [users, setUsers] = useState<NetworkUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
-  const role =
-    !session ? "retailer" :
-    session.role === "master-distributor" ? "master-distributor" :
-    session.role === "distributor" ? "distributor" : "retailer";
+  const role: keyof typeof CHILD_META =
+    session?.role === "super-distributor" ? "super-distributor" :
+    session?.role === "master-distributor" ? "master-distributor" :
+    "distributor";
 
-  const childRole = role === "master-distributor" ? "distributor" : "retailer";
+  const meta = CHILD_META[role];
 
   const fetchNetwork = useCallback(async () => {
     setLoading(true);
@@ -61,10 +100,49 @@ export default function NetworkPage() {
     return () => clearTimeout(t);
   }, [fetchNetwork]);
 
+  const toggleStatus = useCallback(async (row: NetworkUser) => {
+    const suspending = row.status !== "Suspended";
+    let reason: string | undefined;
+
+    if (suspending) {
+      const input = prompt(
+        `SECURITY FREEZE — ${row.name}\n\nThis instantly blocks all transactions and logs the ${meta.singular} out everywhere. Enter a reason (required):`
+      );
+      if (input === null) return; // cancelled
+      reason = input.trim();
+      if (!reason) {
+        setToggleError("A reason is required to suspend an account.");
+        return;
+      }
+    } else if (!confirm(`Reactivate ${row.name}? They will be able to transact again.`)) {
+      return;
+    }
+
+    setTogglingId(row.id);
+    setToggleError(null);
+    try {
+      const res = await fetch(`/api/network/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: suspending ? "suspend" : "activate", reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setToggleError(data.error ?? "Could not update account status.");
+      } else {
+        await fetchNetwork();
+      }
+    } catch {
+      setToggleError("Network error — please try again.");
+    } finally {
+      setTogglingId(null);
+    }
+  }, [meta.singular, fetchNetwork]);
+
   const cols: Column<NetworkUser>[] = [
     {
       key: "name",
-      header: childRole === "distributor" ? "Distributor" : "Retailer",
+      header: meta.header,
       render: (r) => (
         <div>
           <div className="font-semibold text-ink-900">{r.name}</div>
@@ -73,8 +151,8 @@ export default function NetworkPage() {
       ),
     },
     { key: "city", header: "Location", render: (r) => `${r.city}, ${r.state}` },
-    ...(childRole === "distributor"
-      ? [{ key: "retailers" as const, header: "Retailers", align: "right" as const, render: (r: NetworkUser) => r.retailers ?? 0 }]
+    ...(meta.hasDownline
+      ? [{ key: "retailers" as const, header: "Downline", align: "right" as const, render: (r: NetworkUser) => r.retailers ?? 0 }]
       : []),
     { key: "joined", header: "Joined" },
     {
@@ -88,21 +166,54 @@ export default function NetworkPage() {
     },
     { key: "walletBalance", header: "Wallet", align: "right", render: (r) => formatINR(r.walletBalance) },
     { key: "monthlyTurnover", header: "MTD", align: "right", render: (r) => formatINR(r.monthlyTurnover) },
+    {
+      key: "security",
+      header: "Security",
+      align: "right",
+      render: (r) => {
+        if (r.status === "Closed") return null;
+        const busy = togglingId === r.id;
+        const suspended = r.status === "Suspended";
+        return (
+          <button
+            onClick={() => toggleStatus(r)}
+            disabled={busy}
+            title={
+              suspended
+                ? "Reactivate this account"
+                : "Freeze this account — blocks all transactions immediately"
+            }
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${
+              suspended
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+            }`}
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : suspended ? (
+              <ShieldCheck className="h-3.5 w-3.5" />
+            ) : (
+              <ShieldOff className="h-3.5 w-3.5" />
+            )}
+            {suspended ? "Reactivate" : "Freeze"}
+          </button>
+        );
+      },
+    },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={role === "master-distributor" ? "Network tree" : "My retailers"}
-        title={role === "master-distributor" ? "Distributors under you" : "Retailers under you"}
-        description={role === "master-distributor"
-          ? "Direct distributors. Override commissions, top-up wallets, freeze or graduate accounts."
-          : "Retailers in your network. Approve fund requests, set commissions, and watch turnover."}
+        eyebrow={meta.eyebrow}
+        title={meta.title}
+        description={meta.description}
         actions={
           <>
             <ReportActions
-              filename={`my-${childRole === "distributor" ? "distributors" : "retailers"}`}
-              title={`JMP NextGenPay · My ${childRole === "distributor" ? "Distributors" : "Retailers"}`}
+              filename={`my-${meta.plural.replace(/ /g, "-")}`}
+              title={`JMP NextGenPay · My ${meta.plural.replace(/\b\w/g, (c) => c.toUpperCase())}`}
               subtitle={`${users.length} record${users.length === 1 ? "" : "s"}`}
               columns={[
                 { key: "id", header: "Code" },
@@ -123,7 +234,7 @@ export default function NetworkPage() {
             <Link href="/dashboard/network/onboard">
               <Button>
                 <PackagePlus className="h-4 w-4" />
-                {role === "master-distributor" ? "Onboard distributor" : "Onboard retailer"}
+                Onboard {meta.singular}
               </Button>
             </Link>
           </>
@@ -146,11 +257,18 @@ export default function NetworkPage() {
         </div>
       </div>
 
+      {toggleError && (
+        <div className="flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <ShieldOff className="h-4 w-4 shrink-0" />
+          {toggleError}
+        </div>
+      )}
+
       <DataTable
-        title={loading ? "Loading..." : `${users.length} ${childRole === "distributor" ? "distributors" : "retailers"}`}
+        title={loading ? "Loading..." : `${users.length} ${meta.plural}`}
         columns={cols}
         data={users}
-        empty={`No ${childRole}s in your network yet.`}
+        empty={`No ${meta.plural} in your network yet.`}
       />
     </div>
   );

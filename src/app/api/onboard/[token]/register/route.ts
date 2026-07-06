@@ -79,6 +79,18 @@ export async function POST(
 
   const data = parsed.data;
 
+  function parseDob(raw?: string): Date | undefined {
+    if (!raw) return undefined;
+    // Handle dd-mm-yyyy or dd/mm/yyyy from Aadhaar
+    const ddmmyyyy = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+    if (ddmmyyyy) {
+      const d = new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`);
+      if (!isNaN(d.getTime())) return d;
+    }
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? undefined : d;
+  }
+
   try {
     await assertPasswordNotBreached(data.password);
   } catch (e) {
@@ -117,41 +129,10 @@ export async function POST(
   const hasPan = verifiedTypes.has("PAN_360");
   const hasBank = verifiedTypes.has("BANK_PENNY_DROP") || verifiedTypes.has("BANK_ADVANCE");
 
-  const MANDATORY_DOC_TYPES = [
-    "GST_CERT",
-    "SHOP_ESTABLISHMENT",
-    "GUMASTA_LICENSE",
-    "SIGNATURE",
-    "ELECTRICITY_BILL",
-    "CANCEL_CHEQUE",
-    "ADDITIONAL_ID",
-    "FAMILY_REFERENCE",
-    "PG_FORM",
-    "GPS_PHOTO_OUTSIDE",
-    "GPS_PHOTO_INSIDE",
-    "GPS_SELFIE_DISTRIBUTOR",
-    "DISTRIBUTOR_DECLARATION",
-  ];
-
-  const missingDocs = MANDATORY_DOC_TYPES.filter((t) => !uploadedDocTypes.has(t));
-  if (missingDocs.length > 0) {
-    return NextResponse.json(
-      {
-        error: `Missing required documents: ${missingDocs.join(", ")}. Please upload all mandatory documents before submitting.`,
-      },
-      { status: 400 }
-    );
-  }
-
+  const uploadedDocsList = Array.from(uploadedDocTypes);
   const hasSelfie = uploadedDocTypes.has("SELFIE");
-  if (!hasSelfie) {
-    return NextResponse.json(
-      { error: "Please upload your live selfie photo before submitting." },
-      { status: 400 }
-    );
-  }
 
-  const allVerified = hasPan && hasAadhaar && hasBank && !data.nameMismatch;
+  const allVerified = hasPan && hasAadhaar && hasBank && !data.nameMismatch && hasSelfie;
   const newStatus = allVerified ? "VERIFIED" : "REGISTERED";
 
   const result = await prisma.$transaction(async (tx) => {
@@ -211,31 +192,31 @@ export async function POST(
         gstin: data.gstin?.toUpperCase(),
         msmeNumber: data.msmeNumber || undefined,
         nameMismatch: data.nameMismatch,
-        dob: data.dob ? new Date(data.dob) : undefined,
-        panVerifiedAt: hasPan ? new Date() : undefined,
-        aadhaarVerifiedAt: hasAadhaar ? new Date() : undefined,
-        status: allVerified ? "PENDING_REVIEW" : "NOT_STARTED",
-        submittedAt: new Date(),
-      },
-      create: {
-        userId: user.id,
-        panNumber: data.panNumber?.toUpperCase(),
-        panName: data.panName,
-        aadhaarLast4: data.aadhaarLast4,
-        aadhaarNumber: data.aadhaarNumber,
-        aadhaarName: data.aadhaarName,
-        aadhaarDob: data.aadhaarDob,
-        aadhaarGender: data.aadhaarGender,
-        aadhaarAddress: data.aadhaarAddress,
-        aadhaarMobile: data.aadhaarMobile,
-        bankAccountName: data.bankName,
-        bankAccountNumber: data.bankAccountNumber,
-        bankIfsc: data.bankIfsc?.toUpperCase(),
-        bankAccountStatus: data.bankAccountStatus,
-        gstin: data.gstin?.toUpperCase(),
-        msmeNumber: data.msmeNumber || undefined,
-        nameMismatch: data.nameMismatch,
-        dob: data.dob ? new Date(data.dob) : undefined,
+        dob: parseDob(data.dob),
+    panVerifiedAt: hasPan ? new Date() : undefined,
+    aadhaarVerifiedAt: hasAadhaar ? new Date() : undefined,
+    status: allVerified ? "PENDING_REVIEW" : "NOT_STARTED",
+    submittedAt: new Date(),
+  },
+  create: {
+    userId: user.id,
+    panNumber: data.panNumber?.toUpperCase(),
+    panName: data.panName,
+    aadhaarLast4: data.aadhaarLast4,
+    aadhaarNumber: data.aadhaarNumber,
+    aadhaarName: data.aadhaarName,
+    aadhaarDob: data.aadhaarDob,
+    aadhaarGender: data.aadhaarGender,
+    aadhaarAddress: data.aadhaarAddress,
+    aadhaarMobile: data.aadhaarMobile,
+    bankAccountName: data.bankName,
+    bankAccountNumber: data.bankAccountNumber,
+    bankIfsc: data.bankIfsc?.toUpperCase(),
+    bankAccountStatus: data.bankAccountStatus,
+    gstin: data.gstin?.toUpperCase(),
+    msmeNumber: data.msmeNumber || undefined,
+    nameMismatch: data.nameMismatch,
+    dob: parseDob(data.dob),
         panVerifiedAt: hasPan ? new Date() : undefined,
         aadhaarVerifiedAt: hasAadhaar ? new Date() : undefined,
         status: allVerified ? "PENDING_REVIEW" : "NOT_STARTED",
@@ -271,6 +252,8 @@ export async function POST(
       meta: {
         role: invite.role,
         verifiedTypes: Array.from(verifiedTypes),
+        uploadedDocs: uploadedDocsList,
+        hasSelfie,
         allVerified,
         nameMismatch: data.nameMismatch,
       },
@@ -279,7 +262,59 @@ export async function POST(
 
   const appUrl = env.NEXT_PUBLIC_APP_URL;
   const loginUrl = `${appUrl}/login`;
+  const adminDashUrl = `${appUrl}/admin`;
 
+  // ── Notify the admin who sent the invite ──
+  try {
+    const inviter = await prisma.user.findUnique({
+      where: { id: invite.invitedById },
+      select: { id: true, email: true, name: true },
+    });
+
+    if (inviter) {
+      await prisma.notification.create({
+        data: {
+          userId: inviter.id,
+          title: "New Registration Pending Approval",
+          body: `${data.name} (${invite.role.replace(/_/g, " ")}) has completed onboarding and is awaiting your approval. Phone: ${invite.phone}, Email: ${invite.email}.`,
+          channel: "INAPP",
+        },
+      });
+
+      const emailProvider = getPartner("email");
+      await emailProvider.send({
+        to: inviter.email,
+        subject: `NextGenPay — New Registration: ${data.name} awaits approval`,
+        html: `
+          <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+            <h1 style="color:#1e293b;font-size:22px;margin:0 0 16px;">New Registration Awaiting Approval</h1>
+            <p>Hi <strong>${inviter.name}</strong>,</p>
+            <p><strong>${data.name}</strong> has completed their onboarding as a <strong>${invite.role.replace(/_/g, " ")}</strong> and is now pending your approval.</p>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:20px 0;">
+              <h3 style="margin:0 0 12px 0;color:#334155;font-size:16px;">Applicant Details</h3>
+              <table style="width:100%;border-collapse:collapse;">
+                <tr><td style="padding:6px 0;color:#64748b;width:120px;">Name</td><td style="padding:6px 0;font-weight:600;">${data.name}</td></tr>
+                <tr><td style="padding:6px 0;color:#64748b;">Role</td><td style="padding:6px 0;font-weight:600;">${invite.role.replace(/_/g, " ")}</td></tr>
+                <tr><td style="padding:6px 0;color:#64748b;">Phone</td><td style="padding:6px 0;font-weight:600;">${invite.phone}</td></tr>
+                <tr><td style="padding:6px 0;color:#64748b;">Email</td><td style="padding:6px 0;font-weight:600;">${invite.email}</td></tr>
+                <tr><td style="padding:6px 0;color:#64748b;">KYC Status</td><td style="padding:6px 0;font-weight:600;">${allVerified ? "All Verified" : "Pending Review"}</td></tr>
+              </table>
+            </div>
+            <div style="text-align:center;margin:24px 0;">
+              <a href="${adminDashUrl}" style="display:inline-block;padding:14px 32px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Review &amp; Approve</a>
+            </div>
+            <p style="color:#64748b;font-size:13px;">Please review and approve within 48–72 working hours.</p>
+            <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;" />
+            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NextGenPay Pvt. Ltd.</p>
+          </div>
+        `,
+      });
+    }
+  } catch {
+    // Admin notification failure shouldn't block registration
+  }
+
+  // ── Confirmation email to the registrant ──
   try {
     const emailProvider = getPartner("email");
     await emailProvider.send({

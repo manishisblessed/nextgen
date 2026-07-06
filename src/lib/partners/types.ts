@@ -128,6 +128,15 @@ export interface BbpsBill {
   dueDate?: string;
   billNumber?: string;
   billDate?: string;
+  /** Minimum payable amount, when the biller reports one (credit cards). */
+  minAmount?: Money;
+  /** Maximum permissible amount, when the biller reports one. */
+  maxAmount?: Money;
+  /**
+   * Provider reference for this fetch. Providers that require it (Same Day
+   * Pay2New) will reject a pay() whose customerParams lack `billFetchRef`.
+   */
+  billFetchRef?: string;
 }
 export interface BbpsPayInput extends BbpsFetchInput {
   amount: Money;
@@ -136,10 +145,30 @@ export interface BbpsPayOutput {
   txnReference: string;
   receipt: string;
 }
+export interface BbpsBiller {
+  code: string;
+  name: string;
+  category: BbpsFetchInput["category"];
+  /**
+   * Optional: the customer input fields this biller requires (BulkPe exposes
+   * these via selectBiller). UIs use them to render dynamic fetch-bill forms;
+   * absent for providers that don't publish param metadata.
+   */
+  params?: Array<{ name: string; dataType: string; optional: boolean }>;
+}
 export interface BbpsProvider {
   name: string;
   fetchBill(input: BbpsFetchInput): Promise<PartnerResult<BbpsBill>>;
   pay(input: BbpsPayInput): Promise<PartnerResult<BbpsPayOutput>>;
+  /** Optional: live biller catalog for a category (Same Day exposes CC billers). */
+  billers?(category: BbpsFetchInput["category"]): Promise<PartnerResult<BbpsBiller[]>>;
+  /**
+   * Optional: poll a payment's terminal state by provider order id or request
+   * id — used after timeouts (never blind-retry pay) and by reconciliation.
+   */
+  status?(ref: { orderId?: string; requestId?: string }): Promise<
+    PartnerResult<{ status: "SUCCESS" | "PENDING" | "FAILED" | "REFUNDED"; operatorRef?: string }>
+  >;
 }
 
 // ---------- Recharge / DTH / Broadband ----------

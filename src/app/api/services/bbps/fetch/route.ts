@@ -4,6 +4,8 @@ import { getPartner } from "@/lib/partners";
 import { requireAuth } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
+import { assertServiceEnabled } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -19,6 +21,7 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
     await enforceRateLimit(`bbps:fetch:${user.id}`, RATE_LIMITS.txnCreate);
   } catch (e) {
     return toErrorResponse(e);

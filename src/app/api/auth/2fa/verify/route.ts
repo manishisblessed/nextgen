@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       status: true,
       walletBalance: true,
       allowedTabs: true,
-      disabledServices: true,
+      enabledServices: true,
       twoFactorSecret: true,
       twoFactorBackupCodes: true,
     },
@@ -159,7 +159,7 @@ export async function POST(req: Request) {
     status: user.status,
     walletBalance: Number(user.walletBalance),
     allowedTabs: user.allowedTabs ?? [],
-    disabledServices: user.disabledServices ?? [],
+    enabledServices: user.enabledServices ?? [],
     twoFactorEnabled: true,
   };
 

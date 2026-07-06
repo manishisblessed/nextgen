@@ -1,6 +1,6 @@
 import { CreditCard } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
-import { BillForm } from "@/components/dashboard/BillForm";
+import { CreditCardBillForm } from "@/components/dashboard/CreditCardBillForm";
 
 export const dynamic = "force-dynamic";
 
@@ -10,23 +10,9 @@ export default function CreditCardBillPage() {
       <ServicePageHeader
         icon={CreditCard}
         title="Credit Card Bill Payment"
-        description="Pay credit card bills across all major banks via NEFT / IMPS."
+        description="Pay credit card bills across all major banks via BBPS. Fetch the live bill with the card's last 4 digits and registered mobile."
       />
-      <BillForm
-        serviceTitle="Credit Card"
-        consumerLabel="Card number"
-        billers={[
-          "HDFC Credit Card",
-          "ICICI Credit Card",
-          "SBI Credit Card",
-          "Axis Bank Card",
-          "Kotak Credit Card",
-          "RBL Credit Card",
-          "AmEx",
-          "IndusInd Card"
-        ]}
-        refPrefix="CC"
-      />
+      <CreditCardBillForm />
     </div>
   );
 }

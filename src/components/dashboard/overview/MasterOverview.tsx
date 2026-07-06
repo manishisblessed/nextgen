@@ -19,6 +19,8 @@ import type { Session } from "@/lib/auth";
 import { formatINR } from "@/lib/utils";
 
 export function MasterOverview({ session }: { session: Session }) {
+  const isSuper = session.role === "super-distributor";
+  const childLabel = isSuper ? "master distributors" : "distributors";
   const distributors = networkUsers.filter((u) => u.role === "distributor");
   const totalRetailers = distributors.reduce((s, d) => s + (d.retailers ?? 0), 0);
 
@@ -26,10 +28,12 @@ export function MasterOverview({ session }: { session: Session }) {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-ink-500">Master distributor desk</p>
+          <p className="text-sm text-ink-500">
+            {isSuper ? "Super distributor desk" : "Master distributor desk"}
+          </p>
           <h1 className="heading-md mt-1">{session.name}</h1>
           <p className="mt-1 text-sm text-ink-600">
-            {distributors.length} distributors · {totalRetailers}+ retailers · API + white-label active
+            {distributors.length} {childLabel} · {totalRetailers}+ retailers · API + white-label active
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -41,7 +45,7 @@ export function MasterOverview({ session }: { session: Session }) {
           </Link>
           <Link href="/dashboard/network/onboard">
             <Button>
-              Onboard distributor
+              Onboard {isSuper ? "master distributor" : "distributor"}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
@@ -49,7 +53,7 @@ export function MasterOverview({ session }: { session: Session }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Distributors" value={`${distributors.length}`} delta="+1" trend="up" icon={Network} accent="brand" />
+        <StatCard label={isSuper ? "Master Distributors" : "Distributors"} value={`${distributors.length}`} delta="+1" trend="up" icon={Network} accent="brand" />
         <StatCard label="Retailers (network)" value={`${totalRetailers.toLocaleString("en-IN")}`} delta="+128" trend="up" icon={Users} accent="violet" />
         <StatCard label="Override Earnings (MTD)" value={formatINR(1842500)} delta="+19.4%" trend="up" icon={IndianRupee} accent="emerald" />
         <StatCard label="Network Turnover (MTD)" value={formatINR(session.monthlyTurnover ?? 0)} delta="+11.8%" trend="up" icon={TrendingUp} accent="accent" />
@@ -104,9 +108,9 @@ export function MasterOverview({ session }: { session: Session }) {
         <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
           <div>
             <h3 className="font-display text-base font-semibold text-ink-900">
-              My distributors
+              My {childLabel}
             </h3>
-            <p className="text-xs text-ink-500">Direct child distributors with override earnings</p>
+            <p className="text-xs text-ink-500">Direct child {childLabel} with override earnings</p>
           </div>
           <Link href="/dashboard/network" className="text-xs font-semibold text-brand-700 hover:underline">
             View tree

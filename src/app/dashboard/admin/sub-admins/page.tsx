@@ -13,6 +13,7 @@ import {
   X,
   Eye,
   EyeOff,
+  ListChecks,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { generateRandomPassword } from "@/lib/utils";
+import { ASSIGNABLE_SUB_ADMIN_TABS } from "@/lib/roles";
 
 type SubAdmin = {
   id: string;
@@ -28,6 +30,7 @@ type SubAdmin = {
   email: string;
   phone: string;
   status: string;
+  allowedTabs: string[];
   twoFactorEnabled: boolean;
   createdAt: string;
 };
@@ -36,6 +39,7 @@ export default function AdminSubAdminsPage() {
   const [rows, setRows] = useState<SubAdmin[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
+  const [tabsFor, setTabsFor] = useState<SubAdmin | null>(null);
   const [issued, setIssued] = useState<{
     record: SubAdmin;
     password: string;
@@ -93,6 +97,18 @@ export default function AdminSubAdminsPage() {
         ),
     },
     {
+      key: "allowedTabs",
+      header: "Tabs",
+      render: (r) =>
+        (r.allowedTabs ?? []).length === 0 ? (
+          <Badge variant="accent">All tabs</Badge>
+        ) : (
+          <span className="text-xs text-ink-700">
+            {r.allowedTabs.length} of {ASSIGNABLE_SUB_ADMIN_TABS.length}
+          </span>
+        ),
+    },
+    {
       key: "status",
       header: "Status",
       render: (r) => (
@@ -120,6 +136,13 @@ export default function AdminSubAdminsPage() {
       align: "right",
       render: (r) => (
         <div className="flex justify-end gap-1">
+          <button
+            onClick={() => setTabsFor(r)}
+            className="grid h-8 w-8 place-items-center rounded-lg text-violet-700 hover:bg-violet-50"
+            title="Assign tabs"
+          >
+            <ListChecks className="h-4 w-4" />
+          </button>
           {r.status === "ACTIVE" ? (
             <button
               onClick={async () => {
@@ -231,6 +254,17 @@ export default function AdminSubAdminsPage() {
           record={issued.record}
           password={issued.password}
           onClose={() => setIssued(null)}
+        />
+      )}
+
+      {tabsFor && (
+        <TabsDialog
+          record={tabsFor}
+          onClose={() => setTabsFor(null)}
+          onSaved={() => {
+            setTabsFor(null);
+            refresh();
+          }}
         />
       )}
 
@@ -360,6 +394,114 @@ function NewSubAdminForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+function TabsDialog({
+  record,
+  onClose,
+  onSaved,
+}: {
+  record: SubAdmin;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [picked, setPicked] = useState<string[]>(record.allowedTabs ?? []);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function toggle(slug: string) {
+    setPicked((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
+    );
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/sub-admins/${record.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update-tabs", allowedTabs: picked }),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(
+          typeof data?.error === "string" ? data.error : "Failed to save tabs"
+        );
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save tabs");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4">
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 bg-gradient-to-br from-violet-50 to-white px-6 py-5">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700">
+              Assign tabs
+            </p>
+            <h3 className="mt-1 font-display text-lg font-bold text-ink-900">
+              {record.name}
+            </h3>
+            <p className="mt-1 text-xs text-ink-600">
+              Pick the workspace tabs this sub-admin may access. Leaving all
+              unticked grants the full sub-admin menu.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-ink-100"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {error && (
+          <p className="mx-6 mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {error}
+          </p>
+        )}
+
+        <div className="grid gap-2 px-6 py-4 sm:grid-cols-2">
+          {ASSIGNABLE_SUB_ADMIN_TABS.map((tab) => {
+            const on = picked.includes(tab.href);
+            return (
+              <label
+                key={tab.href}
+                className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition ${
+                  on
+                    ? "border-violet-200 bg-violet-50 text-violet-800"
+                    : "border-ink-200 bg-white text-ink-600"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggle(tab.href)}
+                  className="h-4 w-4 rounded border-ink-300 text-violet-600 focus:ring-violet-500"
+                />
+                <span className="flex-1 truncate">{tab.label}</span>
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-ink-100 bg-ink-50/40 px-6 py-3">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            {saving ? "Saving..." : "Save tabs"}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

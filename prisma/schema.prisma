@@ -56,10 +56,11 @@ model User {
   // tabs/features assigned by a higher-level admin (empty = full access for that role)
   allowedTabs String[] @default([])
 
-  // Service-level access control. Stores ServiceRoute keys that are explicitly
-  // disabled for this user by an admin. Empty = all globally-enabled services
-  // are available. Checked by assertServiceEnabled() before any money rail call.
-  disabledServices String[] @default([])
+  // Service-level access control (allowlist). Stores ServiceRoute keys that an
+  // admin has explicitly enabled for this user. Empty = NO services available
+  // (default-disabled). Staff roles (SUPPORT/ADMIN/MASTER_ADMIN) bypass this.
+  // Checked by assertServiceEnabled() before any money rail call.
+  enabledServices String[] @default([])
 
   // ── Monthly Re-KYC gate (Phase 13) ──────────────────────────────────────
   // Network tiers (RT/DT/MD/SD) must re-verify identity on the 1st of every
@@ -77,6 +78,16 @@ model User {
   // Staff/admin roles are never prompted and never gated. The video bytes live in
   // a private S3 bucket — only an encrypted key + hash is kept (see KycVideo).
   hasLivenessVideo Boolean @default(false)
+
+  // ── Transaction PIN ──────────────────────────────────────────────────────
+  // A 4–6 digit PIN (bcrypt-hashed) verified at the moment of EVERY
+  // money-moving action (bill pay, recharge, DMT, AePS, payout). Distinct from
+  // the login password and 2FA: cheap to enter per-transaction, blunts a
+  // walk-up/hijacked-session attack. 5 wrong attempts → 15 min lockout.
+  txnPinHash           String?
+  txnPinSetAt          DateTime?
+  txnPinFailedAttempts Int       @default(0)
+  txnPinLockedUntil    DateTime?
 
   // Commission/charge scheme assigned to this user. Null = fall back to the
   // platform default scheme (Scheme.isDefault). Resolved by getEffectiveRate.
@@ -128,6 +139,18 @@ model User {
   slidersCreated       Slider[]         @relation("SliderCreator")
   reKycLogs            ReKycLog[]
   kycVideo             KycVideo?
+  declarationsToApprove DeclarationApproval[] @relation("DeclarationApprover")
+  declarationsRequested DeclarationApproval[] @relation("DeclarationRequester")
+  disputes              Dispute[]             @relation("DisputeOwner")
+  disputesResolved      Dispute[]             @relation("DisputeResolver")
+  disputeMessages       DisputeMessage[]      @relation("DisputeMessageAuthor")
+  webhookEndpoints      WebhookEndpoint[]     @relation("WebhookOwner")
+  whitelabelProfile     WhitelabelProfile?    @relation("WhitelabelOwner")
+  amlAlerts             AmlAlert[]            @relation("AmlAlertUser")
+  amlReviews            AmlAlert[]            @relation("AmlAlertReviewer")
+  staticQrsCreated      StaticQr[]            @relation("StaticQrCreator")
+  qrClaims              QrClaim[]             @relation("QrClaimOwner")
+  qrClaimsReviewed      QrClaim[]             @relation("QrClaimReviewer")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -288,6 +311,9 @@ model KycVideo {
   consentAt          DateTime // explicit biometric-capture consent timestamp
   capturedIp         String?
   capturedUa         String?
+  // Phase 5 — retention: raw video purged from S3 after the retention window
+  // (baseline + metadata retained). Set by the daily retention worker.
+  purgedAt           DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
@@ -317,7 +343,54 @@ enum DocumentType {
   GPS_PHOTO_INSIDE
   GPS_SELFIE_DISTRIBUTOR
   DISTRIBUTOR_DECLARATION
+  SELF_DECLARATION
+  SUCCESSOR_DECLARATION
   OTHER
+}
+
+// ---------- Declaration Approval (Successor responsibility chain) ----------
+// When a network user onboards a subordinate, the subordinate must upload a
+// prefilled self-declaration form AND (except for SD created by Admin) the
+// creator (successor) must also approve by signing a responsibility declaration
+// with signature, selfie, and GPS-timestamped evidence.
+
+enum DeclarationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model DeclarationApproval {
+  id            String            @id @default(cuid())
+  inviteId      String
+  requestedById String
+  requestedBy   User              @relation("DeclarationRequester", fields: [requestedById], references: [id])
+  approverId    String
+  approver      User              @relation("DeclarationApprover", fields: [approverId], references: [id])
+  approverRole  Role
+  onboardeeRole Role
+
+  status DeclarationStatus @default(PENDING)
+
+  declarationDocUrl String?
+
+  approverSignatureUrl String?
+  approverSelfieUrl    String?
+  approvedAt           DateTime?
+  approvalIp           String?
+  approvalUserAgent    String?
+  approvalLatitude     Float?
+  approvalLongitude    Float?
+
+  rejectedAt     DateTime?
+  rejectedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([inviteId])
+  @@index([approverId, status])
 }
 
 model Document {
@@ -584,6 +657,122 @@ model ApiKey {
   @@index([userId])
 }
 
+// ---------- Platform play (Phase 4) — outbound webhooks & whitelabel ----------
+// WebhookEndpoint: a partner-registered HTTPS URL that receives signed event
+// notifications (txn.success, payout.success, topup.credited, …). The signing
+// secret is generated by us and stored encrypted; every delivery carries an
+// HMAC-SHA256 signature of the raw body.
+
+model WebhookEndpoint {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("WebhookOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  url    String
+  // AES-256-GCM encrypted signing secret (see crypto/fieldEncryption).
+  secret String
+  events String[] // subset of WEBHOOK_EVENTS (src/lib/platform/webhooks.ts)
+  active Boolean  @default(true)
+
+  deliveries WebhookDelivery[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model WebhookDelivery {
+  id         String          @id @default(cuid())
+  endpointId String
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  event   String
+  payload Json
+  status  String @default("PENDING") // PENDING | SUCCESS | FAILED
+
+  attempts     Int       @default(0)
+  responseCode Int?
+  lastError    String?
+  deliveredAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([endpointId, createdAt])
+  @@index([status, createdAt])
+}
+
+// WhitelabelProfile: per-MD/SD brand configuration for running the platform
+// under their own name. `subdomain`/`customDomain` are the tenancy handles a
+// public resolver maps to this profile.
+model WhitelabelProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("WhitelabelOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  brandName    String
+  tagline      String?
+  logoUrl      String?
+  faviconUrl   String?
+  primaryColor String  @default("#185df5")
+  accentColor  String  @default("#f97606")
+  supportEmail String?
+  supportPhone String?
+
+  subdomain    String? @unique // e.g. "kapoorpay" → kapoorpay.<platform-domain>
+  customDomain String? @unique // e.g. "kapoorpay.in"
+
+  status String @default("DRAFT") // DRAFT | LIVE | SUSPENDED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Compliance maturity (Phase 5) — AML monitoring & audit anchoring ----------
+// AmlAlert: post-transaction AML monitoring output. The hourly sweep evaluates
+// rule patterns (high value / CTR aggregation / structuring / dormant burst)
+// and files one alert per (user, rule, IST day) — the unique key makes the
+// sweep idempotent. Compliance reviews the queue and marks alerts CLEARED or
+// REPORTED (STR filed with FIU-IND).
+model AmlAlert {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("AmlAlertUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  rule     String // HIGH_VALUE | AGG_DAILY_VOLUME | STRUCTURING | DORMANT_BURST
+  severity String // HIGH | MEDIUM
+  status   String @default("OPEN") // OPEN | UNDER_REVIEW | CLEARED | REPORTED
+  dateKey  String // IST date bucket (YYYY-MM-DD) — dedup key for the sweep
+  details  Json // rule-specific evidence (amounts, counts, txn refs)
+
+  reviewedById String?
+  reviewedBy   User?     @relation("AmlAlertReviewer", fields: [reviewedById], references: [id])
+  reviewNote   String?
+  reviewedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, rule, dateKey])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+// AuditAnchor: daily hash-chain anchor over AuditLog. Each anchor hashes the
+// day's audit rows (canonical order) and chains onto the previous anchor, so
+// any retroactive tampering with audit history breaks verification. The table
+// itself (and AuditLog) is append-only, enforced by a DB trigger.
+model AuditAnchor {
+  id         String   @id @default(cuid())
+  dateKey    String   @unique // IST day (YYYY-MM-DD) the anchor covers
+  rowCount   Int
+  firstRowId String?
+  lastRowId  String?
+  rootHash   String // SHA-256 over the day's canonical row digest stream
+  prevHash   String // previous anchor's chainHash ("" for genesis)
+  chainHash  String // SHA-256(prevHash + rootHash)
+  createdAt  DateTime @default(now())
+}
+
 // ---------- Audit / system ----------
 
 model AuditLog {
@@ -613,6 +802,92 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([userId, readAt])
+}
+
+// ---------- Disputes / Support tickets (Phase 3 — agent experience) ----------
+// A Dispute is a support ticket raised by a network user (usually about a
+// transaction). Every ticket carries an SLA deadline computed from priority;
+// a scheduled worker sweep flags breaches and alerts ops. Conversation lives
+// in DisputeMessage rows (user ↔ support thread).
+
+enum DisputeCategory {
+  TRANSACTION // failed/duplicate/amount-mismatch txns
+  SETTLEMENT
+  COMMISSION
+  WALLET
+  KYC
+  OTHER
+}
+
+enum DisputeStatus {
+  OPEN // raised, no support response yet
+  UNDER_REVIEW // support engaged
+  AWAITING_USER // support asked the user for info; SLA clock paused
+  RESOLVED
+  REJECTED
+}
+
+enum DisputePriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Dispute {
+  id       String @id @default(cuid())
+  ticketNo String @unique // human-friendly: DSP8K2X9P
+
+  userId String
+  user   User   @relation("DisputeOwner", fields: [userId], references: [id])
+
+  category    DisputeCategory
+  priority    DisputePriority @default(NORMAL)
+  status      DisputeStatus   @default(OPEN)
+  subject     String
+  description String
+
+  // Optional link to the transaction under dispute (Transaction.refId).
+  txnRefId String?
+
+  // SLA tracking. slaDueAt is set at creation from priority (and re-based on
+  // escalation); the worker sweep stamps slaBreachedAt once, alerts ops, and
+  // auto-escalates priority. firstResponseAt = first support reply.
+  slaDueAt        DateTime
+  slaBreachedAt   DateTime?
+  firstResponseAt DateTime?
+
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolvedBy   User?     @relation("DisputeResolver", fields: [resolvedById], references: [id])
+  resolution   String?
+  reopenCount  Int       @default(0)
+
+  messages DisputeMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, slaDueAt])
+  @@index([status, priority, createdAt])
+}
+
+model DisputeMessage {
+  id        String  @id @default(cuid())
+  disputeId String
+  dispute   Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  authorId String?
+  author   User?   @relation("DisputeMessageAuthor", fields: [authorId], references: [id])
+  // true when the author acted as support/admin (drives thread styling + SLA
+  // first-response stamping).
+  fromSupport Boolean @default(false)
+
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([disputeId, createdAt])
 }
 
 // ---------- Onboarding Invites ----------
@@ -952,4 +1227,96 @@ model Slider {
   updatedAt     DateTime   @updatedAt
 
   @@index([kind, active])
+}
+
+// =====================================================================
+// Static QR collections (third-party UPI QR, no webhook).
+//
+// Admin uploads ONE active StaticQr at a time; every retailer sees it and
+// collects customer payments on it. Since the provider gives us no webhook,
+// a retailer files a QrClaim (amount + 12-digit UPI UTR + screenshot) and
+// an admin verifies the UTR in the provider's portal before the wallet is
+// credited. Fraud posture:
+//   - utr UNIQUE            → one UPI payment can be settled at most once,
+//                             platform-wide, race-safe (DB-enforced).
+//   - screenshotHash UNIQUE → the same image can't be re-submitted with
+//                             different typed details.
+//   - portalVerified        → per-admin attestation, audit-logged.
+//   - amounts above a threshold need a SECOND, different admin (maker-checker).
+//   - settlementBatchId/reconciledAt are phase-2 hooks: when the provider's
+//     settlement file lands, every APPROVED claim must match a settled UTR;
+//     unmatched ones get clawed back (CLAWED_BACK).
+// =====================================================================
+
+enum QrClaimStatus {
+  PENDING // filed by retailer, awaiting admin review
+  AWAITING_SECOND_APPROVAL // large amount: first admin approved, needs a different second admin
+  APPROVED // credited to the retailer wallet
+  REJECTED // refused by admin (note required)
+  CLAWED_BACK // approved but provider settlement never matched — credit reversed
+}
+
+model StaticQr {
+  id            String  @id @default(cuid())
+  label         String // "ICICI counter QR — July 2026"
+  upiVpa        String? // VPA encoded in the QR (shown to admins for eyeball checks)
+  imagePublicId String // Cloudinary public_id
+  imageUrl      String // secure_url (public delivery — the QR itself is not a secret)
+  active        Boolean @default(true)
+
+  createdById String
+  createdBy   User   @relation("StaticQrCreator", fields: [createdById], references: [id])
+
+  disabledAt   DateTime? // set when rotated out; claims dated after this are refused
+  disabledById String?
+
+  createdAt DateTime @default(now())
+
+  claims QrClaim[]
+
+  @@index([active])
+}
+
+model QrClaim {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("QrClaimOwner", fields: [userId], references: [id])
+
+  qrId String
+  qr   StaticQr @relation(fields: [qrId], references: [id])
+
+  amount Decimal  @db.Decimal(14, 2)
+  // UPI UTR / RRN — 12 digits, visible in every UPI app. THE dedupe key.
+  utr    String   @unique
+  paidAt DateTime // when the customer paid (per the retailer)
+
+  // Screenshot proof — stored privately in Cloudinary; admins view via signed
+  // URLs. The sha256 of the uploaded bytes blocks image re-use across claims.
+  screenshotPublicId String
+  screenshotFormat   String?
+  screenshotHash     String  @unique
+
+  status QrClaimStatus @default(PENDING)
+
+  // Maker-checker: for amounts above the threshold the FIRST approval only
+  // stages the claim; a DIFFERENT admin must confirm before money moves.
+  firstApprovedById String?
+  firstApprovedAt   DateTime?
+
+  reviewedById String?
+  reviewedBy   User?     @relation("QrClaimReviewer", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  reviewNote   String?
+  // Admin attestation that the UTR was found in the provider's merchant portal.
+  portalVerified Boolean @default(false)
+
+  // Phase-2 reconciliation hooks (provider settlement file matching).
+  settlementBatchId String?
+  reconciledAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@index([reconciledAt])
 }

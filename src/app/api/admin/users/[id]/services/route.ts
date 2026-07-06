@@ -8,7 +8,7 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 const UpdateBody = z.object({
-  disabledServices: z.array(z.string()),
+  enabledServices: z.array(z.string()),
 });
 
 export async function GET(
@@ -20,7 +20,7 @@ export async function GET(
 
     const user = await prisma.user.findUnique({
       where: { id: params.id },
-      select: { id: true, name: true, role: true, disabledServices: true },
+      select: { id: true, name: true, role: true, enabledServices: true },
     });
 
     if (!user)
@@ -35,7 +35,7 @@ export async function GET(
     return NextResponse.json({
       user: { id: user.id, name: user.name, role: user.role },
       allServices,
-      disabledServices: user.disabledServices,
+      enabledServices: user.enabledServices,
     });
   } catch (e) {
     if (e instanceof AuthError)
@@ -56,11 +56,11 @@ export async function PATCH(
     if (!parsed.success)
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-    const { disabledServices } = parsed.data;
+    const { enabledServices } = parsed.data;
 
     const targetUser = await prisma.user.findUnique({
       where: { id: params.id },
-      select: { id: true, role: true, disabledServices: true },
+      select: { id: true, role: true, enabledServices: true },
     });
 
     if (!targetUser)
@@ -75,7 +75,7 @@ export async function PATCH(
     await prisma.$transaction([
       prisma.user.update({
         where: { id: params.id },
-        data: { disabledServices },
+        data: { enabledServices },
       }),
       prisma.auditLog.create({
         data: {
@@ -84,15 +84,15 @@ export async function PATCH(
           entity: "User",
           entityId: params.id,
           meta: {
-            previous: targetUser.disabledServices,
-            updated: disabledServices,
+            previous: targetUser.enabledServices,
+            updated: enabledServices,
           },
           ip: clientIp(req),
         },
       }),
     ]);
 
-    return NextResponse.json({ ok: true, disabledServices });
+    return NextResponse.json({ ok: true, enabledServices });
   } catch (e) {
     if (e instanceof AuthError)
       return NextResponse.json({ error: e.message }, { status: e.statusCode });

@@ -41,7 +41,18 @@ async function ekychubGet<T>(
     headers: { Accept: "application/json" },
   });
 
-  const data = await res.json();
+  const text = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return {
+      ok: false as const,
+      code: "EKYCHUB_FAILURE",
+      message: `eKYC Hub returned non-JSON response (HTTP ${res.status}). Check credentials.`,
+      raw: { status: res.status, body: text.slice(0, 500) },
+    };
+  }
 
   if (data.status === "Success") {
     return { ok: true, data: data as T, raw: data };

@@ -5,9 +5,12 @@ import { runTransaction } from "@/lib/services/transaction";
 import { requireAuth } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { requireStepUp, readStepUpCode } from "@/lib/security/stepUp";
+import { requireTxnPin } from "@/lib/security/txnPin";
 import { assertLivenessReady } from "@/lib/security/livenessGate";
 import { clientIp } from "@/lib/security/audit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
+import { assertServiceEnabled } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 
 const Body = z.object({
   aadhaar: z.string().min(12).max(14),
@@ -26,9 +29,13 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    // Admin kill-switch + per-user allowlist (default-disabled) for this rail.
+    await assertServiceEnabled(SERVICE_KEYS.AEPS, { name: "AePS", userId: user.id, role: user.role });
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
+    // Transaction PIN — required on every money-moving action (x-txn-pin header).
+    await requireTxnPin(user, req, { action: "aeps.withdraw", ip: clientIp(req), userAgent: req.headers.get("user-agent") });
   } catch (e) {
     return toErrorResponse(e);
   }
@@ -51,28 +58,32 @@ export async function POST(req: Request) {
   }
 
   const aeps = getPartner("aeps");
-  const result = await runTransaction({
-    userId: user.id,
-    service: "AEPS_WITHDRAW",
-    amount: parsed.data.amount,
-    fee: 0,
-    commission: Math.min(12, parsed.data.amount * 0.005),
-    idempotencyKey: parsed.data.idempotencyKey,
-    customer: parsed.data.aadhaar.slice(-4),
-    operator: parsed.data.bankIin,
-    partner: aeps.name,
-    request: parsed.data,
-    ip: clientIp(req),
-    call: () =>
-      aeps.withdraw({
-        userId: user.id,
-        idempotencyKey: parsed.data.idempotencyKey,
-        aadhaar: parsed.data.aadhaar,
-        bankIin: parsed.data.bankIin,
-        amount: parsed.data.amount,
-        biometric: parsed.data.biometric
-      })
-  });
+  try {
+    const result = await runTransaction({
+      userId: user.id,
+      service: "AEPS_WITHDRAW",
+      amount: parsed.data.amount,
+      fee: 0,
+      commission: Math.min(12, parsed.data.amount * 0.005),
+      idempotencyKey: parsed.data.idempotencyKey,
+      customer: parsed.data.aadhaar.slice(-4),
+      operator: parsed.data.bankIin,
+      partner: aeps.name,
+      request: parsed.data,
+      ip: clientIp(req),
+      call: () =>
+        aeps.withdraw({
+          userId: user.id,
+          idempotencyKey: parsed.data.idempotencyKey,
+          aadhaar: parsed.data.aadhaar,
+          bankIin: parsed.data.bankIin,
+          amount: parsed.data.amount,
+          biometric: parsed.data.biometric
+        })
+    });
 
-  return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+    return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 }

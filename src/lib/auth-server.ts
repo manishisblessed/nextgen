@@ -23,7 +23,7 @@ export type SessionUser = {
   status: string;
   walletBalance: number;
   allowedTabs: string[];
-  disabledServices: string[];
+  enabledServices: string[];
   twoFactorEnabled: boolean;
 };
 
@@ -38,7 +38,7 @@ declare module "next-auth/jwt" {
   interface JWT extends SessionUser {
     /** Version this token was minted with; checked against User.tokenVersion. */
     tokenVersion: number;
-    disabledServices: string[];
+    enabledServices: string[];
   }
 }
 
@@ -91,7 +91,7 @@ export const authOptions: NextAuthOptions = {
           status: user.status,
           walletBalance: Number(user.walletBalance),
           allowedTabs: (user as any).allowedTabs ?? [],
-          disabledServices: (user as any).disabledServices ?? [],
+          enabledServices: (user as any).enabledServices ?? [],
           twoFactorEnabled: user.twoFactorEnabled,
         };
       },
@@ -150,7 +150,7 @@ export const authOptions: NextAuthOptions = {
           status: user.status,
           walletBalance: Number(user.walletBalance),
           allowedTabs: (user as any).allowedTabs ?? [],
-          disabledServices: (user as any).disabledServices ?? [],
+          enabledServices: (user as any).enabledServices ?? [],
           twoFactorEnabled: user.twoFactorEnabled,
         };
       },
@@ -169,7 +169,7 @@ export const authOptions: NextAuthOptions = {
         token.status = user.status;
         token.walletBalance = user.walletBalance;
         token.allowedTabs = (user as any).allowedTabs ?? [];
-        token.disabledServices = (user as any).disabledServices ?? [];
+        token.enabledServices = (user as any).enabledServices ?? [];
         token.twoFactorEnabled = (user as any).twoFactorEnabled ?? false;
         const seed = await prisma.user.findUnique({
           where: { id: user.id },
@@ -192,7 +192,7 @@ export const authOptions: NextAuthOptions = {
             walletBalance: true,
             status: true,
             role: true,
-            disabledServices: true,
+            enabledServices: true,
           },
         });
         if (
@@ -207,7 +207,7 @@ export const authOptions: NextAuthOptions = {
         token.walletBalance = Number(fresh.walletBalance);
         token.status = fresh.status;
         token.role = fresh.role;
-        token.disabledServices = fresh.disabledServices;
+        token.enabledServices = fresh.enabledServices;
       }
 
       return token;
@@ -227,7 +227,7 @@ export const authOptions: NextAuthOptions = {
         status: token.status as string,
         walletBalance: token.walletBalance as number,
         allowedTabs: (token.allowedTabs as string[]) ?? [],
-        disabledServices: (token.disabledServices as string[]) ?? [],
+        enabledServices: (token.enabledServices as string[]) ?? [],
         twoFactorEnabled: (token.twoFactorEnabled as boolean) ?? false,
       };
       return session;
@@ -272,7 +272,7 @@ export function createMobileToken(user: SessionUser, expiresInSec = 30 * 24 * 60
     role: user.role,
     status: user.status,
     allowedTabs: user.allowedTabs,
-    disabledServices: user.disabledServices,
+    enabledServices: user.enabledServices,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + expiresInSec,
   })));
@@ -306,7 +306,7 @@ export function verifyMobileToken(token: string): SessionUser | null {
       status: data.status,
       walletBalance: 0,
       allowedTabs: data.allowedTabs ?? [],
-      disabledServices: data.disabledServices ?? [],
+      enabledServices: data.enabledServices ?? [],
       twoFactorEnabled: data.twoFactorEnabled ?? false,
     };
   } catch {

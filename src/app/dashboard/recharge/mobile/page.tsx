@@ -14,6 +14,7 @@ export default function MobileRechargePage() {
       />
       <RechargeForm
         serviceTitle="Mobile Recharge"
+        type="MOBILE"
         numberLabel="Mobile number"
         numberPlaceholder="10-digit mobile"
         operators={["Jio", "Airtel", "Vi (Vodafone Idea)", "BSNL", "MTNL"]}

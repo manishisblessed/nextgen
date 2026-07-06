@@ -10,9 +10,13 @@ import { encryptField } from "@/lib/crypto/fieldEncryption";
 import { scopeUserIdFilter } from "@/lib/security/ownership";
 import { assertKycCurrent, ReKycRequiredError } from "@/lib/security/kycGate";
 import { assertLivenessReady, LivenessRequiredError } from "@/lib/security/livenessGate";
+import { assertAccountActive, AccountSuspendedError } from "@/lib/security/accountGate";
 import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
 import { withIdempotency, IdempotencyInProgressError } from "@/lib/idempotency";
 import { requireSubmitNonce, SubmitNonceError } from "@/lib/security/submitNonce";
+import { requireTxnPin, TxnPinError } from "@/lib/security/txnPin";
+import { assertTransactionRisk, RiskError } from "@/lib/risk/engine";
+import { clientIp } from "@/lib/security/audit";
 import { quotePayoutForUser } from "@/lib/payout/charges";
 import { assertServiceEnabled, ServiceDisabledError } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
@@ -108,18 +112,27 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    // Suspension gate — a SUSPENDED account (admin/distributor action) cannot
+    // create payouts, regardless of what its session token says.
+    await assertAccountActive(user.id);
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     // Monthly Re-KYC gate — network users must re-verify before transacting.
     await assertKycCurrent(user);
     // Runtime admin kill-switch (On/Off Services panel) — hard-gates the rail.
-    await assertServiceEnabled(SERVICE_KEYS.PAYOUT, { name: "Payout" });
+    await assertServiceEnabled(SERVICE_KEYS.PAYOUT, { name: "Payout", userId: user.id, role: user.role });
     await enforceRateLimit(`payout:create:${user.id}`, RATE_LIMITS.payoutCreate);
     // Single-use submit nonce (replay defense for the web form). Bearer/mobile
     // callers are exempt and rely on Idempotency-Key instead.
     await requireSubmitNonce(req, user.id);
+    // Transaction PIN — required on every money-moving action (x-txn-pin header).
+    await requireTxnPin(user, req, { action: "payout.create", ip: clientIp(req), userAgent: req.headers.get("user-agent") });
   } catch (e) {
+    if (e instanceof TxnPinError)
+      return NextResponse.json({ error: e.message, txnPin: true, code: e.code }, { status: e.statusCode });
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    if (e instanceof AccountSuspendedError)
+      return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
     if (e instanceof LivenessRequiredError)
       return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
     if (e instanceof ReKycRequiredError)
@@ -138,6 +151,30 @@ export async function POST(req: Request) {
   const body = parsed.data;
 
   const quote = await quotePayoutForUser(user.id, body.amount, body.mode);
+
+  // Risk rules: rolling daily/night caps, hourly velocity, and the
+  // new-beneficiary cooling cap (mule defense). Evaluated on the full debit.
+  try {
+    const handleForRisk = body.mode === "UPI" ? body.vpa! : body.accountNumber!;
+    await assertTransactionRisk({
+      userId: user.id,
+      service: "PAYOUT",
+      amount: quote.totalDebit,
+      beneficiary: {
+        accountLast4: handleForRisk.replace(/@.*/, "").slice(-4),
+        mode: body.mode,
+      },
+      ip: clientIp(req),
+      userAgent: req.headers.get("user-agent"),
+    });
+  } catch (e) {
+    if (e instanceof RiskError)
+      return NextResponse.json(
+        { error: e.message, code: e.code, rule: e.rule },
+        { status: e.statusCode }
+      );
+    throw e;
+  }
 
   // Idempotency-Key header dedupes accidental double submits (client retries).
   const idemKey = req.headers.get("Idempotency-Key") || req.headers.get("idempotency-key") || nanoid();

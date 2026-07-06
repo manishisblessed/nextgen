@@ -1,6 +1,6 @@
 import { Flame } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
-import { BillForm } from "@/components/dashboard/BillForm";
+import { BbpsBillForm } from "@/components/dashboard/BbpsBillForm";
 
 export const dynamic = "force-dynamic";
 
@@ -12,17 +12,10 @@ export default function GasBillPage() {
         title="Gas Bill Payment"
         description="Pay piped gas bills or book LPG cylinder refills for any major operator."
       />
-      <BillForm
+      <BbpsBillForm
+        category="GAS"
         serviceTitle="Gas"
         consumerLabel="Consumer / Booking #"
-        billers={[
-          "Indane (IOCL)",
-          "HP Gas",
-          "Bharat Gas",
-          "Indraprastha Gas (IGL)",
-          "Mahanagar Gas (MGL)",
-          "Adani Gas"
-        ]}
         refPrefix="GAS"
       />
     </div>

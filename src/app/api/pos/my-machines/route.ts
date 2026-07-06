@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth-server";
+import { assertServiceEnabled, ServiceDisabledError } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { scopeUserIdFilter } from "@/lib/security/ownership";
 import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
@@ -21,8 +23,10 @@ export async function GET(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    // Admin kill-switch + per-user allowlist (default-disabled) for this rail.
+    await assertServiceEnabled(SERVICE_KEYS.POS, { name: "POS Terminals", userId: user.id, role: user.role });
   } catch (e) {
-    if (e instanceof AuthError)
+    if (e instanceof AuthError || e instanceof ServiceDisabledError)
       return NextResponse.json({ error: e.message }, { status: e.statusCode });
     throw e;
   }

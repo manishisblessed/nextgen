@@ -45,7 +45,7 @@ export async function GET(
 
   const verifications = await prisma.verificationResult.findMany({
     where: { inviteId: invite.id },
-    select: { type: true, status: true, verifiedName: true, createdAt: true },
+    select: { type: true, status: true, verifiedName: true, responsePayload: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
 

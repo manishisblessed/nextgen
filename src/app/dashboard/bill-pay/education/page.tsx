@@ -1,6 +1,6 @@
 import { GraduationCap } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
-import { BillForm } from "@/components/dashboard/BillForm";
+import { BbpsBillForm } from "@/components/dashboard/BbpsBillForm";
 
 export const dynamic = "force-dynamic";
 
@@ -12,18 +12,10 @@ export default function EducationFeesPage() {
         title="Education Fees"
         description="Pay school, college and coaching fees with auto reminders."
       />
-      <BillForm
+      <BbpsBillForm
+        category="EDUCATION"
         serviceTitle="Education"
         consumerLabel="Student / Roll #"
-        billers={[
-          "DPS Schools",
-          "Kendriya Vidyalaya",
-          "Delhi University",
-          "JEE Main",
-          "BYJU'S",
-          "Allen Career Institute",
-          "FIITJEE"
-        ]}
         refPrefix="EDU"
       />
     </div>

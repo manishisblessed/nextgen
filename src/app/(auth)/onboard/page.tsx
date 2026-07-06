@@ -19,6 +19,14 @@ import {
   Upload,
   FileText,
   AlertTriangle,
+  ArrowDown,
+  Eye,
+  EyeOff,
+  FileSignature,
+  Send,
+  Clock,
+  XCircle,
+  Camera,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
@@ -43,6 +51,7 @@ type Verification = {
   type: string;
   status: string;
   verifiedName: string | null;
+  responsePayload?: any;
 };
 
 const STEPS = [
@@ -55,6 +64,7 @@ const STEPS = [
   { label: "GST & MSME", icon: Building2 },
   { label: "Selfie & Video", icon: Upload },
   { label: "Documents", icon: FileText },
+  { label: "Declaration", icon: FileSignature },
   { label: "Details & Password", icon: Lock },
 ] as const;
 
@@ -65,22 +75,21 @@ type DocumentDef = {
   accept: string;
   requiresGps?: boolean;
   description?: string;
+  downloadUrl?: string;
 };
 
 const REQUIRED_DOCUMENTS: DocumentDef[] = [
-  { type: "GST_CERT", label: "GST Certificate", required: true, accept: "image/*,.pdf" },
-  { type: "SHOP_ESTABLISHMENT", label: "Shop & Establishment Certificate", required: true, accept: "image/*,.pdf" },
-  { type: "GUMASTA_LICENSE", label: "Gumasta License", required: true, accept: "image/*,.pdf" },
+  { type: "GST_CERT", label: "GST Certificate", required: false, accept: "image/*,.pdf" },
+  { type: "SHOP_ESTABLISHMENT", label: "Shop & Establishment Certificate", required: false, accept: "image/*,.pdf" },
+  { type: "GUMASTA_LICENSE", label: "Gumasta License", required: false, accept: "image/*,.pdf" },
   { type: "SIGNATURE", label: "Signature", required: true, accept: "image/*" },
   { type: "ELECTRICITY_BILL", label: "Household Electricity Bill (copy)", required: true, accept: "image/*,.pdf" },
   { type: "CANCEL_CHEQUE", label: "Cancelled Cheque / Bank Passbook (with account holder name)", required: true, accept: "image/*,.pdf", description: "Already verified via penny drop, but physical copy needed" },
   { type: "ADDITIONAL_ID", label: "Additional ID Proof (Driving License / Voter ID / Passport)", required: true, accept: "image/*,.pdf" },
-  { type: "FAMILY_REFERENCE", label: "Family Member Reference Document", required: true, accept: "image/*,.pdf" },
-  { type: "PG_FORM", label: "PG Form", required: true, accept: "image/*,.pdf" },
+  { type: "FAMILY_REFERENCE", label: "Family Member Reference Document — KYC Document", required: true, accept: "image/*,.pdf" },
   { type: "GPS_PHOTO_OUTSIDE", label: "GPS-tagged Photo — House/Office (Outside)", required: true, accept: "image/*", requiresGps: true },
   { type: "GPS_PHOTO_INSIDE", label: "GPS-tagged Photo — House/Office (Inside)", required: true, accept: "image/*", requiresGps: true },
   { type: "GPS_SELFIE_DISTRIBUTOR", label: "GPS-tagged Selfie with Salesperson/Distributor", required: true, accept: "image/*", requiresGps: true, description: "Mandatory — take a selfie with your distributor/salesperson at your location" },
-  { type: "DISTRIBUTOR_DECLARATION", label: "Distributor Declaration Form", required: true, accept: "image/*,.pdf" },
 ];
 
 const INDIAN_STATES = [
@@ -175,6 +184,34 @@ function OnboardContent() {
   // Selfie & video state
   const [selfieUploaded, setSelfieUploaded] = useState(false);
   const [videoCompleted, setVideoCompleted] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Declaration state
+  const [selfDeclarationUploaded, setSelfDeclarationUploaded] = useState(false);
+  const [declarationStatus, setDeclarationStatus] = useState<{
+    requiresApproval: boolean;
+    approverName: string | null;
+    approval: {
+      id: string;
+      status: string;
+      approvedAt: string | null;
+      rejectedAt: string | null;
+      rejectedReason: string | null;
+      sentAt: string;
+    } | null;
+  } | null>(null);
+  const [declarationSending, setDeclarationSending] = useState(false);
+  const [declarationPolling, setDeclarationPolling] = useState(false);
+
+  // Partner agreement eSign (Leegality) state
+  const [agreement, setAgreement] = useState<{
+    sent: boolean;
+    configured?: boolean;
+    status: string | null;
+    signUrl?: string | null;
+  } | null>(null);
+  const [agreementSending, setAgreementSending] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -231,10 +268,32 @@ function OnboardContent() {
       (v: Verification) => v.type === "AADHAAR_DIGILOCKER" && v.status === "Success"
     );
     if (aadhaarV) {
-      setAadhaarResult({ name: aadhaarV.verifiedName });
-      if (aadhaarV.verifiedName) {
-        setForm((f) => ({ ...f, aadhaarName: aadhaarV.verifiedName ?? "" }));
-      }
+      const payload = aadhaarV.responsePayload as any;
+      setAadhaarResult({
+        name: aadhaarV.verifiedName ?? payload?.name,
+        uid: payload?.uid,
+        dob: payload?.dob,
+        gender: payload?.gender,
+        address: payload?.address,
+        split_address: payload?.split_address,
+      });
+      setForm((f) => ({
+        ...f,
+        name: f.name || aadhaarV.verifiedName || payload?.name || "",
+        shopName: f.shopName || aadhaarV.verifiedName || payload?.name || "",
+        shopAddress: f.shopAddress || payload?.address || "",
+        aadhaarName: aadhaarV.verifiedName || payload?.name || "",
+        aadhaarNumber: payload?.uid || "",
+        aadhaarLast4: payload?.uid ? payload.uid.slice(-4) : "",
+        aadhaarDob: payload?.dob || "",
+        aadhaarGender: payload?.gender || "",
+        aadhaarAddress: payload?.address || "",
+        aadhaarMobile: payload?.aadhaarMobile || "",
+        dob: payload?.dob || f.dob,
+        state: payload?.split_address?.state || f.state,
+        pincode: payload?.split_address?.pincode || f.pincode,
+        city: payload?.split_address?.dist || f.city,
+      }));
     }
 
     const panV = vList.find(
@@ -329,7 +388,8 @@ function OnboardContent() {
   async function initAadhaar() {
     setVerifying(true);
     setError("");
-    const redirectUrl = `${window.location.origin}/onboard?token=${token}&digilocker=complete`;
+    const redirectUrl = process.env.NEXT_PUBLIC_DIGILOCKER_REDIRECT_URL
+      || `${window.location.origin}/onboard?token=${token}&digilocker=complete`;
     try {
       const res = await fetch(`/api/onboard/${token}/verify`, {
         method: "POST",
@@ -388,6 +448,8 @@ function OnboardContent() {
         setForm((f) => ({
           ...f,
           name: f.name || data.data.name || "",
+          shopName: f.shopName || data.data.name || "",
+          shopAddress: f.shopAddress || data.data.address || "",
           aadhaarName: data.data.name || "",
           aadhaarNumber: data.data.uid || "",
           aadhaarLast4: data.data.uid ? data.data.uid.slice(-4) : "",
@@ -507,6 +569,12 @@ function OnboardContent() {
       const data = await res.json();
       if (data.ok) {
         setGstResult(data.data);
+        if (data.data.trade_name || data.data.legal_name) {
+          setForm((f) => ({
+            ...f,
+            shopName: data.data.trade_name || data.data.legal_name || f.shopName,
+          }));
+        }
       } else {
         setError(data.message ?? "GST verification failed");
       }
@@ -586,6 +654,147 @@ function OnboardContent() {
     setUploading(null);
   }
 
+  // ----- Declaration -----
+  const fetchDeclarationStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/onboard/${token}/declaration/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setDeclarationStatus(data);
+      }
+    } catch {}
+  }, [token]);
+
+  useEffect(() => {
+    if (step === 9 && token) {
+      fetchDeclarationStatus();
+    }
+  }, [step, token, fetchDeclarationStatus]);
+
+  useEffect(() => {
+    if (step !== 9) return;
+    if (!declarationStatus?.requiresApproval) return;
+    if (declarationStatus.approval?.status === "APPROVED") return;
+    if (!declarationStatus.approval || declarationStatus.approval.status !== "PENDING") return;
+
+    setDeclarationPolling(true);
+    const interval = setInterval(async () => {
+      await fetchDeclarationStatus();
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+      setDeclarationPolling(false);
+    };
+  }, [step, declarationStatus?.requiresApproval, declarationStatus?.approval?.status, fetchDeclarationStatus]);
+
+  // ----- Partner agreement eSign (Leegality) -----
+  const fetchAgreementStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/onboard/${token}/agreement`);
+      if (res.ok) setAgreement(await res.json());
+    } catch {}
+  }, [token]);
+
+  useEffect(() => {
+    if (step === 9 && token) fetchAgreementStatus();
+  }, [step, token, fetchAgreementStatus]);
+
+  useEffect(() => {
+    // Poll while an eSign is out for signature.
+    if (step !== 9) return;
+    if (!agreement?.sent || agreement.status === "Completed" || agreement.status === "Expired") return;
+    const interval = setInterval(fetchAgreementStatus, 10000);
+    return () => clearInterval(interval);
+  }, [step, agreement?.sent, agreement?.status, fetchAgreementStatus]);
+
+  async function sendAgreement() {
+    if (!token) return;
+    setAgreementSending(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/onboard/${token}/agreement`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setAgreement({ sent: true, configured: true, status: data.status ?? "Pending", signUrl: data.signUrl });
+        if (data.signUrl) window.open(data.signUrl, "_blank", "noopener");
+      } else {
+        setError(data.error ?? "Failed to start the agreement eSign");
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    }
+    setAgreementSending(false);
+  }
+
+  async function sendForApproval() {
+    if (!token) return;
+    setDeclarationSending(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/onboard/${token}/declaration/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (data.ok) {
+        await fetchDeclarationStatus();
+      } else {
+        setError(data.error ?? "Failed to send for approval");
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    }
+    setDeclarationSending(false);
+  }
+
+  async function uploadSelfieToS3(file: File) {
+    setUploading("SELFIE");
+    setError("");
+    try {
+      const contentType = file.type || "image/jpeg";
+      const presignRes = await fetch(`/api/onboard/${token}/selfie/presign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType }),
+      });
+      if (!presignRes.ok) {
+        const fallbackUpload = true;
+        if (fallbackUpload) {
+          await uploadDocument("SELFIE", file);
+          return;
+        }
+      }
+      const presign = await presignRes.json();
+
+      const putRes = await fetch(presign.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error("Upload to storage failed");
+
+      const completeRes = await fetch(`/api/onboard/${token}/selfie/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: presign.key,
+          uploadToken: presign.uploadToken,
+          contentType,
+        }),
+      });
+      if (!completeRes.ok) throw new Error("Failed to confirm selfie upload");
+
+      setSelfieUploaded(true);
+      setUploadedDocs((prev) => ({ ...prev, SELFIE: true }));
+    } catch (err) {
+      await uploadDocument("SELFIE", file);
+    }
+    setUploading(null);
+  }
+
   // ----- Submit -----
   async function handleSubmit() {
     if (form.password !== form.confirmPassword) {
@@ -598,6 +807,10 @@ function OnboardContent() {
     }
     if (!form.name || !form.shopName || !form.pincode) {
       setError("Please fill in all required fields");
+      return;
+    }
+    if (!allMandatoryComplete()) {
+      setError("Please complete all mandatory steps before submitting");
       return;
     }
 
@@ -631,7 +844,7 @@ function OnboardContent() {
           gstin: form.gstin.toUpperCase() || undefined,
           msmeNumber: form.msmeNumber || undefined,
           nameMismatch,
-          dob: form.dob || undefined,
+          dob: form.dob || form.aadhaarDob || undefined,
         }),
       });
       const data = await res.json();
@@ -665,18 +878,39 @@ function OnboardContent() {
       case 5:
         return !!bankResult;
       case 6:
-        return true; // GST/MSME optional verification
+        return true;
       case 7:
         return selfieUploaded && videoCompleted;
       case 8: {
         const allRequiredDocs = REQUIRED_DOCUMENTS.filter((d) => d.required);
         return allRequiredDocs.every((d) => !!uploadedDocs[d.type]);
       }
-      case 9:
-        return !!form.password && !!form.name && !!form.shopName && !!form.pincode;
+      case 9: {
+        if (!selfDeclarationUploaded) return false;
+        if (declarationStatus?.requiresApproval) {
+          return declarationStatus.approval?.status === "APPROVED";
+        }
+        return true;
+      }
+      case 10:
+        return allMandatoryComplete();
       default:
         return true;
     }
+  }
+
+  function allMandatoryComplete(): boolean {
+    if (!form.password || !form.name || !form.shopName || !form.pincode) return false;
+    if (form.password !== form.confirmPassword) return false;
+    if (form.password.length < 8) return false;
+    if (!phoneVerified || !emailVerified || !aadhaarVerified) return false;
+    if (!panResult || !bankResult) return false;
+    if (!selfieUploaded || !videoCompleted) return false;
+    const allRequiredDocs = REQUIRED_DOCUMENTS.filter((d) => d.required);
+    if (!allRequiredDocs.every((d) => !!uploadedDocs[d.type])) return false;
+    if (!selfDeclarationUploaded) return false;
+    if (declarationStatus?.requiresApproval && declarationStatus.approval?.status !== "APPROVED") return false;
+    return true;
   }
 
   function handleNext() {
@@ -726,10 +960,18 @@ function OnboardContent() {
           </h2>
           <p className="mt-2 text-ink-600">
             {nameMismatch
-              ? "Your details have been submitted. Since some document names didn't match, your application will be reviewed by our team. You'll receive a notification once approved."
-              : "Your details have been submitted for admin approval. You'll receive a notification once approved."}
+              ? "Your details have been submitted. Since some document names didn't match, your application will be reviewed by our team."
+              : "Your details have been submitted for admin approval."}
           </p>
-          <p className="mt-3 text-sm text-ink-500">
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
+            <p className="text-lg font-bold text-amber-800">
+              Approval within 48–72 working hours
+            </p>
+            <p className="mt-1 text-sm text-amber-700">
+              You&apos;ll receive a notification once your account is approved.
+            </p>
+          </div>
+          <p className="mt-4 text-sm text-ink-500">
             A confirmation email has been sent to <strong>{invite?.email}</strong> with
             your login details.
           </p>
@@ -1392,7 +1634,7 @@ function OnboardContent() {
                 required
                 accept="image/*"
                 capture="user"
-                onUpload={(file) => uploadDocument("SELFIE", file)}
+                onUpload={(file) => uploadSelfieToS3(file)}
               />
 
               {/* 10-second Liveness Video */}
@@ -1410,9 +1652,10 @@ function OnboardContent() {
                 {videoCompleted ? (
                   <p className="text-xs text-emerald-700">Video captured successfully</p>
                 ) : (
-                  <LivenessVideoCapture onComplete={() => setVideoCompleted(true)} />
+                  <LivenessVideoCapture onComplete={() => setVideoCompleted(true)} apiPrefix={`/api/onboard/${token}`} />
                 )}
               </div>
+
             </div>
           )}
 
@@ -1447,6 +1690,7 @@ function OnboardContent() {
                     accept={doc.accept}
                     description={doc.description}
                     requiresGps={doc.requiresGps}
+                    downloadUrl={doc.downloadUrl}
                     onUpload={(file) =>
                       uploadDocument(doc.type, file, { requiresGps: doc.requiresGps })
                     }
@@ -1458,11 +1702,263 @@ function OnboardContent() {
                 <strong>Note:</strong> For GPS-tagged photos, please ensure location
                 services are enabled on your phone&apos;s camera before taking the photo.
               </div>
+
             </div>
           )}
 
-          {/* Step 9: Personal Details + Set Password */}
+          {/* Step 9: Declaration */}
           {step === 9 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-brand-700">
+                <FileSignature className="h-5 w-5" />
+                <h2 className="font-bold">Declaration & Undertaking</h2>
+              </div>
+              <p className="text-sm text-ink-600">
+                Download the prefilled declaration form, sign it, and upload the signed copy.
+                {declarationStatus?.requiresApproval && (
+                  <> You also need approval from your <strong>{declarationStatus.approverName}</strong> ({invite?.role === "MASTER_DISTRIBUTOR" ? "Super Distributor" : invite?.role === "DISTRIBUTOR" ? "Master Distributor" : "Distributor"}).</>
+                )}
+              </p>
+
+              {/* Self Declaration Download & Upload */}
+              <div className={`rounded-xl border p-4 ${selfDeclarationUploaded ? "border-emerald-200 bg-emerald-50" : "border-ink-200 bg-white"}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  {selfDeclarationUploaded ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <FileText className="h-5 w-5 text-ink-400" />
+                  )}
+                  <p className="text-sm font-medium text-ink-900">
+                    Self Declaration Form <span className="text-rose-500">*</span>
+                  </p>
+                </div>
+
+                {!selfDeclarationUploaded && (
+                  <div className="space-y-3">
+                    <a
+                      href={`/api/onboard/${token}/declaration/download`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+                    >
+                      <ArrowDown className="h-4 w-4" /> Download Prefilled Declaration
+                    </a>
+                    <p className="text-xs text-ink-500">
+                      Download, print, sign, and upload the signed declaration form.
+                    </p>
+                    <DocumentUploadField
+                      label="Upload Signed Declaration"
+                      type="SELF_DECLARATION"
+                      uploaded={selfDeclarationUploaded}
+                      uploading={uploading === "SELF_DECLARATION"}
+                      required
+                      accept="image/*,.pdf"
+                      onUpload={(file) => {
+                        uploadDocument("SELF_DECLARATION", file).then(() => {
+                          setSelfDeclarationUploaded(true);
+                        });
+                      }}
+                    />
+                  </div>
+                )}
+
+                {selfDeclarationUploaded && (
+                  <p className="text-xs text-emerald-700">Self declaration uploaded successfully</p>
+                )}
+              </div>
+
+              {/* Successor Approval Section */}
+              {declarationStatus?.requiresApproval && (
+                <div className={`rounded-xl border p-4 ${
+                  declarationStatus.approval?.status === "APPROVED"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : declarationStatus.approval?.status === "REJECTED"
+                    ? "border-rose-200 bg-rose-50"
+                    : declarationStatus.approval?.status === "PENDING"
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-ink-200 bg-white"
+                }`}>
+                  <div className="flex items-center gap-2 mb-3">
+                    {declarationStatus.approval?.status === "APPROVED" ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    ) : declarationStatus.approval?.status === "REJECTED" ? (
+                      <XCircle className="h-5 w-5 text-rose-600" />
+                    ) : declarationStatus.approval?.status === "PENDING" ? (
+                      <Clock className="h-5 w-5 text-amber-600" />
+                    ) : (
+                      <Send className="h-5 w-5 text-ink-400" />
+                    )}
+                    <p className="text-sm font-medium text-ink-900">
+                      {declarationStatus.approverName ?? "Successor"} Approval <span className="text-rose-500">*</span>
+                    </p>
+                  </div>
+
+                  {!declarationStatus.approval && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-ink-600">
+                        Send a declaration request to <strong>{declarationStatus.approverName}</strong>. They will review the declaration, provide their signature &amp; selfie, and approve your onboarding.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={sendForApproval}
+                        disabled={declarationSending || !selfDeclarationUploaded}
+                        className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+                      >
+                        {declarationSending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        Send for Approval
+                      </button>
+                    </div>
+                  )}
+
+                  {declarationStatus.approval?.status === "PENDING" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+                        <p className="text-sm text-amber-800 font-medium">Waiting for approval...</p>
+                      </div>
+                      <p className="text-xs text-amber-700">
+                        Sent on {new Date(declarationStatus.approval.sentAt).toLocaleString()}.
+                        {declarationStatus.approverName} will review and approve from their portal.
+                      </p>
+                      {declarationPolling && (
+                        <p className="text-xs text-amber-600">Checking for updates automatically...</p>
+                      )}
+                    </div>
+                  )}
+
+                  {declarationStatus.approval?.status === "APPROVED" && (
+                    <div className="space-y-1">
+                      <p className="text-sm text-emerald-800 font-medium">
+                        Approved by {declarationStatus.approverName}
+                      </p>
+                      <p className="text-xs text-emerald-700">
+                        Approved on {declarationStatus.approval.approvedAt ? new Date(declarationStatus.approval.approvedAt).toLocaleString() : ""}
+                      </p>
+                    </div>
+                  )}
+
+                  {declarationStatus.approval?.status === "REJECTED" && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-rose-800 font-medium">
+                        Rejected by {declarationStatus.approverName}
+                      </p>
+                      <p className="text-xs text-rose-700">
+                        Reason: {declarationStatus.approval.rejectedReason}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={sendForApproval}
+                        disabled={declarationSending}
+                        className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+                      >
+                        {declarationSending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        Re-send for Approval
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Partner Agreement eSign (Leegality) — shown when the rail is live */}
+              {agreement && (agreement.configured || agreement.sent) && (
+                <div className={`rounded-xl border p-4 ${
+                  agreement.status === "Completed"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : agreement.sent
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-ink-200 bg-white"
+                }`}>
+                  <div className="flex items-center gap-2 mb-3">
+                    {agreement.status === "Completed" ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    ) : agreement.sent ? (
+                      <Clock className="h-5 w-5 text-amber-600" />
+                    ) : (
+                      <FileSignature className="h-5 w-5 text-ink-400" />
+                    )}
+                    <p className="text-sm font-medium text-ink-900">Partner Agreement (Aadhaar eSign)</p>
+                  </div>
+
+                  {!agreement.sent && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-ink-600">
+                        Digitally sign your partner agreement using Aadhaar eSign — no printing or
+                        courier needed. A signing link will open in a new tab (also sent to your
+                        email and phone).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={sendAgreement}
+                        disabled={agreementSending}
+                        className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+                      >
+                        {agreementSending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileSignature className="h-4 w-4" />
+                        )}
+                        Sign Agreement Digitally
+                      </button>
+                    </div>
+                  )}
+
+                  {agreement.sent && agreement.status !== "Completed" && agreement.status !== "Expired" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+                        <p className="text-sm text-amber-800 font-medium">Waiting for your signature...</p>
+                      </div>
+                      {agreement.signUrl && (
+                        <a
+                          href={agreement.signUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+                        >
+                          Open signing page
+                        </a>
+                      )}
+                      <p className="text-xs text-amber-700">
+                        Complete the Aadhaar OTP eSign on the signing page. This card updates automatically.
+                      </p>
+                    </div>
+                  )}
+
+                  {agreement.status === "Completed" && (
+                    <p className="text-sm text-emerald-800 font-medium">
+                      Agreement signed successfully
+                    </p>
+                  )}
+
+                  {agreement.status === "Expired" && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-rose-800 font-medium">The signing link expired.</p>
+                      <button
+                        type="button"
+                        onClick={sendAgreement}
+                        disabled={agreementSending}
+                        className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 transition-colors disabled:opacity-50"
+                      >
+                        {agreementSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        Request a new signing link
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 10: Personal Details + Set Password */}
+          {step === 10 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-brand-700">
                 <User className="h-5 w-5" />
@@ -1473,10 +1969,10 @@ function OnboardContent() {
                 <div>
                   <Label>Full Name (as per documents) *</Label>
                   <Input
-                    required
                     value={form.name}
-                    onChange={(e) => updateForm("name", e.target.value)}
-                    placeholder="Full name"
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
                   />
                 </div>
                 <div>
@@ -1486,51 +1982,57 @@ function OnboardContent() {
                     value={form.shopName}
                     onChange={(e) => updateForm("shopName", e.target.value)}
                     placeholder="Business name"
+                    readOnly={!!gstResult}
+                    disabled={!!gstResult}
+                    className={gstResult ? "bg-ink-50" : ""}
                   />
+                  {gstResult && (
+                    <p className="mt-1 text-xs text-ink-500">Auto-filled from GST registration</p>
+                  )}
                 </div>
                 <div className="md:col-span-2">
                   <Label>Shop Address</Label>
                   <Input
                     value={form.shopAddress}
-                    onChange={(e) => updateForm("shopAddress", e.target.value)}
-                    placeholder="Full address"
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
                   />
                 </div>
                 <div>
                   <Label>City</Label>
                   <Input
                     value={form.city}
-                    onChange={(e) => updateForm("city", e.target.value)}
-                    placeholder="City"
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
                   />
                 </div>
                 <div>
                   <Label>Pin Code *</Label>
                   <Input
-                    required
-                    maxLength={6}
                     value={form.pincode}
-                    onChange={(e) => updateForm("pincode", e.target.value)}
-                    placeholder="110001"
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
                   />
                 </div>
                 <div>
                   <Label>State *</Label>
-                  <Select
+                  <Input
                     value={form.state}
-                    onChange={(e) => updateForm("state", e.target.value)}
-                  >
-                    {INDIAN_STATES.map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </Select>
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
+                  />
                 </div>
                 <div>
                   <Label>Date of Birth</Label>
                   <Input
-                    type="date"
-                    value={form.dob}
-                    onChange={(e) => updateForm("dob", e.target.value)}
+                    value={form.dob || form.aadhaarDob || ""}
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
                   />
                 </div>
               </div>
@@ -1544,23 +2046,43 @@ function OnboardContent() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Label>Password *</Label>
-                  <Input
-                    type="password"
-                    value={form.password}
-                    onChange={(e) => updateForm("password", e.target.value)}
-                    placeholder="Min 8 characters"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      value={form.password}
+                      onChange={(e) => updateForm("password", e.target.value)}
+                      placeholder="Min 8 characters"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <Label>Confirm Password *</Label>
-                  <Input
-                    type="password"
-                    value={form.confirmPassword}
-                    onChange={(e) =>
-                      updateForm("confirmPassword", e.target.value)
-                    }
-                    placeholder="Re-enter password"
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={form.confirmPassword}
+                      onChange={(e) =>
+                        updateForm("confirmPassword", e.target.value)
+                      }
+                      placeholder="Re-enter password"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1609,6 +2131,13 @@ function OnboardContent() {
                   <p>
                     <span className="text-ink-500">Documents:</span>{" "}
                     {Object.keys(uploadedDocs).length}/{REQUIRED_DOCUMENTS.length} uploaded
+                  </p>
+                  <p>
+                    <span className="text-ink-500">Declaration:</span>{" "}
+                    {selfDeclarationUploaded ? "\u2713 Uploaded" : "\u2717 Not uploaded"}
+                    {declarationStatus?.requiresApproval && (
+                      <> | Approval: {declarationStatus.approval?.status === "APPROVED" ? "\u2713 Approved" : declarationStatus.approval?.status ?? "Not sent"}</>
+                    )}
                   </p>
                   {form.msmeNumber && (
                     <p>
@@ -1713,6 +2242,7 @@ function DocumentUploadField({
   capture,
   description,
   requiresGps,
+  downloadUrl,
   onUpload,
 }: {
   label: string;
@@ -1724,6 +2254,7 @@ function DocumentUploadField({
   capture?: string;
   description?: string;
   requiresGps?: boolean;
+  downloadUrl?: string;
   onUpload: (file: File) => void;
 }) {
   return (
@@ -1743,7 +2274,7 @@ function DocumentUploadField({
           )}
           <div>
             <p className="text-sm font-medium text-ink-900">
-              {label} {required && <span className="text-rose-500">*</span>}
+              {label} {required ? <span className="text-rose-500">*</span> : <span className="text-ink-400 text-xs">(Optional)</span>}
               {requiresGps && (
                 <span className="ml-1 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
                   GPS
@@ -1752,6 +2283,17 @@ function DocumentUploadField({
             </p>
             {description && !uploaded && (
               <p className="text-xs text-ink-500">{description}</p>
+            )}
+            {downloadUrl && !uploaded && (
+              <a
+                href={downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                download
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline mt-0.5"
+              >
+                <ArrowDown className="h-3 w-3" /> Download template
+              </a>
             )}
             {uploaded && (
               <p className="text-xs text-emerald-700">Uploaded successfully</p>

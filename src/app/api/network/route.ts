@@ -10,10 +10,19 @@ export async function GET(req: Request) {
   try {
     const user = await requireAuth();
 
-    // Only admin roles can view user data
-    if (!["MASTER_ADMIN", "ADMIN"].includes(user.role)) {
+    // Admins and distributor tiers can list accounts directly under them.
+    // The where clause below is always scoped to parentId = caller, so a
+    // distributor can only ever see their own network.
+    const allowed = [
+      "MASTER_ADMIN",
+      "ADMIN",
+      "SUPER_DISTRIBUTOR",
+      "MASTER_DISTRIBUTOR",
+      "DISTRIBUTOR",
+    ];
+    if (!allowed.includes(user.role)) {
       return NextResponse.json(
-        { error: "Only admins can view user data" },
+        { error: "You cannot view network data" },
         { status: 403 }
       );
     }

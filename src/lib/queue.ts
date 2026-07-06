@@ -24,6 +24,29 @@ export const QUEUES = {
   // duration via ffprobe, extracts a face frame via ffmpeg, and registers the
   // eKYC Hub baseline. Heavy/external work — never run inside the HTTP request.
   KYC_VIDEO_BASELINE: "kyc.video.baseline",
+  // Daily reconciliation sweep (02:30 IST): ledger integrity audit (balances
+  // vs WalletTxn), deep payout reconciliation vs the provider's books, and
+  // housekeeping (expired rate-limit / idempotency rows). See src/lib/recon/*.
+  RECON_DAILY: "recon.daily",
+  // Phase 3 — dispute SLA sweep (every 30 min): stamp breaches, escalate
+  // priority, alert ops. See src/lib/disputes/service.ts.
+  DISPUTE_SLA: "dispute.sla",
+  // Phase 3 — settlement auto-sweep (daily): move surplus partner-wallet
+  // balance at Same Day to the configured bank account. See
+  // src/lib/settlement/autosweep.ts.
+  SETTLEMENT_AUTOSWEEP: "settlement.autosweep",
+  // Phase 4 — outbound partner webhooks: signed JSON POST per delivery row,
+  // retried with backoff. See src/lib/platform/webhooks.ts.
+  WEBHOOK_DELIVER: "webhook.deliver",
+  // Phase 5 — AML transaction-monitoring sweep (hourly). Files AmlAlert rows
+  // for compliance review. See src/lib/aml/engine.ts.
+  AML_SWEEP: "aml.sweep",
+  // Phase 5 — daily audit hash-chain anchor + verification of the previous
+  // anchor. See src/lib/audit/anchor.ts.
+  AUDIT_ANCHOR: "audit.anchor",
+  // Phase 5 — KYC-video retention purger (daily, opt-in via env). Deletes raw
+  // biometric video from S3 after the retention window; metadata retained.
+  KYC_VIDEO_RETENTION: "kyc.video.retention",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
