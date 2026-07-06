@@ -23,8 +23,12 @@ applications:
             # intentionally NOT captured — they are RESERVED by the Lambda
             # runtime (grabbing them here would persist the build role's stale
             # temporary creds). S3 access should use the Amplify compute IAM role.
+            # [A-Z0-9_]* after the group is REQUIRED: entries like NEXTAUTH_ are
+            # prefixes, and without it the regex demanded '=' right after the
+            # prefix (NEXTAUTH_=...), so NEXTAUTH_SECRET / NEXT_PUBLIC_* etc.
+            # were silently dropped and /api/auth/* 500ed at runtime.
             - >-
-              printenv | grep -E '^(NEXT_PUBLIC_|NEXTAUTH_|JWT_SECRET|DATABASE_URL|DIRECT_URL|APP_ENCRYPTION_KEY|CLOUDINARY_|PARTNER_|TWILIO_|MSG91_|RESEND_|EMAIL_|EKYCHUB_|REKYC_|S3_|KYC_|FFMPEG_PATH|FFPROBE_PATH|BULKPE_|SAMEDAY_|LEEGALITY_|SETTLEMENT_|SECURITY_|RISK_|AML_|LOG_LEVEL|TRUSTED_PROXY_HOPS|PAYSPRINT_|RAZORPAY|RECHARGE_|TRIPJACK_|EXPO_|SENTRY_|UPSTASH_|ALERT_WEBHOOK_URL)=' > .env.production || true
+              printenv | grep -E '^(NEXT_PUBLIC_|NEXTAUTH_|JWT_SECRET|DATABASE_URL|DIRECT_URL|APP_ENCRYPTION_KEY|CLOUDINARY_|PARTNER_|TWILIO_|MSG91_|RESEND_|EMAIL_|EKYCHUB_|REKYC_|S3_|KYC_|FFMPEG_PATH|FFPROBE_PATH|BULKPE_|SAMEDAY_|LEEGALITY_|SETTLEMENT_|SECURITY_|RISK_|AML_|LOG_LEVEL|TRUSTED_PROXY_HOPS|PAYSPRINT_|RAZORPAY|RECHARGE_|TRIPJACK_|EXPO_|SENTRY_|UPSTASH_|ALERT_WEBHOOK_URL)[A-Z0-9_]*=' > .env.production || true
             - npm run build
       artifacts:
         baseDirectory: .next
