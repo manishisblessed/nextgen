@@ -6,6 +6,7 @@ import { clientIp } from "@/lib/security/audit";
 import { getPartner } from "@/lib/partners";
 import { canOnboard, defaultChildRole, ONBOARD_CAPABLE_ROLES } from "@/lib/hierarchy";
 import { env } from "@/lib/env";
+import { renderInviteEmail } from "@/lib/email/templates";
 
 const CreateBody = z.object({
   phone: z.string().min(10).max(15),
@@ -96,19 +97,17 @@ export async function POST(req: Request) {
   let emailError: string | undefined;
   try {
     const emailProvider = getPartner("email");
+    const { subject, html } = renderInviteEmail({
+      name,
+      role,
+      onboardingLink,
+      expiresAt: invite.expiresAt,
+    });
     const result = await emailProvider.send({
       from: process.env.EMAIL_FROM_INFO || process.env.EMAIL_FROM,
       to: email,
-      subject: "NextGenPay — Complete your registration",
-      html: `
-        <h2>Welcome to NextGenPay!</h2>
-        <p>You have been invited to join as a <strong>${role.replace(/_/g, " ")}</strong>.</p>
-        <p>Please complete your registration by clicking the link below:</p>
-        <p><a href="${onboardingLink}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Complete Registration</a></p>
-        <p>This link expires in 7 days.</p>
-        <br/>
-        <p>— Team NextGenPay</p>
-      `,
+      subject,
+      html,
     });
     emailSent = result.ok;
     if (!result.ok) emailError = `${result.code}: ${result.message}`;

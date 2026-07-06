@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { getPartner } from "@/lib/partners";
 import { env } from "@/lib/env";
+import { renderInviteEmail } from "@/lib/email/templates";
 
 const PatchBody = z.object({
   action: z.enum(["approve", "reject", "resend"]),
@@ -56,19 +57,18 @@ export async function PATCH(
 
     try {
       const emailProvider = getPartner("email");
+      const { subject, html } = renderInviteEmail({
+        name: invite.name ?? undefined,
+        role: invite.role,
+        onboardingLink,
+        expiresAt: invite.expiresAt,
+        isReminder: true,
+      });
       const result = await emailProvider.send({
         from: process.env.EMAIL_FROM_INFO || process.env.EMAIL_FROM,
         to: invite.email,
-        subject: "NextGenPay — Complete your registration (Reminder)",
-        html: `
-          <h2>Reminder: Complete your NextGenPay registration</h2>
-          <p>You were invited to join as a <strong>${invite.role.replace("_", " ")}</strong>.</p>
-          <p>Please complete your registration by clicking the link below:</p>
-          <p><a href="${onboardingLink}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">Complete Registration</a></p>
-          <p>This link expires on ${new Date(invite.expiresAt).toLocaleDateString()}.</p>
-          <br/>
-          <p>— Team NextGenPay</p>
-        `,
+        subject,
+        html,
       });
       emailSent = result.ok;
       if (!result.ok) emailError = `${result.code}: ${result.message}`;
