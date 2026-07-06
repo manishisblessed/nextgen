@@ -43,6 +43,10 @@ declare module "next-auth/jwt" {
 }
 
 export const authOptions: NextAuthOptions = {
+  // Explicit secret so a misconfigured runtime fails loudly at startup rather
+  // than 500-ing every /api/auth/* request with a cryptic "server configuration"
+  // error. NextAuth requires this in production.
+  secret: process.env.NEXTAUTH_SECRET,
   debug: process.env.NODE_ENV !== "production",
   // Short JWT lifetime for a finance portal; combined with the per-request
   // tokenVersion check this bounds how long any leaked/replayed cookie is usable.

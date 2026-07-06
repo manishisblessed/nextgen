@@ -12,6 +12,19 @@ applications:
             - npx prisma generate
         build:
           commands:
+            # AWS Amplify exposes console env vars at BUILD time but does NOT
+            # forward them to the Next.js SSR (Lambda) runtime. Without this,
+            # NEXTAUTH_SECRET/DATABASE_URL are undefined at runtime and every
+            # /api/auth/* call 500s ("server configuration" error).
+            # Write the app's runtime vars into .env.production, which Next.js
+            # loads automatically when the server starts. NODE_ENV is excluded
+            # on purpose (Next.js manages it and warns if set via .env).
+            # NOTE: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION are
+            # intentionally NOT captured — they are RESERVED by the Lambda
+            # runtime (grabbing them here would persist the build role's stale
+            # temporary creds). S3 access should use the Amplify compute IAM role.
+            - >-
+              printenv | grep -E '^(NEXT_PUBLIC_|NEXTAUTH_|JWT_SECRET|DATABASE_URL|DIRECT_URL|APP_ENCRYPTION_KEY|CLOUDINARY_|PARTNER_|TWILIO_|MSG91_|RESEND_|EMAIL_|EKYCHUB_|REKYC_|S3_|KYC_|FFMPEG_PATH|FFPROBE_PATH|BULKPE_|SAMEDAY_|LEEGALITY_|SETTLEMENT_|SECURITY_|RISK_|AML_|LOG_LEVEL|TRUSTED_PROXY_HOPS|PAYSPRINT_|RAZORPAY|RECHARGE_|TRIPJACK_|EXPO_|SENTRY_|UPSTASH_|ALERT_WEBHOOK_URL)=' > .env.production || true
             - npm run build
       artifacts:
         baseDirectory: .next

@@ -24,7 +24,7 @@ function buildCsp(): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https://res.cloudinary.com https://api.qrserver.com https://images.unsplash.com https://api.dicebear.com",
     "font-src 'self' data:",
-    "connect-src 'self' https://challenges.cloudflare.com https://ip-api.com https://api.cloudinary.com https://*.s3.*.amazonaws.com https://*.s3.amazonaws.com",
+    "connect-src 'self' https://challenges.cloudflare.com https://ip-api.com https://api.cloudinary.com https://*.amazonaws.com",
     "frame-src 'self' https://challenges.cloudflare.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
