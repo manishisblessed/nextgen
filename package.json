@@ -50,6 +50,9 @@
     "react-hook-form": "^7.53.1",
     "swr": "^2.2.5",
     "tailwind-merge": "^2.5.4",
+    "tailwindcss": "^3.4.13",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -59,12 +62,9 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
-    "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.15",
-    "postcss": "^8.4.47",
     "prisma": "^5.22.0",
-    "tailwindcss": "^3.4.13",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^4.1.9"
