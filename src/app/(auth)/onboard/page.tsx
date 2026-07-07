@@ -101,6 +101,11 @@ const INDIAN_STATES = [
   "Uttarakhand", "West Bengal",
 ];
 
+// Persisted across the full-page DigiLocker redirect so we can auto-complete
+// the Aadhaar step when the user returns (works on mobile, where popups and
+// window.opener/postMessage are unreliable).
+const DIGILOCKER_STORAGE_KEY = "ngp_digilocker_pending";
+
 export default function OnboardPage() {
   return (
     <Suspense
@@ -229,17 +234,6 @@ function OnboardContent() {
     const t = setTimeout(() => setOtpResendTimer((v) => v - 1), 1000);
     return () => clearTimeout(t);
   }, [otpResendTimer]);
-
-  // Listen for Digilocker popup return
-  useEffect(() => {
-    function handleMessage(event: MessageEvent) {
-      if (event.data?.type === "DIGILOCKER_COMPLETE" && digilockerIds) {
-        completeAadhaar();
-      }
-    }
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [digilockerIds]);
 
   async function fetchInvite() {
     setLoading(true);
@@ -388,8 +382,8 @@ function OnboardContent() {
   async function initAadhaar() {
     setVerifying(true);
     setError("");
-    const redirectUrl = process.env.NEXT_PUBLIC_DIGILOCKER_REDIRECT_URL
-      || `${window.location.origin}/onboard?token=${token}&digilocker=complete`;
+    // Always return to THIS onboarding page so we can auto-complete on return.
+    const redirectUrl = `${window.location.origin}/onboard?token=${token}&digilocker=complete`;
     try {
       const res = await fetch(`/api/onboard/${token}/verify`, {
         method: "POST",
@@ -401,12 +395,21 @@ function OnboardContent() {
       });
       const data = await res.json();
       if (data.ok) {
-        setDigilockerIds({
+        const ids = {
           verification_id: data.data.verification_id,
           reference_id: String(data.data.reference_id),
-        });
-        setDigilockerPending(true);
-        window.open(data.data.url, "_blank", "width=800,height=600");
+        };
+        setDigilockerIds(ids);
+        // Persist so we can finish the flow after the full-page redirect back.
+        try {
+          localStorage.setItem(
+            DIGILOCKER_STORAGE_KEY,
+            JSON.stringify({ token, ...ids })
+          );
+        } catch {}
+        // Full-page redirect (reliable on mobile & desktop — no popup needed).
+        window.location.href = data.data.url;
+        return;
       } else {
         const msg = data.message ?? "Failed to initiate Aadhaar verification";
         if (msg.includes("HTTP 403") || msg.includes("service error")) {
@@ -421,18 +424,51 @@ function OnboardContent() {
     setVerifying(false);
   }
 
-  // Check if digilocker=complete is in URL (redirect back from DigiLocker)
+  // On return from DigiLocker (?digilocker=complete), auto-finish the step.
+  const digilockerResumeRef = useRef(false);
   useEffect(() => {
-    if (searchParams.get("digilocker") === "complete" && !aadhaarVerified) {
-      if (window.opener) {
-        window.opener.postMessage({ type: "DIGILOCKER_COMPLETE" }, "*");
-        window.close();
-      }
-    }
-  }, [searchParams, aadhaarVerified]);
+    if (loading) return;
+    if (searchParams.get("digilocker") !== "complete") return;
+    if (digilockerResumeRef.current) return;
+    digilockerResumeRef.current = true;
 
-  async function completeAadhaar() {
-    if (!digilockerIds) return;
+    // Make sure the user lands back on the Aadhaar step.
+    setStep(3);
+
+    // Already verified (restored from DB) — nothing else to do.
+    if (aadhaarVerified) return;
+
+    // Recover the verification IDs (state is lost across the redirect).
+    let ids = digilockerIds;
+    if (!ids) {
+      try {
+        const raw = localStorage.getItem(DIGILOCKER_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.token === token && parsed?.verification_id && parsed?.reference_id) {
+            ids = {
+              verification_id: parsed.verification_id,
+              reference_id: String(parsed.reference_id),
+            };
+            setDigilockerIds(ids);
+          }
+        }
+      } catch {}
+    }
+
+    if (ids) {
+      setDigilockerPending(true);
+      completeAadhaar(ids);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, searchParams, aadhaarVerified]);
+
+  async function completeAadhaar(idsOverride?: {
+    verification_id: string;
+    reference_id: string;
+  }) {
+    const ids = idsOverride ?? digilockerIds;
+    if (!ids) return;
     setVerifying(true);
     setError("");
     try {
@@ -441,8 +477,8 @@ function OnboardContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "AADHAAR_COMPLETE",
-          verification_id: digilockerIds.verification_id,
-          reference_id: digilockerIds.reference_id,
+          verification_id: ids.verification_id,
+          reference_id: ids.reference_id,
         }),
       });
       const data = await res.json();
@@ -450,6 +486,13 @@ function OnboardContent() {
         setAadhaarResult(data.data);
         setAadhaarVerified(true);
         setDigilockerPending(false);
+        try {
+          localStorage.removeItem(DIGILOCKER_STORAGE_KEY);
+        } catch {}
+        // Strip the ?digilocker=complete param so a refresh doesn't re-trigger.
+        if (searchParams.get("digilocker") === "complete") {
+          router.replace(`/onboard?token=${token}`);
+        }
         setForm((f) => ({
           ...f,
           name: f.name || data.data.name || "",
@@ -1297,14 +1340,14 @@ function OnboardContent() {
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center">
                     <Loader2 className="mx-auto h-6 w-6 animate-spin text-amber-600" />
                     <p className="mt-2 text-sm font-medium text-amber-800">
-                      Waiting for DigiLocker verification...
+                      Fetching your Aadhaar details...
                     </p>
                     <p className="text-xs text-amber-700">
-                      Complete the process in the opened window, then click below.
+                      This happens automatically. If it doesn&apos;t complete, tap below.
                     </p>
                   </div>
                   <Button
-                    onClick={completeAadhaar}
+                    onClick={() => completeAadhaar()}
                     disabled={verifying}
                     className="w-full"
                   >
@@ -1313,7 +1356,7 @@ function OnboardContent() {
                     ) : (
                       <CheckCircle2 className="h-4 w-4" />
                     )}
-                    I&apos;ve Completed DigiLocker Verification
+                    Fetch Aadhaar Details
                   </Button>
                   <button
                     type="button"
@@ -1321,7 +1364,7 @@ function OnboardContent() {
                     disabled={verifying}
                     className="w-full text-center text-sm text-brand-600 hover:underline"
                   >
-                    Re-open DigiLocker
+                    Restart DigiLocker Verification
                   </button>
                 </div>
               ) : (
