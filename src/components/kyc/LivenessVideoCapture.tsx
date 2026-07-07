@@ -5,7 +5,11 @@ import { motion } from "framer-motion";
 import { Camera, Loader2, CheckCircle2, Video, ShieldCheck, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { CameraPermissionGuide } from "@/components/kyc/CameraPermissionGuide";
-import { getMediaPermissionState, type MediaPermissionState } from "@/lib/mediaPermissions";
+import {
+  getMediaPermissionState,
+  watchMediaPermissions,
+  type MediaPermissionState,
+} from "@/lib/mediaPermissions";
 
 /**
  * Onboarding liveness video capture (Phase 14).
@@ -62,6 +66,28 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   useEffect(() => {
     void refreshPermState();
   }, [refreshPermState]);
+
+  // Auto-recover: if the user unblocks camera/mic in browser settings while
+  // our "blocked" guide is showing, clear the error so they can start right
+  // away (we don't auto-record — consent + the 10s countdown need a tap).
+  const phaseRef = useRef<Phase>("consent");
+  phaseRef.current = phase;
+  const errorKindRef = useRef(errorKind);
+  errorKindRef.current = errorKind;
+
+  useEffect(() => {
+    return watchMediaPermissions({ audio: true }, (s) => {
+      setPermState(s);
+      if (
+        s === "granted" &&
+        phaseRef.current === "error" &&
+        errorKindRef.current === "permission"
+      ) {
+        setError(null);
+        setPhase("consent");
+      }
+    });
+  }, []);
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());

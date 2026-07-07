@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Search,
   RefreshCw,
+  Pencil,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -53,6 +54,7 @@ export default function AdminInvitesPage() {
   const [selectedInvite, setSelectedInvite] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<any>(null);
   const [resending, setResending] = useState<string | null>(null);
+  const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
 
   const fetchInvites = useCallback(async () => {
     setLoading(true);
@@ -163,6 +165,17 @@ export default function AdminInvitesPage() {
         />
       )}
 
+      {editingInvite && (
+        <EditInviteForm
+          invite={editingInvite}
+          onClose={() => setEditingInvite(null)}
+          onUpdated={() => {
+            setEditingInvite(null);
+            fetchInvites();
+          }}
+        />
+      )}
+
       {selectedInvite && detailData && (
         <InviteDetail
           data={detailData}
@@ -215,18 +228,27 @@ export default function AdminInvitesPage() {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       {inv.status === "PENDING" && (
-                        <button
-                          onClick={() => handleResend(inv.id)}
-                          disabled={resending === inv.id}
-                          title="Resend onboarding email"
-                          className="rounded-lg p-1.5 text-brand-600 hover:bg-brand-50 disabled:opacity-50"
-                        >
-                          {resending === inv.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => setEditingInvite(inv)}
+                            title="Edit mobile number or email"
+                            className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-100 hover:text-ink-900"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleResend(inv.id)}
+                            disabled={resending === inv.id}
+                            title="Resend onboarding email"
+                            className="rounded-lg p-1.5 text-brand-600 hover:bg-brand-50 disabled:opacity-50"
+                          >
+                            {resending === inv.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </button>
+                        </>
                       )}
                       <button
                         onClick={() => viewDetail(inv.id)}
@@ -377,6 +399,124 @@ function CreateInviteForm({
           <Button type="submit" disabled={submitting}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             Send Invite
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EditInviteForm({
+  invite,
+  onClose,
+  onUpdated,
+}: {
+  invite: Invite;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const [form, setForm] = useState({
+    phone: invite.phone,
+    email: invite.email,
+    name: invite.name ?? "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    const res = await fetch(`/api/admin/invite/${invite.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update",
+        phone: form.phone.replace(/\s/g, ""),
+        email: form.email,
+        ...(form.name ? { name: form.name } : {}),
+      }),
+    });
+
+    const data = await res.json();
+    setSubmitting(false);
+
+    if (!res.ok) {
+      setError(typeof data.error === "string" ? data.error : "Failed to update invite");
+      return;
+    }
+
+    setSuccess(
+      data.emailSent
+        ? "Invite updated and onboarding email sent to the new address!"
+        : `Invite updated, but email delivery failed${data.emailError ? `: ${data.emailError}` : ""}. You can retry with the resend button.`
+    );
+    setTimeout(onUpdated, 2000);
+  }
+
+  return (
+    <div className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 to-white p-6 shadow-soft">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="font-display text-lg font-bold text-ink-900">
+          Edit Invite — {invite.role.replace(/_/g, " ")}
+        </h3>
+        <button onClick={onClose} className="text-ink-400 hover:text-ink-700">✕</button>
+      </div>
+
+      <p className="mb-4 text-sm text-ink-500">
+        Correct the mobile number or email if the invite was sent to the wrong
+        contact. The onboarding link will be re-sent to the updated details.
+      </p>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
+          {success}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-2">
+        <div>
+          <Label>Mobile Number *</Label>
+          <Input
+            required
+            value={form.phone}
+            onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+            placeholder="+91 98765 43210"
+          />
+        </div>
+        <div>
+          <Label>Email *</Label>
+          <Input
+            required
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+            placeholder="user@example.com"
+          />
+        </div>
+        <div>
+          <Label>Name (optional)</Label>
+          <Input
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="Full name"
+          />
+        </div>
+        <div className="flex items-end gap-3">
+          <Button type="submit" disabled={submitting}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Save & Resend
           </Button>
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel

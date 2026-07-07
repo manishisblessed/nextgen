@@ -49,3 +49,53 @@ export async function getMediaPermissionState(opts?: {
   if (cam === "granted" && mic === "granted") return "granted";
   return "prompt";
 }
+
+/**
+ * Watch for permission changes (e.g. the user unblocks the camera in the
+ * browser's site settings while our "blocked" guide is on screen) and report
+ * the new combined state. Lets the UI recover without a manual page reload.
+ *
+ * Returns an unsubscribe function. No-ops on browsers without the
+ * Permissions API (the returned cleanup is still safe to call).
+ */
+export function watchMediaPermissions(
+  opts: { audio?: boolean },
+  onChange: (state: MediaPermissionState) => void
+): () => void {
+  const wantAudio = opts.audio ?? false;
+  const statuses: PermissionStatus[] = [];
+  let disposed = false;
+
+  const handleChange = () => {
+    void getMediaPermissionState({ audio: wantAudio }).then((s) => {
+      if (!disposed) onChange(s);
+    });
+  };
+
+  const names: Array<"camera" | "microphone"> = wantAudio
+    ? ["camera", "microphone"]
+    : ["camera"];
+
+  for (const name of names) {
+    try {
+      if (typeof navigator === "undefined" || !navigator.permissions?.query) break;
+      navigator.permissions
+        .query({ name: name as PermissionName })
+        .then((status) => {
+          if (disposed) return;
+          statuses.push(status);
+          status.addEventListener("change", handleChange);
+        })
+        .catch(() => {});
+    } catch {
+      // Permissions API unavailable — nothing to watch.
+    }
+  }
+
+  return () => {
+    disposed = true;
+    for (const status of statuses) {
+      status.removeEventListener("change", handleChange);
+    }
+  };
+}

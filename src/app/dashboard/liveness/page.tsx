@@ -7,6 +7,7 @@ import { ShieldCheck, Loader2, ArrowRight, ScanFace } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { LivenessVideoCapture } from "@/components/kyc/LivenessVideoCapture";
+import { InAppBrowserWarning } from "@/components/kyc/InAppBrowserWarning";
 
 type Status = {
   isNetworkTier: boolean;
@@ -95,6 +96,7 @@ export default function LivenessPage() {
                 </p>
               )}
             </div>
+            <InAppBrowserWarning />
             <LivenessVideoCapture onComplete={() => setStep("done")} />
           </motion.div>
         )}

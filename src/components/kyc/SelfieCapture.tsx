@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { CameraPermissionGuide } from "@/components/kyc/CameraPermissionGuide";
-import { getMediaPermissionState, type MediaPermissionState } from "@/lib/mediaPermissions";
+import {
+  getMediaPermissionState,
+  watchMediaPermissions,
+  type MediaPermissionState,
+} from "@/lib/mediaPermissions";
 
 /**
  * Live selfie capture using the FRONT camera (facingMode: "user").
@@ -45,6 +49,27 @@ export function SelfieCapture({
   useEffect(() => {
     void refreshPermState();
   }, [refreshPermState]);
+
+  // Auto-recover: if the user unblocks the camera in browser settings while
+  // our "blocked" guide is showing, open the camera without a manual retry.
+  const phaseRef = useRef<Phase>("idle");
+  phaseRef.current = phase;
+  const errorKindRef = useRef(errorKind);
+  errorKindRef.current = errorKind;
+  const startRef = useRef<() => Promise<void>>();
+
+  useEffect(() => {
+    return watchMediaPermissions({ audio: false }, (s) => {
+      setPermState(s);
+      if (
+        s === "granted" &&
+        phaseRef.current === "error" &&
+        errorKindRef.current === "permission"
+      ) {
+        void startRef.current?.();
+      }
+    });
+  }, []);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -107,6 +132,7 @@ export function SelfieCapture({
       }
     }
   }
+  startRef.current = start;
 
   function capture() {
     const video = videoRef.current;

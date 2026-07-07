@@ -8,8 +8,11 @@ import { env } from "@/lib/env";
 import { renderInviteEmail } from "@/lib/email/templates";
 
 const PatchBody = z.object({
-  action: z.enum(["approve", "reject", "resend"]),
+  action: z.enum(["approve", "reject", "resend", "update"]),
   reason: z.string().optional(),
+  phone: z.string().min(10).max(15).optional(),
+  email: z.string().email().optional(),
+  name: z.string().min(2).optional(),
 });
 
 export const fetchCache = "force-no-store";
@@ -40,6 +43,128 @@ export async function PATCH(
   const invite = await prisma.invite.findUnique({ where: { id } });
   if (!invite) {
     return NextResponse.json({ error: "Invite not found" }, { status: 404 });
+  }
+
+  if (parsed.data.action === "update") {
+    if (invite.status !== "PENDING") {
+      return NextResponse.json(
+        { error: `Cannot edit invite with status ${invite.status}` },
+        { status: 400 }
+      );
+    }
+
+    const phone = parsed.data.phone?.replace(/\s/g, "");
+    const email = parsed.data.email?.toLowerCase();
+    const name = parsed.data.name;
+
+    if (!phone && !email && name === undefined) {
+      return NextResponse.json(
+        { error: "Provide a new phone, email or name to update" },
+        { status: 400 }
+      );
+    }
+
+    const contactChecks: { email?: string; phone?: string }[] = [];
+    if (email && email !== invite.email) contactChecks.push({ email });
+    if (phone && phone !== invite.phone) contactChecks.push({ phone });
+
+    if (contactChecks.length > 0) {
+      const existingUser = await prisma.user.findFirst({
+        where: { OR: contactChecks },
+      });
+      if (existingUser) {
+        return NextResponse.json(
+          { error: "A user with this email or phone already exists" },
+          { status: 409 }
+        );
+      }
+
+      const existingInvite = await prisma.invite.findFirst({
+        where: {
+          id: { not: id },
+          OR: contactChecks,
+          status: { in: ["PENDING", "REGISTERED"] },
+        },
+      });
+      if (existingInvite) {
+        return NextResponse.json(
+          { error: "An active invite already exists for this email or phone" },
+          { status: 409 }
+        );
+      }
+    }
+
+    const updated = await prisma.invite.update({
+      where: { id },
+      data: {
+        ...(phone ? { phone } : {}),
+        ...(email ? { email } : {}),
+        ...(name !== undefined ? { name } : {}),
+      },
+    });
+
+    // Resend the onboarding link to the corrected contact details
+    const appUrl = env.NEXT_PUBLIC_APP_URL;
+    const onboardingLink = `${appUrl}/onboard?token=${updated.token}`;
+    let emailSent = false;
+    let emailError: string | undefined;
+
+    try {
+      const emailProvider = getPartner("email");
+      const { subject, html } = renderInviteEmail({
+        name: updated.name ?? undefined,
+        role: updated.role,
+        onboardingLink,
+        expiresAt: updated.expiresAt,
+      });
+      const result = await emailProvider.send({
+        from: process.env.EMAIL_FROM_INFO || process.env.EMAIL_FROM,
+        to: updated.email,
+        subject,
+        html,
+      });
+      emailSent = result.ok;
+      if (!result.ok) emailError = `${result.code}: ${result.message}`;
+    } catch (e) {
+      emailError = (e as Error).message;
+    }
+
+    try {
+      const smsProvider = getPartner("sms");
+      await smsProvider.sendTransactional({
+        phone: updated.phone,
+        templateId: "onboard_invite",
+        variables: {
+          link: onboardingLink,
+          role: updated.role.replace(/_/g, " "),
+        },
+      });
+    } catch {
+      // SMS failure shouldn't block the update
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "invite.updated",
+        entity: "Invite",
+        entityId: id,
+        meta: {
+          before: { phone: invite.phone, email: invite.email, name: invite.name },
+          after: { phone: updated.phone, email: updated.email, name: updated.name },
+          emailSent,
+          emailError,
+        },
+        ip: clientIp(req),
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      invite: updated,
+      emailSent,
+      ...(emailError ? { emailError } : {}),
+    });
   }
 
   if (parsed.data.action === "resend") {

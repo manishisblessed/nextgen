@@ -34,6 +34,7 @@ import { namesMatch } from "@/lib/utils";
 import { extractGpsFromFile } from "@/lib/gps";
 import { LivenessVideoCapture } from "@/components/kyc/LivenessVideoCapture";
 import { SelfieCapture } from "@/components/kyc/SelfieCapture";
+import { InAppBrowserWarning } from "@/components/kyc/InAppBrowserWarning";
 
 type InviteData = {
   id: string;
@@ -1113,6 +1114,11 @@ function OnboardContent() {
           {/* Step 0: Welcome */}
           {step === 0 && (
             <div className="space-y-4 text-center">
+              {/* Warn immediately if opened in a WebView — the selfie/video
+                  steps later would fail there. */}
+              <div className="text-left">
+                <InAppBrowserWarning />
+              </div>
               <ShieldCheck className="mx-auto h-12 w-12 text-brand-600" />
               <h2 className="text-lg font-bold text-ink-900">Welcome!</h2>
               <p className="text-ink-600">
@@ -1697,6 +1703,9 @@ function OnboardContent() {
                 Take a live selfie photo and record a 10-second video for identity verification.
                 Both are mandatory.
               </p>
+
+              {/* WebViews (WhatsApp/Instagram/…) auto-deny the camera — warn early. */}
+              <InAppBrowserWarning />
 
               {/* Selfie Upload — live front camera */}
               <SelfieCapture
