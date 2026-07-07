@@ -44,27 +44,6 @@ async function ekychubGet<T>(
   return parseEkychubResponse<T>(res);
 }
 
-async function ekychubPost<T>(
-  path: string,
-  params: Record<string, string>
-): Promise<PartnerResult<T>> {
-  // eKYC Hub authenticates via query-string username/token on every endpoint.
-  // Keep auth in the query string, but send data params (e.g. redirect_url) in
-  // the JSON body so a full URL never lands in the query string (that trips the
-  // upstream WAF and returns a non-JSON HTTP 403).
-  const url = new URL(`${baseUrl()}${path}`);
-  url.searchParams.set("username", username());
-  url.searchParams.set("token", token());
-
-  const res = await fetch(url.toString(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(params),
-  });
-
-  return parseEkychubResponse<T>(res);
-}
-
 async function parseEkychubResponse<T>(res: Response): Promise<PartnerResult<T>> {
   const text = await res.text();
   let data: any;
@@ -275,22 +254,10 @@ export async function createDigilockerUrl(input: {
       ? "/digilocker/create_url_aadhaar"
       : "/digilocker/create_url_pan";
 
-  const params = {
+  return ekychubGet(path, {
     redirect_url: input.redirect_url,
     orderid: input.orderid,
-  };
-
-  // Try POST first (handles long redirect_url without WAF/URL-length issues),
-  // fall back to GET if POST returns 404/405 (older API versions).
-  const postResult = await ekychubPost<DigilockerUrlResponse>(path, params);
-  if (postResult.ok) return postResult;
-
-  const rawStatus = (postResult.raw as any)?.status;
-  if (rawStatus === 404 || rawStatus === 405) {
-    return ekychubGet(path, params);
-  }
-
-  return postResult;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -331,23 +298,12 @@ export async function getDigilockerDocument(input: {
   orderid: string;
   document_type: "AADHAAR" | "PAN";
 }): Promise<PartnerResult<DigilockerDocResponse>> {
-  const params = {
+  return ekychubGet("/digilocker/get_document", {
     verification_id: input.verification_id,
     reference_id: input.reference_id,
     orderid: input.orderid,
     document_type: input.document_type,
-  };
-
-  // Try POST first for consistency with createDigilockerUrl
-  const postResult = await ekychubPost<DigilockerDocResponse>("/digilocker/get_document", params);
-  if (postResult.ok) return postResult;
-
-  const rawStatus = (postResult.raw as any)?.status;
-  if (rawStatus === 404 || rawStatus === 405) {
-    return ekychubGet("/digilocker/get_document", params);
-  }
-
-  return postResult;
+  });
 }
 
 // ---------------------------------------------------------------------------
