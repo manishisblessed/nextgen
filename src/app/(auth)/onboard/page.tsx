@@ -408,7 +408,12 @@ function OnboardContent() {
         setDigilockerPending(true);
         window.open(data.data.url, "_blank", "width=800,height=600");
       } else {
-        setError(data.message ?? "Failed to initiate Aadhaar verification");
+        const msg = data.message ?? "Failed to initiate Aadhaar verification";
+        if (msg.includes("HTTP 403") || msg.includes("service error")) {
+          setError("Aadhaar DigiLocker service is temporarily unavailable. Please try again in a few minutes or contact support.");
+        } else {
+          setError(msg);
+        }
       }
     } catch {
       setError("Network error. Please try again.");
@@ -986,26 +991,26 @@ function OnboardContent() {
   const StepIcon = STEPS[step].icon;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-brand-50 px-4 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-brand-50 px-3 py-6 sm:px-4 sm:py-8">
       <div className="mx-auto max-w-2xl">
         {/* Header */}
-        <div className="mb-6 text-center">
-          <h1 className="font-display text-2xl font-bold text-ink-900">
+        <div className="mb-4 text-center sm:mb-6">
+          <h1 className="font-display text-xl font-bold text-ink-900 sm:text-2xl">
             NextGenPay Registration
           </h1>
-          <p className="mt-1 text-ink-600">
+          <p className="mt-1 text-sm text-ink-600 sm:text-base">
             Complete your onboarding as{" "}
             <strong>{invite?.role.replace(/_/g, " ")}</strong>
           </p>
         </div>
 
         {/* Stepper */}
-        <div className="mb-6 overflow-x-auto">
-          <div className="flex items-center justify-center gap-1 min-w-max px-2">
+        <div className="mb-4 sm:mb-6">
+          <div className="flex items-center justify-center gap-0.5 overflow-x-auto px-1 sm:gap-1 sm:px-2">
             {STEPS.map((s, i) => (
-              <div key={s.label} className="flex items-center gap-1">
+              <div key={s.label} className="flex items-center gap-0.5 sm:gap-1">
                 <span
-                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold transition-colors ${
+                  className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold transition-colors sm:h-6 sm:w-6 sm:text-xs ${
                     i < step
                       ? "bg-emerald-500 text-white"
                       : i === step
@@ -1015,15 +1020,8 @@ function OnboardContent() {
                 >
                   {i < step ? "\u2713" : i + 1}
                 </span>
-                <span
-                  className={`hidden text-xs sm:inline ${
-                    i === step ? "font-semibold text-ink-900" : "text-ink-500"
-                  }`}
-                >
-                  {s.label}
-                </span>
                 {i < STEPS.length - 1 && (
-                  <span className="mx-0.5 h-px w-3 bg-ink-200" />
+                  <span className="mx-0.5 h-px w-2 bg-ink-200 sm:w-3" />
                 )}
               </div>
             ))}
@@ -1031,14 +1029,14 @@ function OnboardContent() {
         </div>
 
         {error && (
-          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 sm:mb-4 sm:px-4 sm:py-3">
             <AlertCircle className="mr-2 inline h-4 w-4" />
             {error}
           </div>
         )}
 
         {/* Form Card */}
-        <div className="rounded-2xl border border-ink-100 bg-white p-6 shadow-soft">
+        <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-soft sm:p-6">
           {/* Step 0: Welcome */}
           {step === 0 && (
             <div className="space-y-4 text-center">
@@ -1255,7 +1253,7 @@ function OnboardContent() {
                       Aadhaar Verified via DigiLocker
                     </p>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                     <div>
                       <span className="text-emerald-700">Name:</span>{" "}
                       {aadhaarResult.name}
@@ -1354,7 +1352,7 @@ function OnboardContent() {
                 Enter your PAN number. We&apos;ll verify it and cross-check with
                 your Aadhaar details.
               </p>
-              <div className="flex items-end gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="flex-1">
                   <Label>PAN Number *</Label>
                   <Input
@@ -1373,6 +1371,7 @@ function OnboardContent() {
                     type="button"
                     onClick={verifyPan}
                     disabled={verifying || form.panNumber.length !== 10}
+                    className="w-full sm:w-auto"
                   >
                     {verifying ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1389,7 +1388,7 @@ function OnboardContent() {
                     <p className="font-semibold text-emerald-800">
                       PAN Verified
                     </p>
-                    <div className="mt-2 grid grid-cols-2 gap-1 text-sm">
+                    <div className="mt-2 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-emerald-700">Name:</span>{" "}
                         {panResult.registered_name}
@@ -1434,7 +1433,7 @@ function OnboardContent() {
                 We&apos;ll verify your bank account via Penny Drop (\u20B91
                 deposit) and confirm the account holder name.
               </p>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label>Account Number *</Label>
                   <Input
@@ -1482,7 +1481,7 @@ function OnboardContent() {
                     <p className="font-semibold text-emerald-800">
                       Bank Account Verified
                     </p>
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                    <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-emerald-700">Name at Bank:</span>{" "}
                         {bankResult.nameAtBank}
@@ -1538,7 +1537,7 @@ function OnboardContent() {
 
               {/* GST */}
               <div className="space-y-2">
-                <div className="flex items-end gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="flex-1">
                     <Label>GSTIN</Label>
                     <Input
@@ -1557,6 +1556,7 @@ function OnboardContent() {
                       type="button"
                       onClick={verifyGst}
                       disabled={verifying || form.gstin.length !== 15}
+                      className="w-full sm:w-auto"
                     >
                       {verifying ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1572,7 +1572,7 @@ function OnboardContent() {
                     <p className="font-semibold text-emerald-800">
                       GST Verified
                     </p>
-                    <div className="mt-2 grid grid-cols-2 gap-1 text-sm">
+                    <div className="mt-2 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-emerald-700">Legal Name:</span>{" "}
                         {gstResult.legal_name}
@@ -1965,7 +1965,7 @@ function OnboardContent() {
                 <h2 className="font-bold">Business Details &amp; Password</h2>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label>Full Name (as per documents) *</Label>
                   <Input
@@ -1990,7 +1990,7 @@ function OnboardContent() {
                     <p className="mt-1 text-xs text-ink-500">Auto-filled from GST registration</p>
                   )}
                 </div>
-                <div className="md:col-span-2">
+                <div className="sm:col-span-2">
                   <Label>Shop Address</Label>
                   <Input
                     value={form.shopAddress}
@@ -2043,7 +2043,7 @@ function OnboardContent() {
                 <Lock className="h-5 w-5" />
                 <h2 className="font-bold">Set Your Password</h2>
               </div>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label>Password *</Label>
                   <div className="relative">
@@ -2091,7 +2091,7 @@ function OnboardContent() {
                 <p className="mb-2 text-xs font-bold uppercase tracking-wider text-ink-500">
                   Registration Summary
                 </p>
-                <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                   <p>
                     <span className="text-ink-500">Phone:</span>{" "}
                     {phoneVerified ? "\u2713 Verified" : "\u2717 Not verified"}
