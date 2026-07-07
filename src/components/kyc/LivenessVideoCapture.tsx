@@ -22,7 +22,32 @@ import {
 
 const CAPTURE_SECONDS = 10;
 
-type Phase = "consent" | "ready" | "starting" | "recording" | "uploading" | "processing" | "done" | "error";
+type Phase =
+  | "consent"
+  | "ready"
+  | "starting"
+  | "recording"
+  | "uploading"
+  | "processing"
+  | "done"
+  | "error"
+  | "fallback";
+
+/** Read a recorded file's duration (seconds) via a detached <video> element. */
+function readVideoDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    const done = (d: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(d);
+    };
+    v.onloadedmetadata = () => done(Number.isFinite(v.duration) ? v.duration : null);
+    v.onerror = () => done(null);
+    v.src = url;
+  });
+}
 
 /** Choose a recorder MIME the browser supports, mapped to our allowed types. */
 function pickMime(): { mime: string; contentType: "video/mp4" | "video/webm" } | null {
@@ -45,6 +70,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [phase, setPhase] = useState<Phase>("consent");
   const [consent, setConsent] = useState(false);
@@ -54,6 +80,8 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<"permission" | "generic">("generic");
   const [permState, setPermState] = useState<MediaPermissionState>("unknown");
+  const [fallbackMaxBytes, setFallbackMaxBytes] = useState(15_728_640);
+  const [processingFile, setProcessingFile] = useState(false);
 
   const refreshPermState = useCallback(async () => {
     const s = await getMediaPermissionState({ audio: true });
@@ -239,10 +267,94 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
     }, 1000);
   }
 
+  /**
+   * PERMANENT FALLBACK — no getUserMedia involved. Fetches the liveness
+   * challenge code, shows it on screen, then lets the user record with the
+   * phone's NATIVE camera app via <input capture>. Works even when the site's
+   * camera permission is blocked or the page runs inside a WebView.
+   */
+  async function beginFallback() {
+    setError(null);
+    try {
+      const initiateUrl = apiPrefix ? `${apiPrefix}/video/initiate` : "/api/kyc/video/initiate";
+      const res = await fetch(initiateUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ consent: true, contentType: "video/mp4" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        fail(typeof data.error === "string" ? data.error : "Could not start capture. Please try again.");
+        return;
+      }
+      setPrompt(data.prompt ?? null);
+      setChallengeCode(data.challengeCode ?? null);
+      setFallbackMaxBytes(data.maxBytes ?? 15_728_640);
+      setPhase("fallback");
+    } catch {
+      fail("Network error starting capture. Please try again.");
+    }
+  }
+
+  /** Validate the camera-app recording, then presign fresh and upload. */
+  async function handleNativeVideo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking again after a validation error
+    if (!file) return;
+
+    setProcessingFile(true);
+    setError(null);
+    try {
+      if (file.size > fallbackMaxBytes) {
+        setError(
+          "That video file is too large. Please record a shorter clip (about 10 seconds) — lowering the camera resolution also helps."
+        );
+        return;
+      }
+
+      const rawDuration = await readVideoDuration(file);
+      const durationSec = Math.round(rawDuration ?? CAPTURE_SECONDS);
+      if (rawDuration !== null && durationSec > 15) {
+        setError("The video is too long. Please record about 10 seconds only.");
+        return;
+      }
+      if (rawDuration !== null && durationSec < 5) {
+        setError("The video is too short. Please record at least 5 seconds while reading the number aloud.");
+        return;
+      }
+
+      // Re-initiate for a FRESH presigned URL + upload token — the one from
+      // beginFallback() may have expired while the user was recording.
+      const initiateUrl = apiPrefix ? `${apiPrefix}/video/initiate` : "/api/kyc/video/initiate";
+      const res = await fetch(initiateUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ consent: true, contentType: "video/mp4" }),
+      });
+      const init = await res.json();
+      if (!res.ok) {
+        fail(typeof init.error === "string" ? init.error : "Could not start the upload. Please try again.");
+        return;
+      }
+
+      await upload(
+        file,
+        // Keep the challenge code the user actually read aloud on camera.
+        { ...init, challengeCode: challengeCode ?? init.challengeCode },
+        Math.min(15, Math.max(5, durationSec))
+      );
+    } catch {
+      setError("Couldn't read that video. Please try recording again.");
+    } finally {
+      setProcessingFile(false);
+    }
+  }
+
   /** Upload the recorded blob to S3, then finalize via /complete. */
   async function upload(
     blob: Blob,
-    init: { uploadUrl: string; key: string; uploadToken: string; contentType: string; maxBytes: number; challengeCode?: string }
+    init: { uploadUrl: string; key: string; uploadToken: string; contentType: string; maxBytes: number; challengeCode?: string },
+    durationSec: number = CAPTURE_SECONDS
   ) {
     stopStream();
     setPhase("uploading");
@@ -291,7 +403,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
           key: init.key,
           uploadToken: init.uploadToken,
           contentType: init.contentType,
-          durationSec: CAPTURE_SECONDS,
+          durationSec,
           challengeCode: init.challengeCode,
         }),
       });
@@ -352,7 +464,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
           </>
         )}
 
-        {(phase === "consent" || phase === "ready" || phase === "error") && (
+        {(phase === "consent" || phase === "ready" || phase === "error" || phase === "fallback") && (
           <div className="absolute inset-0 grid place-items-center">
             <Video className="h-12 w-12 text-white/30" />
           </div>
@@ -395,8 +507,30 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
       )}
 
       {phase === "error" && errorKind === "permission" && (
-        <CameraPermissionGuide withMic />
+        <div className="space-y-3">
+          {/* Zero-permission escape hatch — always works, even in WebViews. */}
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="mb-2 text-sm text-emerald-800">
+              <strong>No problem —</strong> record the 10-second video with your
+              phone&apos;s camera app instead. No browser permission needed.
+            </p>
+            <Button type="button" className="w-full" onClick={beginFallback}>
+              <Video className="h-4 w-4" /> Record with Camera App
+            </Button>
+          </div>
+          <CameraPermissionGuide withMic />
+        </div>
       )}
+
+      {/* Hidden native camera-app input (front camera hint via capture). */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*"
+        capture="user"
+        className="hidden"
+        onChange={handleNativeVideo}
+      />
 
       {/* Controls */}
       {phase === "consent" && (
@@ -442,7 +576,23 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
             <div className="space-y-2">
               <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
                 Camera &amp; microphone access is currently <strong>blocked</strong>{" "}
-                for this site. Enable it below, then tap start.
+                for this site. Use your phone&apos;s camera app below (no permission
+                needed), or re-enable access and tap start.
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={!consent}
+                  onClick={beginFallback}
+                >
+                  <Video className="h-4 w-4" /> Record with Camera App
+                </Button>
+                {!consent && (
+                  <p className="mt-1.5 text-center text-[11px] text-emerald-700">
+                    Tick the consent box above first.
+                  </p>
+                )}
               </div>
               <CameraPermissionGuide withMic />
             </div>
@@ -451,6 +601,14 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
           <Button size="lg" className="w-full" disabled={!consent} onClick={begin}>
             <Camera className="h-4 w-4" /> Start 10-second capture
           </Button>
+          <button
+            type="button"
+            disabled={!consent}
+            onClick={beginFallback}
+            className="mx-auto flex items-center gap-1.5 text-center text-xs font-medium text-brand-600 hover:underline disabled:opacity-50"
+          >
+            <Video className="h-3.5 w-3.5" /> Camera not opening? Record with your phone&apos;s camera app
+          </button>
           <p className="flex items-center justify-center gap-1.5 text-center text-xs text-ink-400">
             <ShieldCheck className="h-3.5 w-3.5" /> Private &amp; encrypted. Never shared publicly.
           </p>
@@ -461,6 +619,60 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
         <p className="text-center text-sm text-ink-500">
           Keep your face centered and clearly read the number shown aloud.
         </p>
+      )}
+
+      {phase === "fallback" && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-4"
+        >
+          <div className="rounded-2xl border border-brand-200 bg-brand-50 p-4 text-center">
+            <p className="text-xs font-medium uppercase tracking-wide text-brand-700">
+              Remember this number — read it aloud in your video
+            </p>
+            <p className="mt-1 text-4xl font-black tracking-[0.35em] text-brand-800">
+              {challengeCode ?? "— — — —"}
+            </p>
+          </div>
+
+          <ol className="ml-4 list-decimal space-y-1.5 text-sm text-ink-600">
+            <li>Tap the button below — your phone&apos;s camera app will open.</li>
+            <li>
+              Switch to the <strong>front (selfie) camera</strong> and record
+              about <strong>10 seconds</strong> with your face centered.
+            </li>
+            <li>
+              Clearly <strong>read the number above aloud</strong> while recording.
+            </li>
+            <li>Tap Done / OK in the camera app — the upload starts automatically.</li>
+          </ol>
+
+          <Button
+            size="lg"
+            className="w-full"
+            disabled={processingFile}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {processingFile ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Checking video…
+              </>
+            ) : (
+              <>
+                <Video className="h-4 w-4" /> Open Camera App & Record
+              </>
+            )}
+          </Button>
+
+          <button
+            type="button"
+            onClick={reset}
+            className="mx-auto block text-center text-xs text-ink-400 hover:underline"
+          >
+            ← Back
+          </button>
+        </motion.div>
       )}
 
       {phase === "done" && (

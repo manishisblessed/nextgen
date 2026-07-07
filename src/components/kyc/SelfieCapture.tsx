@@ -13,12 +13,55 @@ import {
 /**
  * Live selfie capture using the FRONT camera (facingMode: "user").
  *
- * A plain <input capture="user"> is unreliable on Android (many devices open
- * the rear camera), so we drive the front camera directly via getUserMedia and
- * grab a still frame. Falls back to a file picker if the camera is unavailable.
+ * Primary path drives the front camera via getUserMedia (a plain
+ * <input capture="user"> is unreliable on Android — many devices open the
+ * rear camera). PERMANENT FALLBACK: a native <input capture> that opens the
+ * phone's camera app directly — it needs no web camera permission, so it
+ * works even when the site is blocked or the page runs inside a WebView.
  */
 
 type Phase = "idle" | "starting" | "preview" | "captured" | "error";
+
+/**
+ * Downscale/re-encode a camera-app photo to JPEG under the 5 MiB selfie
+ * limit (phone camera photos are often 8–15 MB).
+ */
+async function toJpegUnderLimit(file: File, maxDim = 1600): Promise<File> {
+  let source: ImageBitmap | HTMLImageElement;
+  try {
+    source = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    source = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => resolve(img);
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("decode failed"));
+      };
+      img.src = url;
+    });
+  }
+
+  const w = source instanceof HTMLImageElement ? source.naturalWidth : source.width;
+  const h = source instanceof HTMLImageElement ? source.naturalHeight : source.height;
+  if (!w || !h) throw new Error("empty image");
+
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no canvas context");
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  if ("close" in source) source.close();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.85)
+  );
+  if (!blob) throw new Error("encode failed");
+  return new File([blob], `selfie_${Date.now()}.jpg`, { type: "image/jpeg" });
+}
 
 export function SelfieCapture({
   uploaded,
@@ -32,6 +75,8 @@ export function SelfieCapture({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [processingFile, setProcessingFile] = useState(false);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +222,33 @@ export function SelfieCapture({
     start();
   }
 
+  /**
+   * Fallback path: photo taken with the phone's native camera app via
+   * <input capture>. Works with zero web camera permissions.
+   */
+  async function handleNativeFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!raw) return;
+
+    setProcessingFile(true);
+    setError(null);
+    try {
+      const file = await toJpegUnderLimit(raw);
+      stop();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      const url = URL.createObjectURL(file);
+      previewUrlRef.current = url;
+      setPreviewUrl(url);
+      setPhase("captured");
+      onCapture(file);
+    } catch {
+      failWith("Couldn't read that photo. Please try taking it again.");
+    } finally {
+      setProcessingFile(false);
+    }
+  }
+
   const showCameraViewport = phase === "starting" || phase === "preview";
   const showPreviewImage = phase === "captured" && previewUrl;
 
@@ -236,7 +308,27 @@ export function SelfieCapture({
 
       {((phase === "error" && errorKind === "permission") ||
         (phase === "idle" && permState === "denied")) && (
-        <div className="mb-3">
+        <div className="mb-3 space-y-3">
+          {/* Zero-permission escape hatch — always works, even in WebViews. */}
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <p className="mb-2 text-xs text-emerald-800">
+              <strong>No problem —</strong> you can take the selfie with your
+              phone&apos;s camera app instead. No browser permission needed.
+            </p>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={processingFile}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {processingFile ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Camera className="h-4 w-4" />
+              )}
+              Take Selfie with Camera App
+            </Button>
+          </div>
           <CameraPermissionGuide withMic={false} />
         </div>
       )}
@@ -253,14 +345,39 @@ export function SelfieCapture({
         </div>
       )}
 
+      {/* Native camera-app input (front camera hint via capture="user"). */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="user"
+        className="hidden"
+        onChange={handleNativeFile}
+      />
+
       {/* Controls */}
       {uploaded ? (
         <p className="text-xs text-emerald-700">Selfie uploaded successfully</p>
       ) : phase === "idle" || phase === "error" ? (
-        <Button type="button" onClick={start} className="w-full">
-          <Camera className="h-4 w-4" />
-          {phase === "error" ? "Try again" : "Open Front Camera"}
-        </Button>
+        <div className="space-y-2">
+          <Button type="button" onClick={start} className="w-full">
+            <Camera className="h-4 w-4" />
+            {phase === "error" ? "Try again" : "Open Front Camera"}
+          </Button>
+          <button
+            type="button"
+            disabled={processingFile}
+            onClick={() => fileInputRef.current?.click()}
+            className="mx-auto flex items-center gap-1.5 text-center text-xs font-medium text-brand-600 hover:underline disabled:opacity-50"
+          >
+            {processingFile ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Camera className="h-3.5 w-3.5" />
+            )}
+            Camera not opening? Use your phone&apos;s camera app
+          </button>
+        </div>
       ) : phase === "preview" ? (
         <Button type="button" onClick={capture} className="w-full">
           <Camera className="h-4 w-4" /> Capture Selfie
