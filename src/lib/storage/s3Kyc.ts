@@ -72,6 +72,11 @@ function client(): S3Client {
   const hasStaticKeys = !!(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY);
   cachedClient = new S3Client({
     region,
+    // AWS SDK >= 3.729 defaults to WHEN_SUPPORTED, which bakes an (empty-body)
+    // x-amz-checksum-crc32 into presigned PUT URLs — browser uploads then fail
+    // with 403 SignatureDoesNotMatch. WHEN_REQUIRED restores the old behavior.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
     ...(hasStaticKeys
       ? {
           credentials: {

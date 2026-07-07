@@ -418,7 +418,7 @@ identity on the 1st of every month before they can transact.
 Quick header check (PowerShell):
 
 ```powershell
-curl.exe -sI https://api.next-gen.space/api/healthz | Select-String -Pattern "cache-control"
+curl.exe -sI https://api.nxtgenpay.space/api/healthz | Select-String -Pattern "cache-control"
 ```
 
 ---
