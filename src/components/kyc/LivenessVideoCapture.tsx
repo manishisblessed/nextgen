@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/Button";
 
 const CAPTURE_SECONDS = 10;
 
-type Phase = "consent" | "ready" | "recording" | "uploading" | "processing" | "done" | "error";
+type Phase = "consent" | "ready" | "starting" | "recording" | "uploading" | "processing" | "done" | "error";
 
 /** Choose a recorder MIME the browser supports, mapped to our allowed types. */
 function pickMime(): { mime: string; contentType: "video/mp4" | "video/webm" } | null {
@@ -43,8 +43,10 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   const [phase, setPhase] = useState<Phase>("consent");
   const [consent, setConsent] = useState(false);
   const [prompt, setPrompt] = useState<string | null>(null);
+  const [challengeCode, setChallengeCode] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(CAPTURE_SECONDS);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<"permission" | "generic">("generic");
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -56,9 +58,10 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   useEffect(() => () => stopStream(), [stopStream]);
 
   const fail = useCallback(
-    (msg: string) => {
+    (msg: string, kind: "permission" | "generic" = "generic") => {
       stopStream();
       setError(msg);
+      setErrorKind(kind);
       setPhase("error");
     },
     [stopStream]
@@ -69,17 +72,56 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
     setError(null);
     const picked = pickMime();
     if (!picked) {
-      fail("Your browser does not support video recording. Try a modern browser.");
+      fail("Your browser doesn't support in-app video recording. Please use the latest Chrome or Safari.");
       return;
     }
 
-    // 1. Get the presigned upload URL + liveness prompt (records consent server-side).
+    // 1. Open the front camera + mic FIRST — this makes the permission prompt
+    //    appear immediately on the button tap (best user-gesture association).
+    //    Retry with relaxed constraints so a fussy device still works.
+    setPhase("starting");
+    let stream: MediaStream;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        fail("This browser can't access the camera. Please open the link in Chrome or Safari.");
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "user" } },
+          audio: true,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      }
+    } catch (err) {
+      const name = (err as DOMException)?.name;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        fail("Camera & microphone permission is blocked.", "permission");
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        fail("No camera or microphone was found on this device.");
+      } else if (name === "NotReadableError") {
+        fail("Your camera is being used by another app. Close it and try again.");
+      } else {
+        fail("Camera and microphone access are required for the liveness video.");
+      }
+      return;
+    }
+    streamRef.current = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.muted = true;
+      await videoRef.current.play().catch(() => {});
+    }
+
+    // 2. Get the presigned upload URL + challenge code (records consent server-side).
     let init: {
       uploadUrl: string;
       key: string;
       uploadToken: string;
       contentType: "video/mp4" | "video/webm";
       prompt: string;
+      challengeCode?: string;
       maxBytes: number;
       maxDurationSec: number;
     };
@@ -92,7 +134,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
       });
       const data = await res.json();
       if (!res.ok) {
-        fail(typeof data.error === "string" ? data.error : "Could not start capture.");
+        fail(typeof data.error === "string" ? data.error : "Could not start capture. Please try again.");
         return;
       }
       init = data;
@@ -102,28 +144,18 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
     }
 
     setPrompt(init.prompt);
+    setChallengeCode(init.challengeCode ?? null);
 
-    // 2. Open the camera.
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: true,
-      });
-    } catch {
-      fail("Camera and microphone access are required for the liveness video.");
-      return;
-    }
-    streamRef.current = stream;
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.muted = true;
-      await videoRef.current.play().catch(() => {});
-    }
-
-    // 3. Record for CAPTURE_SECONDS, then upload.
+    // 3. Record for CAPTURE_SECONDS, then upload. Use a timeslice so data is
+    //    flushed periodically (some mobile browsers only emit on stop).
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream, { mimeType: picked.mime });
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: picked.mime });
+    } catch {
+      // Some devices reject the explicit mimeType — let the browser choose.
+      recorder = new MediaRecorder(stream);
+    }
     recorderRef.current = recorder;
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
@@ -132,10 +164,18 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
       const blob = new Blob(chunksRef.current, { type: picked.contentType });
       void upload(blob, init);
     };
+    recorder.onerror = () => {
+      fail("Recording failed on this device. Please try again.");
+    };
 
     setPhase("recording");
     setCountdown(CAPTURE_SECONDS);
-    recorder.start();
+    try {
+      recorder.start(1000);
+    } catch {
+      fail("Couldn't start the recorder. Please try again.");
+      return;
+    }
 
     timerRef.current = setInterval(() => {
       setCountdown((c) => {
@@ -153,7 +193,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   /** Upload the recorded blob to S3, then finalize via /complete. */
   async function upload(
     blob: Blob,
-    init: { uploadUrl: string; key: string; uploadToken: string; contentType: string; maxBytes: number }
+    init: { uploadUrl: string; key: string; uploadToken: string; contentType: string; maxBytes: number; challengeCode?: string }
   ) {
     stopStream();
     setPhase("uploading");
@@ -167,19 +207,29 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
       return;
     }
 
-    try {
-      const put = await fetch(init.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": init.contentType },
-        body: blob,
-      });
-      if (!put.ok) {
-        fail("Upload failed. Please try again.");
-        return;
+    // Upload to S3 with one automatic retry (covers transient network drops).
+    let uploaded = false;
+    for (let attempt = 0; attempt < 2 && !uploaded; attempt++) {
+      try {
+        const put = await fetch(init.uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": init.contentType },
+          body: blob,
+        });
+        if (put.ok) {
+          uploaded = true;
+        } else if (attempt === 1) {
+          fail(`Upload failed (HTTP ${put.status}). Please try again.`);
+          return;
+        }
+      } catch {
+        // A thrown fetch on a cross-origin PUT is typically a CORS/network issue.
+        if (attempt === 1) {
+          fail("Upload failed — network or storage error. Please check your connection and try again.");
+          return;
+        }
       }
-    } catch {
-      fail("Upload failed (network). Please try again.");
-      return;
+      if (!uploaded) await new Promise((r) => setTimeout(r, 800));
     }
 
     setPhase("processing");
@@ -193,6 +243,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
           uploadToken: init.uploadToken,
           contentType: init.contentType,
           durationSec: CAPTURE_SECONDS,
+          challengeCode: init.challengeCode,
         }),
       });
       const data = await res.json();
@@ -212,6 +263,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
     chunksRef.current = [];
     setError(null);
     setPrompt(null);
+    setChallengeCode(null);
     setCountdown(CAPTURE_SECONDS);
     setPhase("consent");
     setConsent(false);
@@ -231,17 +283,37 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
             <div className="absolute right-3 top-3 grid h-9 min-w-9 place-items-center rounded-full bg-ink-900/70 px-2 text-sm font-bold text-white">
               {countdown}s
             </div>
-            {prompt && (
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink-900/90 to-transparent p-4 pt-10">
-                <p className="text-center text-sm font-semibold text-white">{prompt}</p>
-              </div>
-            )}
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink-900/95 to-transparent p-4 pt-12">
+              {challengeCode ? (
+                <div className="text-center">
+                  <p className="text-xs font-medium uppercase tracking-wide text-white/80">
+                    Read this number aloud
+                  </p>
+                  <p className="mt-1 text-3xl font-black tracking-[0.35em] text-white drop-shadow">
+                    {challengeCode}
+                  </p>
+                </div>
+              ) : (
+                prompt && (
+                  <p className="text-center text-sm font-semibold text-white">{prompt}</p>
+                )
+              )}
+            </div>
           </>
         )}
 
         {(phase === "consent" || phase === "ready" || phase === "error") && (
           <div className="absolute inset-0 grid place-items-center">
             <Video className="h-12 w-12 text-white/30" />
+          </div>
+        )}
+
+        {phase === "starting" && (
+          <div className="absolute inset-0 grid place-items-center bg-ink-900/70">
+            <div className="flex flex-col items-center gap-2 text-white">
+              <Loader2 className="h-7 w-7 animate-spin" />
+              <p className="text-sm">Starting camera…</p>
+            </div>
           </div>
         )}
 
@@ -272,6 +344,31 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
         </div>
       )}
 
+      {phase === "error" && errorKind === "permission" && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-semibold">How to enable the camera &amp; microphone</p>
+          <div className="mt-2 space-y-2">
+            <div>
+              <p className="font-medium">Android (Chrome):</p>
+              <ol className="ml-4 list-decimal space-y-0.5 text-xs">
+                <li>Tap the <strong>lock / tune icon</strong> to the left of the address bar.</li>
+                <li>Tap <strong>Permissions</strong>.</li>
+                <li>Turn <strong>Camera</strong> and <strong>Microphone</strong> to <strong>Allow</strong>.</li>
+                <li>Return here and tap <strong>Try again</strong>.</li>
+              </ol>
+            </div>
+            <div>
+              <p className="font-medium">iPhone (Safari):</p>
+              <ol className="ml-4 list-decimal space-y-0.5 text-xs">
+                <li>Tap <strong>aA</strong> in the address bar → <strong>Website Settings</strong>.</li>
+                <li>Set <strong>Camera</strong> and <strong>Microphone</strong> to <strong>Allow</strong>.</li>
+                <li>Reload the page and tap <strong>Try again</strong>.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       {phase === "consent" && (
         <motion.div
@@ -293,6 +390,11 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
               data-retention policy.
             </span>
           </label>
+          <div className="rounded-2xl border border-brand-100 bg-brand-50 p-3 text-center text-xs text-brand-700">
+            When recording starts, a <strong>4-digit number</strong> will appear on
+            screen. Please <strong>read it aloud</strong> clearly while looking at
+            the camera.
+          </div>
           <Button size="lg" className="w-full" disabled={!consent} onClick={begin}>
             <Camera className="h-4 w-4" /> Start 10-second capture
           </Button>
@@ -304,7 +406,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
 
       {phase === "recording" && (
         <p className="text-center text-sm text-ink-500">
-          Follow the on-screen instruction and keep your face centered.
+          Keep your face centered and clearly read the number shown aloud.
         </p>
       )}
 

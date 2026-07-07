@@ -33,6 +33,7 @@ import { Input, Label, Select } from "@/components/ui/Input";
 import { namesMatch } from "@/lib/utils";
 import { extractGpsFromFile } from "@/lib/gps";
 import { LivenessVideoCapture } from "@/components/kyc/LivenessVideoCapture";
+import { SelfieCapture } from "@/components/kyc/SelfieCapture";
 
 type InviteData = {
   id: string;
@@ -123,7 +124,10 @@ export default function OnboardPage() {
 function OnboardContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const token = searchParams.get("token");
+  const urlToken = searchParams.get("token");
+  // Token may be absent on the DigiLocker return (we redirect back to a clean
+  // /onboard URL to avoid tripping the eKYC Hub WAF). Recover it from storage.
+  const [token, setToken] = useState<string | null>(urlToken);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -218,13 +222,37 @@ function OnboardContent() {
   } | null>(null);
   const [agreementSending, setAgreementSending] = useState(false);
 
+  // Recover the token from a pending DigiLocker flow when it's missing from the
+  // URL (the DigiLocker return lands on a clean /onboard with no query string).
   useEffect(() => {
-    if (!token) {
-      setError("Invalid onboarding link. No token found.");
-      setLoading(false);
+    if (urlToken) {
+      setToken(urlToken);
       return;
     }
-    fetchInvite();
+    if (token) return;
+    try {
+      const raw = localStorage.getItem(DIGILOCKER_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.token) setToken(parsed.token);
+      }
+    } catch {}
+  }, [urlToken]);
+
+  useEffect(() => {
+    if (token) {
+      fetchInvite();
+      return;
+    }
+    // No token yet — it may still be recovered from a pending DigiLocker flow.
+    let hasPending = false;
+    try {
+      hasPending = !!localStorage.getItem(DIGILOCKER_STORAGE_KEY);
+    } catch {}
+    if (!hasPending) {
+      setError("Invalid onboarding link. No token found.");
+      setLoading(false);
+    }
   }, [token]);
 
   const autoVerifyRef = useRef(false);
@@ -382,8 +410,10 @@ function OnboardContent() {
   async function initAadhaar() {
     setVerifying(true);
     setError("");
-    // Always return to THIS onboarding page so we can auto-complete on return.
-    const redirectUrl = `${window.location.origin}/onboard?token=${token}&digilocker=complete`;
+    // IMPORTANT: keep the redirect URL CLEAN (no query string). A nested query
+    // string in redirect_url trips the eKYC Hub WAF and returns a 403. We carry
+    // the token + verification IDs through localStorage instead.
+    const redirectUrl = `${window.location.origin}/onboard`;
     try {
       const res = await fetch(`/api/onboard/${token}/verify`, {
         method: "POST",
@@ -404,7 +434,7 @@ function OnboardContent() {
         try {
           localStorage.setItem(
             DIGILOCKER_STORAGE_KEY,
-            JSON.stringify({ token, ...ids })
+            JSON.stringify({ token, ...ids, ts: Date.now() })
           );
         } catch {}
         // Full-page redirect (reliable on mobile & desktop — no popup needed).
@@ -424,44 +454,43 @@ function OnboardContent() {
     setVerifying(false);
   }
 
-  // On return from DigiLocker (?digilocker=complete), auto-finish the step.
+  // On return from DigiLocker, auto-finish the step. We detect the return via a
+  // recent pending record in localStorage (the redirect URL is clean, so there
+  // is no query flag to read).
   const digilockerResumeRef = useRef(false);
   useEffect(() => {
     if (loading) return;
-    if (searchParams.get("digilocker") !== "complete") return;
+    if (aadhaarVerified) return;
     if (digilockerResumeRef.current) return;
+
+    let pending: any = null;
+    try {
+      const raw = localStorage.getItem(DIGILOCKER_STORAGE_KEY);
+      if (raw) pending = JSON.parse(raw);
+    } catch {}
+
+    if (!pending?.verification_id || !pending?.reference_id) return;
+    if (pending.token !== token) return;
+    // Only auto-resume shortly after initiation (avoid acting on stale records).
+    if (pending.ts && Date.now() - pending.ts > 20 * 60 * 1000) return;
+
     digilockerResumeRef.current = true;
 
-    // Make sure the user lands back on the Aadhaar step.
+    // Consume the record so a later refresh doesn't re-trigger a stale attempt.
+    try {
+      localStorage.removeItem(DIGILOCKER_STORAGE_KEY);
+    } catch {}
+
+    const ids = {
+      verification_id: pending.verification_id,
+      reference_id: String(pending.reference_id),
+    };
+    setDigilockerIds(ids);
     setStep(3);
-
-    // Already verified (restored from DB) — nothing else to do.
-    if (aadhaarVerified) return;
-
-    // Recover the verification IDs (state is lost across the redirect).
-    let ids = digilockerIds;
-    if (!ids) {
-      try {
-        const raw = localStorage.getItem(DIGILOCKER_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed?.token === token && parsed?.verification_id && parsed?.reference_id) {
-            ids = {
-              verification_id: parsed.verification_id,
-              reference_id: String(parsed.reference_id),
-            };
-            setDigilockerIds(ids);
-          }
-        }
-      } catch {}
-    }
-
-    if (ids) {
-      setDigilockerPending(true);
-      completeAadhaar(ids);
-    }
+    setDigilockerPending(true);
+    completeAadhaar(ids);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, searchParams, aadhaarVerified]);
+  }, [loading, aadhaarVerified, token]);
 
   async function completeAadhaar(idsOverride?: {
     verification_id: string;
@@ -489,8 +518,9 @@ function OnboardContent() {
         try {
           localStorage.removeItem(DIGILOCKER_STORAGE_KEY);
         } catch {}
-        // Strip the ?digilocker=complete param so a refresh doesn't re-trigger.
-        if (searchParams.get("digilocker") === "complete") {
+        // Restore the token in the URL (we returned to a clean /onboard) so a
+        // refresh reloads the correct invite.
+        if (!urlToken && token) {
           router.replace(`/onboard?token=${token}`);
         }
         setForm((f) => ({
@@ -1473,7 +1503,7 @@ function OnboardContent() {
                 <h2 className="font-bold">Bank Account Verification</h2>
               </div>
               <p className="text-sm text-ink-600">
-                We&apos;ll verify your bank account via Penny Drop (\u20B91
+                We&apos;ll verify your bank account via Penny Drop (₹1
                 deposit) and confirm the account holder name.
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1549,7 +1579,7 @@ function OnboardContent() {
                       )}
                       <p>
                         <span className="text-emerald-700">Penny Drop:</span>{" "}
-                        \u20B9{bankResult.depositAmount ?? 1} deposited
+                        ₹{bankResult.depositAmount ?? 1} deposited
                       </p>
                     </div>
                   </div>
@@ -1668,16 +1698,11 @@ function OnboardContent() {
                 Both are mandatory.
               </p>
 
-              {/* Selfie Upload */}
-              <DocumentUploadField
-                label="Live Selfie Photo"
-                type="SELFIE"
+              {/* Selfie Upload — live front camera */}
+              <SelfieCapture
                 uploaded={selfieUploaded}
                 uploading={uploading === "SELFIE"}
-                required
-                accept="image/*"
-                capture="user"
-                onUpload={(file) => uploadSelfieToS3(file)}
+                onCapture={(file) => uploadSelfieToS3(file)}
               />
 
               {/* 10-second Liveness Video */}

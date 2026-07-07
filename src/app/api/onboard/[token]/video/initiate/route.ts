@@ -68,14 +68,10 @@ export async function POST(
   });
   const uploadToken = signUploadToken(invite.id, presigned.key);
 
-  const prompts = [
-    "Please blink your eyes twice",
-    "Turn your head slowly to the left and back",
-    "Smile and say your name clearly",
-    "Nod your head up and down",
-    "Turn your head slowly to the right and back",
-  ];
-  const prompt = prompts[Math.floor(Math.random() * prompts.length)];
+  // Server-issued liveness challenge: a random 4-digit code the user must read
+  // aloud on camera. Recording the spoken code deters replay/spoof attacks.
+  const challengeCode = String(Math.floor(1000 + Math.random() * 9000));
+  const prompt = `Read this number aloud: ${challengeCode}`;
 
   return NextResponse.json({
     uploadUrl: presigned.uploadUrl,
@@ -83,6 +79,7 @@ export async function POST(
     uploadToken,
     contentType: presigned.contentType,
     prompt,
+    challengeCode,
     expiresInSec: presigned.expiresInSec,
     maxBytes: KYC_VIDEO_MAX_BYTES,
     maxDurationSec: KYC_VIDEO_MAX_DURATION_SEC,

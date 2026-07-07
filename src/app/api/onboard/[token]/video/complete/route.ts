@@ -13,6 +13,7 @@ const Body = z.object({
   uploadToken: z.string(),
   contentType: z.string(),
   durationSec: z.number().int().min(5).max(15),
+  challengeCode: z.string().length(4).optional(),
 }).strict();
 
 export const fetchCache = "force-no-store";
@@ -79,6 +80,7 @@ export async function POST(
         contentType: parsed.data.contentType,
         durationSec: parsed.data.durationSec,
         sizeBytes: head.contentLength,
+        challengeCode: parsed.data.challengeCode,
       },
     },
   });
