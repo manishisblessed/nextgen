@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { clientIp } from "@/lib/security/audit";
 
 const DOCUMENT_TYPES = [
   "PAN",
@@ -40,6 +41,12 @@ const Body = z.object({
   height: z.number().int().optional(),
   gpsLatitude: z.number().optional(),
   gpsLongitude: z.number().optional(),
+  /** Accuracy radius in meters of the live browser geolocation fix. */
+  gpsAccuracy: z.number().optional(),
+  /** ISO timestamp of when the location fix was taken (shutter press). */
+  gpsCapturedAt: z.string().datetime().optional(),
+  /** "browser" = live fix at capture time, "exif" = embedded photo metadata. */
+  gpsSource: z.enum(["browser", "exif"]).optional(),
 });
 
 export const fetchCache = "force-no-store";
@@ -89,6 +96,12 @@ export async function POST(
         height: parsed.data.height,
         gpsLatitude: parsed.data.gpsLatitude,
         gpsLongitude: parsed.data.gpsLongitude,
+        gpsAccuracy: parsed.data.gpsAccuracy,
+        gpsCapturedAt: parsed.data.gpsCapturedAt,
+        gpsSource: parsed.data.gpsSource,
+        // Server-observed capture context (not client-supplied).
+        uploadIp: clientIp(req),
+        uploadUserAgent: req.headers.get("user-agent") ?? undefined,
       },
     },
   });

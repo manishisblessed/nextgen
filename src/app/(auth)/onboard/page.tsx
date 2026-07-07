@@ -34,6 +34,7 @@ import { namesMatch } from "@/lib/utils";
 import { extractGpsFromFile } from "@/lib/gps";
 import { LivenessVideoCapture } from "@/components/kyc/LivenessVideoCapture";
 import { SelfieCapture } from "@/components/kyc/SelfieCapture";
+import { GpsPhotoCapture, type GpsCapture } from "@/components/kyc/GpsPhotoCapture";
 import { InAppBrowserWarning } from "@/components/kyc/InAppBrowserWarning";
 
 type InviteData = {
@@ -664,14 +665,28 @@ function OnboardContent() {
   }
 
   // ----- Document Upload -----
-  async function uploadDocument(type: string, file: File, opts?: { requiresGps?: boolean }) {
+  async function uploadDocument(
+    type: string,
+    file: File,
+    opts?: { requiresGps?: boolean; gps?: GpsCapture }
+  ) {
     setUploading(type);
     setError("");
     try {
       let gpsLatitude: number | undefined;
       let gpsLongitude: number | undefined;
+      let gpsAccuracy: number | undefined;
+      let gpsCapturedAt: string | undefined;
+      let gpsSource: string | undefined;
 
-      if (opts?.requiresGps) {
+      if (opts?.gps) {
+        // Live fix taken by GpsPhotoCapture at the moment of the shutter press.
+        gpsLatitude = opts.gps.latitude;
+        gpsLongitude = opts.gps.longitude;
+        gpsAccuracy = opts.gps.accuracy;
+        gpsCapturedAt = opts.gps.capturedAt;
+        gpsSource = opts.gps.source;
+      } else if (opts?.requiresGps) {
         const gps = await extractGpsFromFile(file);
         if (!gps) {
           setError(
@@ -682,6 +697,7 @@ function OnboardContent() {
         }
         gpsLatitude = gps.latitude;
         gpsLongitude = gps.longitude;
+        gpsSource = "exif";
       }
 
       const signRes = await fetch(`/api/onboard/${token}/documents/sign`, {
@@ -721,6 +737,9 @@ function OnboardContent() {
           height: cloudResult.height,
           gpsLatitude,
           gpsLongitude,
+          gpsAccuracy,
+          gpsCapturedAt,
+          gpsSource,
         }),
       });
       if (!docRes.ok) throw new Error("Failed to save document");
@@ -1745,7 +1764,8 @@ function OnboardContent() {
               </div>
               <p className="text-sm text-ink-600">
                 Upload all the required documents listed below. GPS-tagged photos
-                must have location data embedded in the image.
+                are taken live with your camera and your location is captured
+                automatically at that moment.
               </p>
 
               {nameMismatch && (
@@ -1756,28 +1776,42 @@ function OnboardContent() {
               )}
 
               <div className="space-y-3">
-                {REQUIRED_DOCUMENTS.map((doc) => (
-                  <DocumentUploadField
-                    key={doc.type}
-                    label={doc.label}
-                    type={doc.type}
-                    uploaded={!!uploadedDocs[doc.type]}
-                    uploading={uploading === doc.type}
-                    required={doc.required}
-                    accept={doc.accept}
-                    description={doc.description}
-                    requiresGps={doc.requiresGps}
-                    downloadUrl={doc.downloadUrl}
-                    onUpload={(file) =>
-                      uploadDocument(doc.type, file, { requiresGps: doc.requiresGps })
-                    }
-                  />
-                ))}
+                {REQUIRED_DOCUMENTS.map((doc) =>
+                  doc.requiresGps ? (
+                    <GpsPhotoCapture
+                      key={doc.type}
+                      label={doc.label}
+                      description={doc.description}
+                      required={doc.required}
+                      uploaded={!!uploadedDocs[doc.type]}
+                      uploading={uploading === doc.type}
+                      facing={doc.type === "GPS_SELFIE_DISTRIBUTOR" ? "user" : "environment"}
+                      onCapture={(file, gps) => uploadDocument(doc.type, file, { gps })}
+                    />
+                  ) : (
+                    <DocumentUploadField
+                      key={doc.type}
+                      label={doc.label}
+                      type={doc.type}
+                      uploaded={!!uploadedDocs[doc.type]}
+                      uploading={uploading === doc.type}
+                      required={doc.required}
+                      accept={doc.accept}
+                      description={doc.description}
+                      requiresGps={doc.requiresGps}
+                      downloadUrl={doc.downloadUrl}
+                      onUpload={(file) =>
+                        uploadDocument(doc.type, file, { requiresGps: doc.requiresGps })
+                      }
+                    />
+                  )
+                )}
               </div>
 
               <div className="mt-2 rounded-xl bg-ink-50 p-3 text-xs text-ink-500">
-                <strong>Note:</strong> For GPS-tagged photos, please ensure location
-                services are enabled on your phone&apos;s camera before taking the photo.
+                <strong>Note:</strong> GPS-tagged photos must be taken live with your
+                camera. Your browser will ask for camera and location access — your
+                location is recorded at the moment each photo is taken.
               </div>
 
             </div>
