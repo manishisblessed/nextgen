@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { CameraPermissionGuide } from "@/components/kyc/CameraPermissionGuide";
+import { getMediaPermissionState, type MediaPermissionState } from "@/lib/mediaPermissions";
 
 /**
  * Live selfie capture using the FRONT camera (facingMode: "user").
@@ -31,6 +33,18 @@ export function SelfieCapture({
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<"permission" | "generic">("generic");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [permState, setPermState] = useState<MediaPermissionState>("unknown");
+
+  const refreshPermState = useCallback(async () => {
+    const s = await getMediaPermissionState({ audio: false });
+    setPermState(s);
+    return s;
+  }, []);
+
+  // Probe up front so we can prime the user (or guide them if it's blocked).
+  useEffect(() => {
+    void refreshPermState();
+  }, [refreshPermState]);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -56,6 +70,12 @@ export function SelfieCapture({
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         failWith("This browser can't access the camera. Please open the link in Chrome or Safari.");
+        return;
+      }
+      // If already blocked, show the fix guide instead of a futile attempt.
+      const pre = await refreshPermState();
+      if (pre === "denied") {
+        failWith("Camera permission is blocked.", "permission");
         return;
       }
       let stream: MediaStream;
@@ -188,28 +208,22 @@ export function SelfieCapture({
         </div>
       )}
 
-      {phase === "error" && errorKind === "permission" && (
-        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          <p className="font-semibold">How to enable the camera</p>
-          <div className="mt-1.5 space-y-1.5">
-            <div>
-              <p className="font-medium">Android (Chrome):</p>
-              <ol className="ml-4 list-decimal space-y-0.5">
-                <li>Tap the <strong>lock / tune icon</strong> left of the address bar.</li>
-                <li>Tap <strong>Permissions</strong> (or <strong>Site settings</strong>).</li>
-                <li>Set <strong>Camera</strong> to <strong>Allow</strong> (or tap <strong>Reset permissions</strong>).</li>
-                <li>Reload the page and tap <strong>Try again</strong>.</li>
-              </ol>
-            </div>
-            <div>
-              <p className="font-medium">iPhone (Safari):</p>
-              <ol className="ml-4 list-decimal space-y-0.5">
-                <li>Tap <strong>aA</strong> in the address bar → <strong>Website Settings</strong>.</li>
-                <li>Set <strong>Camera</strong> to <strong>Allow</strong>.</li>
-                <li>Reload the page and tap <strong>Try again</strong>.</li>
-              </ol>
-            </div>
-          </div>
+      {((phase === "error" && errorKind === "permission") ||
+        (phase === "idle" && permState === "denied")) && (
+        <div className="mb-3">
+          <CameraPermissionGuide withMic={false} />
+        </div>
+      )}
+
+      {/* Priming: set expectations before the browser's permission prompt. */}
+      {!uploaded && phase === "idle" && permState !== "denied" && permState !== "granted" && (
+        <div className="mb-3 flex items-start gap-2 rounded-xl border border-ink-100 bg-ink-50/60 p-3 text-xs text-ink-600">
+          <Camera className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+          <span>
+            When you tap below, your browser will ask to use the{" "}
+            <strong>camera</strong>. Please tap <strong>Allow</strong> to take your
+            live selfie.
+          </span>
         </div>
       )}
 

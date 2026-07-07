@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Camera, Loader2, CheckCircle2, Video, ShieldCheck, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { CameraPermissionGuide } from "@/components/kyc/CameraPermissionGuide";
+import { getMediaPermissionState, type MediaPermissionState } from "@/lib/mediaPermissions";
 
 /**
  * Onboarding liveness video capture (Phase 14).
@@ -47,6 +49,19 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
   const [countdown, setCountdown] = useState(CAPTURE_SECONDS);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<"permission" | "generic">("generic");
+  const [permState, setPermState] = useState<MediaPermissionState>("unknown");
+
+  const refreshPermState = useCallback(async () => {
+    const s = await getMediaPermissionState({ audio: true });
+    setPermState(s);
+    return s;
+  }, []);
+
+  // Probe the current permission state up front so we can prime (or guide) the
+  // user before they tap — like a bank vKYC flow.
+  useEffect(() => {
+    void refreshPermState();
+  }, [refreshPermState]);
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -73,6 +88,14 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
     const picked = pickMime();
     if (!picked) {
       fail("Your browser doesn't support in-app video recording. Please use the latest Chrome or Safari.");
+      return;
+    }
+
+    // If the browser already reports the permission as blocked, don't bother
+    // firing getUserMedia (it would throw instantly) — show the fix guide now.
+    const pre = await refreshPermState();
+    if (pre === "denied") {
+      fail("Camera & microphone permission is blocked.", "permission");
       return;
     }
 
@@ -267,6 +290,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
     setCountdown(CAPTURE_SECONDS);
     setPhase("consent");
     setConsent(false);
+    void refreshPermState();
   }
 
   return (
@@ -345,28 +369,7 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
       )}
 
       {phase === "error" && errorKind === "permission" && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <p className="font-semibold">How to enable the camera &amp; microphone</p>
-          <div className="mt-2 space-y-2">
-            <div>
-              <p className="font-medium">Android (Chrome):</p>
-              <ol className="ml-4 list-decimal space-y-0.5 text-xs">
-                <li>Tap the <strong>lock / tune icon</strong> to the left of the address bar.</li>
-                <li>Tap <strong>Permissions</strong>.</li>
-                <li>Turn <strong>Camera</strong> and <strong>Microphone</strong> to <strong>Allow</strong>.</li>
-                <li>Return here and tap <strong>Try again</strong>.</li>
-              </ol>
-            </div>
-            <div>
-              <p className="font-medium">iPhone (Safari):</p>
-              <ol className="ml-4 list-decimal space-y-0.5 text-xs">
-                <li>Tap <strong>aA</strong> in the address bar → <strong>Website Settings</strong>.</li>
-                <li>Set <strong>Camera</strong> and <strong>Microphone</strong> to <strong>Allow</strong>.</li>
-                <li>Reload the page and tap <strong>Try again</strong>.</li>
-              </ol>
-            </div>
-          </div>
-        </div>
+        <CameraPermissionGuide withMic />
       )}
 
       {/* Controls */}
@@ -395,6 +398,30 @@ export function LivenessVideoCapture({ onComplete, apiPrefix }: { onComplete?: (
             screen. Please <strong>read it aloud</strong> clearly while looking at
             the camera.
           </div>
+
+          {/* Priming: tell the user what to expect before the browser prompt. */}
+          {permState !== "denied" && permState !== "granted" && (
+            <div className="flex items-start gap-2 rounded-2xl border border-ink-100 bg-ink-50/60 p-3 text-xs text-ink-600">
+              <Camera className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+              <span>
+                When you tap start, your browser will ask to use the{" "}
+                <strong>camera and microphone</strong>. Please tap{" "}
+                <strong>Allow</strong> to continue.
+              </span>
+            </div>
+          )}
+
+          {/* Proactive guidance if the browser already reports it as blocked. */}
+          {permState === "denied" && (
+            <div className="space-y-2">
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                Camera &amp; microphone access is currently <strong>blocked</strong>{" "}
+                for this site. Enable it below, then tap start.
+              </div>
+              <CameraPermissionGuide withMic />
+            </div>
+          )}
+
           <Button size="lg" className="w-full" disabled={!consent} onClick={begin}>
             <Camera className="h-4 w-4" /> Start 10-second capture
           </Button>
