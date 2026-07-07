@@ -29,6 +29,7 @@ export function SelfieCapture({
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<"permission" | "generic">("generic");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const stop = useCallback(() => {
@@ -43,13 +44,18 @@ export function SelfieCapture({
     };
   }, [stop]);
 
+  function failWith(msg: string, kind: "permission" | "generic" = "generic") {
+    setError(msg);
+    setErrorKind(kind);
+    setPhase("error");
+  }
+
   async function start() {
     setError(null);
     setPhase("starting");
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError("This browser can't access the camera. Use the Upload option below.");
-        setPhase("error");
+        failWith("This browser can't access the camera. Please open the link in Chrome or Safari.");
         return;
       }
       let stream: MediaStream;
@@ -71,13 +77,14 @@ export function SelfieCapture({
     } catch (err) {
       const name = (err as DOMException)?.name;
       if (name === "NotAllowedError" || name === "SecurityError") {
-        setError("Camera permission is blocked. Tap the lock icon in the address bar, allow Camera, then try again — or use Upload below.");
+        failWith("Camera permission is blocked.", "permission");
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        failWith("No camera was found on this device.");
       } else if (name === "NotReadableError") {
-        setError("Your camera is in use by another app. Close it and try again.");
+        failWith("Your camera is being used by another app. Close it and try again.");
       } else {
-        setError("Couldn't open the camera. Please try again or use Upload below.");
+        failWith("Couldn't open the camera. Please try again.");
       }
-      setPhase("error");
     }
   }
 
@@ -122,17 +129,6 @@ export function SelfieCapture({
     }
     setPreviewUrl(null);
     start();
-  }
-
-  function onFilePick(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    const url = URL.createObjectURL(file);
-    previewUrlRef.current = url;
-    setPreviewUrl(url);
-    setPhase("captured");
-    onCapture(file);
   }
 
   const showCameraViewport = phase === "starting" || phase === "preview";
@@ -192,19 +188,39 @@ export function SelfieCapture({
         </div>
       )}
 
+      {phase === "error" && errorKind === "permission" && (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-semibold">How to enable the camera</p>
+          <div className="mt-1.5 space-y-1.5">
+            <div>
+              <p className="font-medium">Android (Chrome):</p>
+              <ol className="ml-4 list-decimal space-y-0.5">
+                <li>Tap the <strong>lock / tune icon</strong> left of the address bar.</li>
+                <li>Tap <strong>Permissions</strong> (or <strong>Site settings</strong>).</li>
+                <li>Set <strong>Camera</strong> to <strong>Allow</strong> (or tap <strong>Reset permissions</strong>).</li>
+                <li>Reload the page and tap <strong>Try again</strong>.</li>
+              </ol>
+            </div>
+            <div>
+              <p className="font-medium">iPhone (Safari):</p>
+              <ol className="ml-4 list-decimal space-y-0.5">
+                <li>Tap <strong>aA</strong> in the address bar → <strong>Website Settings</strong>.</li>
+                <li>Set <strong>Camera</strong> to <strong>Allow</strong>.</li>
+                <li>Reload the page and tap <strong>Try again</strong>.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Controls */}
       {uploaded ? (
         <p className="text-xs text-emerald-700">Selfie uploaded successfully</p>
       ) : phase === "idle" || phase === "error" ? (
-        <div className="space-y-2">
-          <Button type="button" onClick={start} className="w-full">
-            <Camera className="h-4 w-4" /> Open Front Camera
-          </Button>
-          <label className="block cursor-pointer text-center text-xs text-brand-600 hover:underline">
-            <input type="file" accept="image/*" className="hidden" onChange={onFilePick} />
-            or upload a photo instead
-          </label>
-        </div>
+        <Button type="button" onClick={start} className="w-full">
+          <Camera className="h-4 w-4" />
+          {phase === "error" ? "Try again" : "Open Front Camera"}
+        </Button>
       ) : phase === "preview" ? (
         <Button type="button" onClick={capture} className="w-full">
           <Camera className="h-4 w-4" /> Capture Selfie
