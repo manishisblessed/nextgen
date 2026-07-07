@@ -48,13 +48,18 @@ async function ekychubPost<T>(
   path: string,
   params: Record<string, string>
 ): Promise<PartnerResult<T>> {
+  // eKYC Hub authenticates via query-string username/token on every endpoint.
+  // Keep auth in the query string, but send data params (e.g. redirect_url) in
+  // the JSON body so a full URL never lands in the query string (that trips the
+  // upstream WAF and returns a non-JSON HTTP 403).
   const url = new URL(`${baseUrl()}${path}`);
-  const body = { username: username(), token: token(), ...params };
+  url.searchParams.set("username", username());
+  url.searchParams.set("token", token());
 
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(params),
   });
 
   return parseEkychubResponse<T>(res);
