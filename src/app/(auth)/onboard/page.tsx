@@ -27,6 +27,8 @@ import {
   Clock,
   XCircle,
   Camera,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
@@ -171,7 +173,20 @@ function OnboardContent() {
   const [gstResult, setGstResult] = useState<any>(null);
   const [aadhaarResult, setAadhaarResult] = useState<any>(null);
   const [verifying, setVerifying] = useState(false);
-  const [nameMismatch, setNameMismatch] = useState(false);
+
+  // Derived (not state) so it recomputes when a step is edited & re-verified.
+  const bankRefName = aadhaarResult?.name || panResult?.registered_name;
+  const nameMismatch =
+    !!(
+      aadhaarResult?.name &&
+      panResult?.registered_name &&
+      !namesMatch(aadhaarResult.name, panResult.registered_name)
+    ) ||
+    !!(
+      bankRefName &&
+      bankResult?.nameAtBank &&
+      !namesMatch(bankRefName, bankResult.nameAtBank)
+    );
 
   // OTP state
   const [otpCode, setOtpCode] = useState("");
@@ -356,6 +371,23 @@ function OnboardContent() {
       }
     }
 
+    // Restore uploaded documents / selfie / video / declaration so a page
+    // reload doesn't force the applicant to upload everything again.
+    const docFlags: Record<string, boolean> = {};
+    for (const v of vList as Verification[]) {
+      if (v.type.startsWith("DOCUMENT_") && v.status === "Uploaded") {
+        docFlags[v.type.replace("DOCUMENT_", "")] = true;
+      }
+    }
+    setUploadedDocs(docFlags);
+    setSelfieUploaded(!!docFlags.SELFIE);
+    setSelfDeclarationUploaded(!!docFlags.SELF_DECLARATION);
+    setVideoCompleted(
+      vList.some(
+        (v: Verification) => v.type === "ONBOARD_VIDEO" && v.status === "Uploaded"
+      )
+    );
+
     setLoading(false);
   }
 
@@ -482,7 +514,8 @@ function OnboardContent() {
   const digilockerResumeRef = useRef(false);
   useEffect(() => {
     if (loading) return;
-    if (aadhaarVerified) return;
+    // NOTE: no early-return on aadhaarVerified — a pending record also exists
+    // when the user re-verifies with a different Aadhaar (Edit flow).
     if (digilockerResumeRef.current) return;
 
     let pending: any = null;
@@ -512,7 +545,7 @@ function OnboardContent() {
     setDigilockerPending(true);
     completeAadhaar(ids);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, aadhaarVerified, token]);
+  }, [loading, token]);
 
   async function completeAadhaar(idsOverride?: {
     verification_id: string;
@@ -596,12 +629,6 @@ function OnboardContent() {
           name: f.name || data.data.registered_name,
           dob: data.data.date_of_birth || f.dob,
         }));
-        // Cross-check PAN name with Aadhaar name
-        if (aadhaarResult?.name && data.data.registered_name) {
-          if (!namesMatch(aadhaarResult.name, data.data.registered_name)) {
-            setNameMismatch(true);
-          }
-        }
       } else {
         setError(data.message ?? "PAN verification failed");
       }
@@ -638,13 +665,6 @@ function OnboardContent() {
           bankName: data.data.nameAtBank || "",
           bankAccountStatus: data.data.accountStatus || "active",
         }));
-        // Cross-check bank name with Aadhaar/PAN name
-        const refName = aadhaarResult?.name || panResult?.registered_name;
-        if (refName && data.data.nameAtBank) {
-          if (!namesMatch(refName, data.data.nameAtBank)) {
-            setNameMismatch(true);
-          }
-        }
       } else {
         setError(data.message ?? "Bank verification failed");
       }
@@ -772,6 +792,49 @@ function OnboardContent() {
       setError(err instanceof Error ? err.message : "Upload failed");
     }
     setUploading(null);
+  }
+
+  // ----- Document Remove (to re-upload a correct file) -----
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  async function removeDocument(type: string) {
+    setRemoving(type);
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/onboard/${token}/documents?type=${encodeURIComponent(type)}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to remove document");
+      setUploadedDocs((prev) => {
+        const next = { ...prev };
+        delete next[type];
+        return next;
+      });
+      if (type === "SELFIE") setSelfieUploaded(false);
+      if (type === "SELF_DECLARATION") setSelfDeclarationUploaded(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove document");
+    }
+    setRemoving(null);
+  }
+
+  // ----- Edit verified steps (redo a verification with corrected details) -----
+  function editPan() {
+    setPanResult(null);
+    setError("");
+  }
+
+  function editBank() {
+    setBankResult(null);
+    setForm((f) => ({ ...f, bankName: "", bankAccountStatus: "" }));
+    setError("");
+  }
+
+  function editGst() {
+    setGstResult(null);
+    setError("");
   }
 
   // ----- Declaration -----
@@ -1424,6 +1487,15 @@ function OnboardContent() {
                       </div>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={initAadhaar}
+                    disabled={verifying}
+                    className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline disabled:opacity-50"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Wrong Aadhaar? Re-verify with DigiLocker
+                  </button>
                 </div>
               ) : digilockerPending ? (
                 <div className="space-y-3">
@@ -1518,9 +1590,18 @@ function OnboardContent() {
               {panResult && (
                 <div className="space-y-3">
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                    <p className="font-semibold text-emerald-800">
-                      PAN Verified
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-emerald-800">
+                        PAN Verified
+                      </p>
+                      <button
+                        type="button"
+                        onClick={editPan}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                    </div>
                     <div className="mt-2 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-emerald-700">Name:</span>{" "}
@@ -1611,9 +1692,18 @@ function OnboardContent() {
               {bankResult && (
                 <div className="space-y-3">
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                    <p className="font-semibold text-emerald-800">
-                      Bank Account Verified
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-emerald-800">
+                        Bank Account Verified
+                      </p>
+                      <button
+                        type="button"
+                        onClick={editBank}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                    </div>
                     <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-emerald-700">Name at Bank:</span>{" "}
@@ -1702,9 +1792,18 @@ function OnboardContent() {
                 </div>
                 {gstResult && (
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                    <p className="font-semibold text-emerald-800">
-                      GST Verified
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-emerald-800">
+                        GST Verified
+                      </p>
+                      <button
+                        type="button"
+                        onClick={editGst}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                    </div>
                     <div className="mt-2 grid grid-cols-1 gap-1 text-sm sm:grid-cols-2">
                       <p>
                         <span className="text-emerald-700">Legal Name:</span>{" "}
@@ -1765,7 +1864,9 @@ function OnboardContent() {
               <SelfieCapture
                 uploaded={selfieUploaded}
                 uploading={uploading === "SELFIE"}
+                removing={removing === "SELFIE"}
                 onCapture={(file) => uploadSelfieToS3(file)}
+                onRemove={() => removeDocument("SELFIE")}
               />
 
               {/* 10-second Liveness Video */}
@@ -1781,7 +1882,16 @@ function OnboardContent() {
                   </p>
                 </div>
                 {videoCompleted ? (
-                  <p className="text-xs text-emerald-700">Video captured successfully</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-emerald-700">Video captured successfully</p>
+                    <button
+                      type="button"
+                      onClick={() => setVideoCompleted(false)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+                    >
+                      <Pencil className="h-3 w-3" /> Record again
+                    </button>
+                  </div>
                 ) : (
                   <LivenessVideoCapture onComplete={() => setVideoCompleted(true)} apiPrefix={`/api/onboard/${token}`} />
                 )}
@@ -1820,8 +1930,10 @@ function OnboardContent() {
                       required={doc.required}
                       uploaded={!!uploadedDocs[doc.type]}
                       uploading={uploading === doc.type}
+                      removing={removing === doc.type}
                       facing={doc.type === "GPS_SELFIE_DISTRIBUTOR" ? "user" : "environment"}
                       onCapture={(file, gps) => uploadDocument(doc.type, file, { gps })}
+                      onRemove={() => removeDocument(doc.type)}
                     />
                   ) : (
                     <DocumentUploadField
@@ -1830,6 +1942,7 @@ function OnboardContent() {
                       type={doc.type}
                       uploaded={!!uploadedDocs[doc.type]}
                       uploading={uploading === doc.type}
+                      removing={removing === doc.type}
                       required={doc.required}
                       accept={doc.accept}
                       description={doc.description}
@@ -1838,6 +1951,7 @@ function OnboardContent() {
                       onUpload={(file) =>
                         uploadDocument(doc.type, file, { requiresGps: doc.requiresGps })
                       }
+                      onRemove={() => removeDocument(doc.type)}
                     />
                   )
                 )}
@@ -1909,7 +2023,27 @@ function OnboardContent() {
                 )}
 
                 {selfDeclarationUploaded && (
-                  <p className="text-xs text-emerald-700">Self declaration uploaded successfully</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-emerald-700">Self declaration uploaded successfully</p>
+                    {/* Replacing a declaration that is under (or past) successor
+                        review would invalidate the approval — block it then. */}
+                    {(!declarationStatus?.approval ||
+                      declarationStatus.approval.status === "REJECTED") && (
+                      <button
+                        type="button"
+                        onClick={() => removeDocument("SELF_DECLARATION")}
+                        disabled={removing === "SELF_DECLARATION"}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        {removing === "SELF_DECLARATION" ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
+                        Remove & re-upload
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -2283,7 +2417,7 @@ function OnboardContent() {
                   </p>
                   <p>
                     <span className="text-ink-500">Documents:</span>{" "}
-                    {Object.keys(uploadedDocs).length}/{REQUIRED_DOCUMENTS.length} uploaded
+                    {REQUIRED_DOCUMENTS.filter((d) => uploadedDocs[d.type]).length}/{REQUIRED_DOCUMENTS.length} uploaded
                   </p>
                   <p>
                     <span className="text-ink-500">Declaration:</span>{" "}
@@ -2390,6 +2524,7 @@ function DocumentUploadField({
   type,
   uploaded,
   uploading,
+  removing,
   required,
   accept,
   capture,
@@ -2397,11 +2532,13 @@ function DocumentUploadField({
   requiresGps,
   downloadUrl,
   onUpload,
+  onRemove,
 }: {
   label: string;
   type: string;
   uploaded: boolean;
   uploading: boolean;
+  removing?: boolean;
   required?: boolean;
   accept?: string;
   capture?: string;
@@ -2409,6 +2546,7 @@ function DocumentUploadField({
   requiresGps?: boolean;
   downloadUrl?: string;
   onUpload: (file: File) => void;
+  onRemove?: () => void;
 }) {
   return (
     <div
@@ -2475,6 +2613,21 @@ function DocumentUploadField({
               {uploading ? "Uploading..." : "Upload"}
             </span>
           </label>
+        )}
+        {uploaded && onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={removing}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+          >
+            {removing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+            Remove
+          </button>
         )}
       </div>
     </div>

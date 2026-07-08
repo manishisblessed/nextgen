@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
+import { Camera, Loader2, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { CameraPermissionGuide } from "@/components/kyc/CameraPermissionGuide";
 import {
@@ -66,11 +66,16 @@ async function toJpegUnderLimit(file: File, maxDim = 1600): Promise<File> {
 export function SelfieCapture({
   uploaded,
   uploading,
+  removing,
   onCapture,
+  onRemove,
 }: {
   uploaded: boolean;
   uploading: boolean;
+  removing?: boolean;
   onCapture: (file: File) => void;
+  /** When set, an uploaded selfie can be removed so it can be retaken. */
+  onRemove?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -222,6 +227,18 @@ export function SelfieCapture({
     start();
   }
 
+  /** Remove an already-uploaded selfie and reset back to the idle state. */
+  function handleRemove() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+    setPreviewUrl(null);
+    setError(null);
+    setPhase("idle");
+    onRemove?.();
+  }
+
   /**
    * Fallback path: photo taken with the phone's native camera app via
    * <input capture>. Works with zero web camera permissions.
@@ -357,7 +374,24 @@ export function SelfieCapture({
 
       {/* Controls */}
       {uploaded ? (
-        <p className="text-xs text-emerald-700">Selfie uploaded successfully</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-emerald-700">Selfie uploaded successfully</p>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={handleRemove}
+              disabled={removing || uploading}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+            >
+              {removing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              Remove & retake
+            </button>
+          )}
+        </div>
       ) : phase === "idle" || phase === "error" ? (
         <div className="space-y-2">
           <Button type="button" onClick={start} className="w-full">

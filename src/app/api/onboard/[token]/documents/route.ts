@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
+import { deleteFromCloudinary } from "@/lib/cloudinary";
 
 const DOCUMENT_TYPES = [
   "PAN",
@@ -136,4 +137,59 @@ export async function GET(
       createdAt: d.createdAt.toISOString(),
     })),
   });
+}
+
+/**
+ * Remove an uploaded document so the applicant can re-upload the correct
+ * file. Only allowed while the invite is still in progress.
+ */
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token } = await params;
+
+  const invite = await prisma.invite.findUnique({ where: { token } });
+  if (!invite) {
+    return NextResponse.json({ error: "Invalid invite" }, { status: 404 });
+  }
+
+  if (!["PENDING", "REGISTERED"].includes(invite.status)) {
+    return NextResponse.json(
+      { error: "Invite is no longer active" },
+      { status: 400 }
+    );
+  }
+
+  const type = new URL(req.url).searchParams.get("type");
+  const parsed = z.enum(DOCUMENT_TYPES).safeParse(type);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid document type" }, { status: 400 });
+  }
+
+  const docs = await prisma.verificationResult.findMany({
+    where: { inviteId: invite.id, type: `DOCUMENT_${parsed.data}` },
+  });
+  if (docs.length === 0) {
+    return NextResponse.json({ ok: true, removed: 0 });
+  }
+
+  // Best effort: also destroy the underlying Cloudinary assets.
+  for (const doc of docs) {
+    const payload = doc.requestPayload as Record<string, unknown> | null;
+    const publicId = payload?.publicId;
+    if (typeof publicId === "string" && publicId) {
+      try {
+        await deleteFromCloudinary(publicId, { isSensitive: true });
+      } catch {
+        // Ignore — the DB record removal is what matters for the flow.
+      }
+    }
+  }
+
+  const result = await prisma.verificationResult.deleteMany({
+    where: { inviteId: invite.id, type: `DOCUMENT_${parsed.data}` },
+  });
+
+  return NextResponse.json({ ok: true, removed: result.count });
 }
