@@ -13,6 +13,11 @@ import {
   Search,
   RefreshCw,
   Pencil,
+  FileText,
+  Video,
+  MapPin,
+  ExternalLink,
+  X,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -43,6 +48,48 @@ const STATUS_COLORS: Record<string, string> = {
   APPROVED: "bg-emerald-100 text-emerald-800",
   REJECTED: "bg-rose-100 text-rose-800",
   EXPIRED: "bg-gray-100 text-gray-600",
+};
+
+const DOC_TYPE_LABEL: Record<string, string> = {
+  PAN: "PAN Card",
+  AADHAAR_FRONT: "Aadhaar (Front)",
+  AADHAAR_BACK: "Aadhaar (Back)",
+  SHOP_PHOTO: "Shop Photo",
+  BANK_PROOF: "Bank Proof",
+  CANCEL_CHEQUE: "Cancelled Cheque / Passbook",
+  PASSBOOK: "Bank Passbook",
+  GST_CERT: "GST Certificate",
+  SELFIE: "Live Selfie",
+  LIVE_VIDEO: "Liveness Video",
+  VIDEO: "Liveness Video",
+  AGREEMENT: "Agreement",
+  SHOP_ESTABLISHMENT: "Shop & Establishment Certificate",
+  GUMASTA_LICENSE: "Gumasta License",
+  SIGNATURE: "Signature",
+  ELECTRICITY_BILL: "Electricity Bill",
+  ADDITIONAL_ID: "Additional ID Proof",
+  FAMILY_REFERENCE: "Family Reference Document",
+  PG_FORM: "PG Form",
+  GPS_PHOTO_OUTSIDE: "GPS Photo — Outside",
+  GPS_PHOTO_INSIDE: "GPS Photo — Inside",
+  GPS_SELFIE_DISTRIBUTOR: "GPS Selfie with Distributor",
+  DISTRIBUTOR_DECLARATION: "Distributor Declaration",
+  SELF_DECLARATION: "Self Declaration Form",
+  SUCCESSOR_DECLARATION: "Successor Declaration",
+  OTHER: "Other Document",
+};
+
+type OnboardDocument = {
+  id: string;
+  type: string;
+  status: string;
+  url: string | null;
+  format: string | null;
+  publicId: string | null;
+  resourceType: string;
+  gpsLatitude: number | null;
+  gpsLongitude: number | null;
+  createdAt: string;
 };
 
 export default function AdminInvitesPage() {
@@ -532,11 +579,13 @@ function InviteDetail({
   onClose,
   onAction,
 }: {
-  data: { invite: Invite; verifications: any[]; registeredUser: any };
+  data: { invite: Invite; verifications: any[]; documents?: OnboardDocument[]; registeredUser: any };
   onClose: () => void;
   onAction: (action: "approve" | "reject") => void;
 }) {
   const { invite, verifications, registeredUser } = data;
+  const documents = data.documents ?? [];
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   return (
     <div className="rounded-2xl border border-ink-200 bg-white p-6 shadow-soft">
@@ -597,6 +646,96 @@ function InviteDetail({
         </div>
       )}
 
+      {documents.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-bold text-ink-700">
+            Uploaded Documents ({documents.length})
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {documents.map((doc) => {
+              const isImage = doc.resourceType === "image" && doc.format !== "pdf";
+              const isVideo = doc.resourceType === "video" || ["mp4", "webm", "mov"].includes(doc.format ?? "");
+              const isPdf = doc.format === "pdf";
+              const openHref = `/api/kyc/document/${doc.id}`;
+
+              return (
+                <div
+                  key={doc.id}
+                  className="group overflow-hidden rounded-xl border border-ink-200 bg-white transition hover:border-brand-300 hover:shadow-sm"
+                >
+                  {doc.url && isImage ? (
+                    <button
+                      type="button"
+                      onClick={() => setLightbox(doc.url)}
+                      className="relative block h-32 w-full overflow-hidden bg-ink-50"
+                    >
+                      <img
+                        src={doc.url}
+                        alt={DOC_TYPE_LABEL[doc.type] ?? doc.type}
+                        className="h-full w-full object-contain transition group-hover:scale-[1.02]"
+                        loading="lazy"
+                      />
+                    </button>
+                  ) : isVideo ? (
+                    <div className="flex h-32 w-full items-center justify-center bg-ink-900">
+                      <Video className="h-8 w-8 text-white/60" />
+                    </div>
+                  ) : isPdf ? (
+                    <a
+                      href={openHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex h-24 w-full items-center justify-center bg-rose-50 transition hover:bg-rose-100"
+                    >
+                      <FileText className="h-7 w-7 text-rose-400" />
+                      <span className="ml-2 text-xs font-bold uppercase text-rose-500">PDF</span>
+                    </a>
+                  ) : (
+                    <div className="flex h-24 w-full items-center justify-center bg-ink-50">
+                      <FileText className="h-7 w-7 text-ink-300" />
+                    </div>
+                  )}
+
+                  <div className="p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-xs font-semibold text-ink-800">
+                        {DOC_TYPE_LABEL[doc.type] ?? doc.type.replace(/_/g, " ")}
+                      </p>
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-ink-500">
+                      {doc.format && (
+                        <span className="rounded bg-ink-100 px-1.5 py-0.5 font-medium uppercase">
+                          {doc.format}
+                        </span>
+                      )}
+                      {doc.gpsLatitude && doc.gpsLongitude && (
+                        <a
+                          href={`https://www.google.com/maps?q=${doc.gpsLatitude},${doc.gpsLongitude}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-0.5 font-medium text-amber-600 hover:underline"
+                        >
+                          <MapPin className="h-3 w-3" /> GPS
+                        </a>
+                      )}
+                    </div>
+                    <a
+                      href={openHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline"
+                    >
+                      Open <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {registeredUser && (
         <div className="mt-4 rounded-xl border border-ink-100 bg-ink-50/50 p-4">
           <p className="mb-1 text-sm font-bold text-ink-700">Registered User</p>
@@ -617,6 +756,26 @@ function InviteDetail({
           <Button variant="outline" onClick={() => onAction("reject")}>
             <XCircle className="h-4 w-4" /> Reject
           </Button>
+        </div>
+      )}
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-ink-900/80 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+            onClick={() => setLightbox(null)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={lightbox}
+            alt="Document preview"
+            className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>

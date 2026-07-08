@@ -313,10 +313,34 @@ export async function GET(
     return NextResponse.json({ error: "Invite not found" }, { status: 404 });
   }
 
-  const verifications = await prisma.verificationResult.findMany({
+  const allResults = await prisma.verificationResult.findMany({
     where: { inviteId: id },
     orderBy: { createdAt: "desc" },
   });
+
+  // Split KYC verifications (PAN/Aadhaar/Bank/GST) from uploaded documents.
+  // Documents are stored as VerificationResult rows of type DOCUMENT_* with
+  // status "Uploaded" — treat them as attachments, not pass/fail checks.
+  const verifications = allResults.filter(
+    (v) => !v.type.startsWith("DOCUMENT_")
+  );
+  const documents = allResults
+    .filter((v) => v.type.startsWith("DOCUMENT_"))
+    .map((v) => {
+      const payload = (v.requestPayload ?? {}) as Record<string, unknown>;
+      return {
+        id: v.id,
+        type: v.type.replace("DOCUMENT_", ""),
+        status: v.status,
+        url: (payload.url as string) ?? null,
+        format: (payload.format as string) ?? null,
+        publicId: (payload.publicId as string) ?? null,
+        resourceType: (payload.resourceType as string) ?? "image",
+        gpsLatitude: (payload.gpsLatitude as number) ?? null,
+        gpsLongitude: (payload.gpsLongitude as number) ?? null,
+        createdAt: v.createdAt.toISOString(),
+      };
+    });
 
   let registeredUser = null;
   if (invite.userId) {
@@ -338,5 +362,5 @@ export async function GET(
     });
   }
 
-  return NextResponse.json({ invite, verifications, registeredUser });
+  return NextResponse.json({ invite, verifications, documents, registeredUser });
 }

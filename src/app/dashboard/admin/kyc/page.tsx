@@ -17,11 +17,9 @@ import {
   Phone,
   Mail,
   MapPin,
-  Camera,
   FileText,
   Video,
   ExternalLink,
-  Calendar,
   Shield,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
@@ -58,6 +56,7 @@ type KycDoc = {
   type: string;
   url: string;
   format: string | null;
+  resourceType: string | null;
   uploadedAt: string;
 };
 
@@ -79,7 +78,11 @@ type KycRow = {
   bankAccountNumber: string | null;
   bankIfsc: string | null;
   bankAccountStatus: string | null;
+  bankVerifiedAt: string | null;
   gstin: string | null;
+  gstVerified: boolean;
+  gstLegalName: string | null;
+  gstTradeName: string | null;
   msmeNumber: string | null;
   nameMismatch: boolean;
   dob: string | null;
@@ -443,7 +446,7 @@ function DetailDrawer({
       type: d.type,
       url: d.url,
       format: d.format,
-      resourceType: "image",
+      resourceType: d.resourceType ?? "image",
       hasGps: false,
       gpsLatitude: null as number | null,
       gpsLongitude: null as number | null,
@@ -454,7 +457,7 @@ function DetailDrawer({
 
   const uniqueDocs = new Map<string, (typeof allDocs)[0]>();
   for (const doc of allDocs) {
-    if (!uniqueDocs.has(doc.type) && doc.url) {
+    if (!uniqueDocs.has(doc.type)) {
       uniqueDocs.set(doc.type, doc);
     }
   }
@@ -596,12 +599,16 @@ function DetailsTab({ kyc }: { kyc: KycRow }) {
       </Section>
 
       {/* Business Info */}
-      <Section title="Business Details" icon={Building2}>
+      <Section title="Business Details" icon={Building2} verified={kyc.gstVerified}>
         <div className="grid gap-3 sm:grid-cols-2">
           <InfoField label="Shop / Firm Name" value={kyc.user.shopName ?? "—"} />
           <InfoField label="GSTIN" value={kyc.gstin ?? "—"} />
+          {kyc.gstLegalName && <InfoField label="GST Legal Name" value={kyc.gstLegalName} />}
+          {kyc.gstTradeName && <InfoField label="GST Trade Name" value={kyc.gstTradeName} />}
           <InfoField label="MSME / Udyam No." value={kyc.msmeNumber ?? "—"} />
-          <InfoField label="Shop Address" value={kyc.user.shopAddress ?? "—"} />
+          <div className="sm:col-span-2">
+            <InfoField label="Shop Address" value={kyc.user.shopAddress ?? "—"} />
+          </div>
           <InfoField label="City" value={kyc.user.city ?? "—"} />
           <InfoField label="State" value={kyc.user.state ?? "—"} />
           <InfoField label="Pincode" value={kyc.user.pincode ?? "—"} />
@@ -631,7 +638,7 @@ function DetailsTab({ kyc }: { kyc: KycRow }) {
       </Section>
 
       {/* Bank */}
-      <Section title="Bank Account" icon={Building2} verified={!!kyc.bankAccountNumber}>
+      <Section title="Bank Account" icon={Building2} verified={!!kyc.bankVerifiedAt}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <InfoField label="Account Holder" value={kyc.bankAccountName ?? "—"} />
           <InfoField label="Account Number" value={kyc.bankAccountNumber ?? "—"} />
@@ -659,6 +666,8 @@ function DetailsTab({ kyc }: { kyc: KycRow }) {
 /* ─── Documents Tab ──────────────────────────────────────────────────── */
 
 function DocsTab({ docs }: { docs: Array<{ id: string; type: string; url: string | null; format: string | null; resourceType: string; hasGps: boolean; gpsLatitude: number | null; gpsLongitude: number | null; uploadedAt: string; source: "onboarding" | "direct" }> }) {
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
   if (docs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-ink-400">
@@ -669,81 +678,116 @@ function DocsTab({ docs }: { docs: Array<{ id: string; type: string; url: string
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {docs.map((doc) => {
-        const isImage = doc.resourceType === "image" || ["jpg", "jpeg", "png", "webp", "gif"].includes(doc.format ?? "");
-        const isVideo = doc.resourceType === "video" || ["mp4", "webm", "mov"].includes(doc.format ?? "");
-        const isPdf = doc.format === "pdf";
+    <>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {docs.map((doc) => {
+          const isImage = doc.resourceType === "image" && doc.format !== "pdf";
+          const isVideo = doc.resourceType === "video" || ["mp4", "webm", "mov"].includes(doc.format ?? "");
+          const isPdf = doc.format === "pdf";
+          // Always open through the signed endpoint so private PDFs (and any
+          // asset whose stored URL signature is unavailable) resolve reliably.
+          const openHref = `/api/kyc/document/${doc.id}`;
 
-        return (
-          <div
-            key={doc.id}
-            className="group rounded-xl border border-ink-200 bg-white overflow-hidden transition hover:border-brand-300 hover:shadow-sm"
-          >
-            {/* Preview */}
-            {doc.url && isImage && (
-              <div className="relative h-40 w-full bg-ink-50 overflow-hidden">
-                <img
-                  src={doc.url}
-                  alt={DOC_TYPE_LABEL[doc.type] ?? doc.type}
-                  className="h-full w-full object-contain"
-                  loading="lazy"
-                />
-              </div>
-            )}
-            {doc.url && isVideo && (
-              <div className="relative h-40 w-full bg-ink-900 flex items-center justify-center">
-                <Video className="h-10 w-10 text-white/60" />
-              </div>
-            )}
-            {doc.url && isPdf && (
-              <div className="relative h-24 w-full bg-rose-50 flex items-center justify-center">
-                <FileText className="h-8 w-8 text-rose-400" />
-                <span className="ml-2 text-xs font-bold text-rose-500 uppercase">PDF</span>
-              </div>
-            )}
-            {doc.url && !isImage && !isVideo && !isPdf && (
-              <div className="relative h-24 w-full bg-ink-50 flex items-center justify-center">
-                <FileText className="h-8 w-8 text-ink-300" />
-              </div>
-            )}
-
-            {/* Info */}
-            <div className="p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-ink-800 truncate">
-                  {DOC_TYPE_LABEL[doc.type] ?? doc.type.replace(/_/g, " ")}
-                </p>
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
-                {doc.format && (
-                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-medium uppercase">
-                    {doc.format}
-                  </span>
-                )}
-                <span>{new Date(doc.uploadedAt).toLocaleDateString("en-IN")}</span>
-                {doc.hasGps && (
-                  <span className="flex items-center gap-0.5 text-amber-600 font-medium">
-                    <MapPin className="h-3 w-3" /> GPS
-                  </span>
-                )}
-              </div>
-              {doc.url && (
+          return (
+            <div
+              key={doc.id}
+              className="group rounded-xl border border-ink-200 bg-white overflow-hidden transition hover:border-brand-300 hover:shadow-sm"
+            >
+              {/* Preview */}
+              {doc.url && isImage ? (
+                <button
+                  type="button"
+                  onClick={() => setLightbox(doc.url)}
+                  className="relative block h-40 w-full bg-ink-50 overflow-hidden"
+                >
+                  <img
+                    src={doc.url}
+                    alt={DOC_TYPE_LABEL[doc.type] ?? doc.type}
+                    className="h-full w-full object-contain transition group-hover:scale-[1.02]"
+                    loading="lazy"
+                  />
+                </button>
+              ) : isVideo ? (
+                <div className="relative h-40 w-full bg-ink-900 flex items-center justify-center">
+                  <Video className="h-10 w-10 text-white/60" />
+                </div>
+              ) : isPdf ? (
                 <a
-                  href={doc.url}
+                  href={openHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative flex h-28 w-full items-center justify-center bg-rose-50 hover:bg-rose-100 transition"
+                >
+                  <FileText className="h-8 w-8 text-rose-400" />
+                  <span className="ml-2 text-xs font-bold text-rose-500 uppercase">PDF</span>
+                </a>
+              ) : (
+                <div className="relative h-28 w-full bg-ink-50 flex items-center justify-center">
+                  <FileText className="h-8 w-8 text-ink-300" />
+                </div>
+              )}
+
+              {/* Info */}
+              <div className="p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-ink-800 truncate">
+                    {DOC_TYPE_LABEL[doc.type] ?? doc.type.replace(/_/g, " ")}
+                  </p>
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
+                  {doc.format && (
+                    <span className="rounded bg-ink-100 px-1.5 py-0.5 font-medium uppercase">
+                      {doc.format}
+                    </span>
+                  )}
+                  <span>{new Date(doc.uploadedAt).toLocaleDateString("en-IN")}</span>
+                  {doc.hasGps && doc.gpsLatitude && doc.gpsLongitude && (
+                    <a
+                      href={`https://www.google.com/maps?q=${doc.gpsLatitude},${doc.gpsLongitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-0.5 font-medium text-amber-600 hover:underline"
+                    >
+                      <MapPin className="h-3 w-3" /> GPS
+                    </a>
+                  )}
+                </div>
+                <a
+                  href={openHref}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline"
                 >
                   Open in new tab <ExternalLink className="h-3 w-3" />
                 </a>
-              )}
+              </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+
+      {/* Image lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-ink-900/80 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+            onClick={() => setLightbox(null)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={lightbox}
+            alt="Document preview"
+            className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
