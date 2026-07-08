@@ -304,7 +304,8 @@ function OnboardContent() {
       setForm((f) => ({
         ...f,
         name: f.name || aadhaarV.verifiedName || payload?.name || "",
-        shopName: f.shopName || aadhaarV.verifiedName || payload?.name || "",
+        // Shop/Firm name must come from GST (or manual entry), never the Aadhaar name.
+        shopName: f.shopName,
         shopAddress: f.shopAddress || payload?.address || "",
         aadhaarName: aadhaarV.verifiedName || payload?.name || "",
         aadhaarNumber: payload?.uid || "",
@@ -334,6 +335,24 @@ function OnboardContent() {
     );
     if (bankV) {
       setBankResult({ nameAtBank: bankV.verifiedName });
+    }
+
+    const gstV = vList.find(
+      (v: Verification) => v.type === "GST" && v.status === "Success"
+    );
+    if (gstV) {
+      const gp = (gstV.responsePayload ?? {}) as any;
+      const tradeName =
+        gp.trade_name ??
+        gp.trade_name_of_business ??
+        gp.legal_name ??
+        gp.legal_name_of_business ??
+        gstV.verifiedName ??
+        "";
+      setGstResult(gp);
+      if (tradeName) {
+        setForm((f) => ({ ...f, shopName: tradeName }));
+      }
     }
 
     setLoading(false);
@@ -528,7 +547,8 @@ function OnboardContent() {
         setForm((f) => ({
           ...f,
           name: f.name || data.data.name || "",
-          shopName: f.shopName || data.data.name || "",
+          // Shop/Firm name must come from GST (or manual entry), never the Aadhaar name.
+          shopName: f.shopName,
           shopAddress: f.shopAddress || data.data.address || "",
           aadhaarName: data.data.name || "",
           aadhaarNumber: data.data.uid || "",
