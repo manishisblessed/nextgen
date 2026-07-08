@@ -47,7 +47,14 @@ export async function buildDeclarationData(inviteId: string): Promise<Declaratio
     ? `XXXX-XXXX-${String(aadhaarPayload.uid).slice(-4)}`
     : "";
 
-  const onboardeeName = invite.name ?? aadhaarPayload?.name ?? panV?.verifiedName ?? "";
+  // Prefer the Aadhaar-verified name so the declaration carries the real
+  // documented name, falling back to PAN and only then the invite name.
+  const onboardeeName =
+    aadhaarV?.verifiedName ??
+    aadhaarPayload?.name ??
+    panV?.verifiedName ??
+    invite.name ??
+    "";
   const onboardeeAddress = aadhaarPayload?.address ?? gstPayload?.principal_place_address ?? "";
 
   const today = new Date();
