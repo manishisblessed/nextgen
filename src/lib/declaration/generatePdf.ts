@@ -321,8 +321,6 @@ export async function generateSelfDeclarationPdf(data: DeclarationData): Promise
   b.sectionBar(`${onboardeeLabel} Signature`);
   b.signatureBlock(data.onboardeeName);
 
-  b.companyUseOnly();
-
   return b.finish(DISCLAIMER);
 }
 
