@@ -1825,9 +1825,9 @@ function OnboardContent() {
                 <h2 className="font-bold">Declaration & Undertaking</h2>
               </div>
               <p className="text-sm text-ink-600">
-                Download the prefilled declaration form, sign it, and upload the signed copy.
+                Download your prefilled <strong>self-declaration</strong>, sign it, and upload the signed copy.
                 {declarationStatus?.requiresApproval && (
-                  <> You also need approval from your <strong>{declarationStatus.approverName}</strong> ({invite?.role === "MASTER_DISTRIBUTOR" ? "Super Distributor" : invite?.role === "DISTRIBUTOR" ? "Master Distributor" : "Distributor"}).</>
+                  <> Additionally, your <strong>{declarationStatus.approverName}</strong> ({invite?.role === "MASTER_DISTRIBUTOR" ? "Super Distributor" : invite?.role === "DISTRIBUTOR" ? "Master Distributor" : "Distributor"}) must review the responsibility declaration and approve your onboarding with their signature &amp; selfie.</>
                 )}
               </p>
 
@@ -1852,10 +1852,10 @@ function OnboardContent() {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100 transition-colors"
                     >
-                      <ArrowDown className="h-4 w-4" /> Download Prefilled Declaration
+                      <ArrowDown className="h-4 w-4" /> Download Prefilled Self-Declaration
                     </a>
                     <p className="text-xs text-ink-500">
-                      Download, print, sign, and upload the signed declaration form.
+                      Download, print, sign, and upload the signed self-declaration form.
                     </p>
                     <DocumentUploadField
                       label="Upload Signed Declaration"

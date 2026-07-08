@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { generateDeclarationPdf } from "@/lib/declaration/generatePdf";
-import type { DeclarationData, DeclarationRole } from "@/lib/declaration/types";
+import { generateSelfDeclarationPdf } from "@/lib/declaration/generatePdf";
+import { buildDeclarationData } from "@/lib/declaration/data";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -25,59 +25,17 @@ export async function GET(
     return NextResponse.json({ error: "Invite has expired" }, { status: 400 });
   }
 
-  const inviter = await prisma.user.findUnique({
-    where: { id: invite.invitedById },
-    include: { kyc: true },
-  });
-
-  if (!inviter) {
-    return NextResponse.json({ error: "Inviter not found" }, { status: 404 });
+  const data = await buildDeclarationData(invite.id);
+  if (!data) {
+    return NextResponse.json({ error: "Unable to prepare declaration" }, { status: 404 });
   }
 
-  const verifications = await prisma.verificationResult.findMany({
-    where: { inviteId: invite.id },
-    select: { type: true, status: true, verifiedName: true, responsePayload: true },
-  });
-
-  const aadhaarV = verifications.find(
-    (v) => v.type === "AADHAAR_DIGILOCKER" && v.status === "Success"
-  );
-  const aadhaarPayload = aadhaarV?.responsePayload as any;
-
-  const today = new Date();
-  const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
-
-  const data: DeclarationData = {
-    date: dateStr,
-
-    creatorName: inviter.name,
-    creatorId: inviter.id.slice(-8).toUpperCase(),
-    creatorCompany: inviter.shopName ?? "",
-    creatorMobile: inviter.phone,
-    creatorEmail: inviter.email,
-    creatorAddress: [inviter.shopAddress, inviter.city, inviter.state, inviter.pincode]
-      .filter(Boolean)
-      .join(", "),
-    creatorPan: inviter.kyc?.panNumber ?? "",
-    creatorAadhaar: inviter.kyc?.aadhaarNumber
-      ? `XXXX-XXXX-${inviter.kyc.aadhaarLast4 ?? inviter.kyc.aadhaarNumber.slice(-4)}`
-      : "",
-    creatorRole: inviter.role as DeclarationRole,
-
-    onboardeeName: invite.name ?? aadhaarPayload?.name ?? "",
-    onboardeeId: invite.id.slice(-8).toUpperCase(),
-    onboardeeBusiness: "",
-    onboardeeMobile: invite.phone,
-    onboardeeAddress: aadhaarPayload?.address ?? "",
-    onboardeeRole: invite.role as DeclarationRole,
-  };
-
-  const pdfBytes = await generateDeclarationPdf(data);
+  const pdfBytes = await generateSelfDeclarationPdf(data);
 
   return new Response(Buffer.from(pdfBytes), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="declaration-${invite.role.toLowerCase()}-${invite.id.slice(-6)}.pdf"`,
+      "Content-Disposition": `attachment; filename="self-declaration-${invite.role.toLowerCase()}-${invite.id.slice(-6)}.pdf"`,
       "Cache-Control": "no-store",
     },
   });

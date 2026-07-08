@@ -7,6 +7,7 @@ import {
   Clock,
   Loader2,
   FileSignature,
+  FileText,
   Camera,
   MapPin,
   RefreshCw,
@@ -184,6 +185,16 @@ function ApprovalCard({ approval, onReview }: { approval: Approval; onReview?: (
           <FileSignature className="h-4 w-4" /> Review & Approve
         </Button>
       )}
+      {approval.status === "APPROVED" && (
+        <a
+          href={`/api/declarations/${approval.id}/document`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-ink-200 bg-white px-4 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50 transition-colors"
+        >
+          <FileText className="h-4 w-4" /> View Signed Declaration
+        </a>
+      )}
     </div>
   );
 }
@@ -357,6 +368,8 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
           selfieUrl,
           latitude: gps.lat,
           longitude: gps.lng,
+          signatureDataUrl,
+          selfieDataUrl,
         }),
       });
       const data = await res.json();
@@ -471,7 +484,7 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
         </div>
       </div>
 
-      {/* Declaration Warning */}
+      {/* Declaration Warning + document view */}
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
         <div className="flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
@@ -483,6 +496,14 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
               This includes liability for chargebacks, fraud, disputes, and any financial
               losses as outlined in the declaration form.
             </p>
+            <a
+              href={`/api/declarations/${approval.id}/document`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+            >
+              <FileText className="h-4 w-4" /> View / Download the responsibility declaration
+            </a>
           </div>
         </div>
       </div>

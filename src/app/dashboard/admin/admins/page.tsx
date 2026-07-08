@@ -51,7 +51,7 @@ export default function ManageAdminsPage() {
   const [showNew, setShowNew] = useState(false);
   const [showNewMaster, setShowNewMaster] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<AdminRecord | null>(null);
-  const [created, setCreated] = useState<{ admin: AdminRecord | MasterAdminRecord; password: string } | null>(null);
+  const [created, setCreated] = useState<{ admin: AdminRecord | MasterAdminRecord; password: string; isMaster: boolean } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -273,7 +273,7 @@ export default function ManageAdminsPage() {
               onCancel={() => setShowNew(false)}
               onCreated={(admin, password) => {
                 setShowNew(false);
-                setCreated({ admin, password });
+                setCreated({ admin, password, isMaster: false });
                 refresh();
               }}
             />
@@ -310,7 +310,7 @@ export default function ManageAdminsPage() {
               onCancel={() => setShowNewMaster(false)}
               onCreated={(admin, password) => {
                 setShowNewMaster(false);
-                setCreated({ admin, password });
+                setCreated({ admin, password, isMaster: true });
                 refresh();
               }}
             />
@@ -330,6 +330,7 @@ export default function ManageAdminsPage() {
         <CredentialsDialog
           admin={created.admin}
           password={created.password}
+          isMaster={created.isMaster}
           onClose={() => setCreated(null)}
         />
       )}
@@ -731,14 +732,19 @@ function EditTabsDialog({
 function CredentialsDialog({
   admin,
   password,
+  isMaster,
   onClose
 }: {
   admin: AdminRecord | MasterAdminRecord;
   password: string;
+  isMaster: boolean;
   onClose: () => void;
 }) {
   const [showPwd, setShowPwd] = useState(true);
   const [copied, setCopied] = useState<"none" | "email" | "pwd" | "both">("none");
+
+  const roleLabel = isMaster ? "master admin" : "admin";
+  const loginPath = isMaster ? "/master-admin" : "/admin";
 
   const copy = async (text: string, which: "email" | "pwd" | "both") => {
     try {
@@ -748,7 +754,7 @@ function CredentialsDialog({
     } catch { /* ignore */ }
   };
 
-  const both = `Login URL: ${typeof window !== "undefined" ? window.location.origin : ""}/admin\nEmail: ${admin.email}\nPassword: ${password}`;
+  const both = `Login URL: ${typeof window !== "undefined" ? window.location.origin : ""}${loginPath}\nEmail: ${admin.email}\nPassword: ${password}`;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4">
@@ -756,13 +762,13 @@ function CredentialsDialog({
         <div className="flex items-start justify-between gap-4 bg-gradient-to-br from-emerald-50 to-white px-6 py-5">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
-              Admin created
+              {isMaster ? "Master admin created" : "Admin created"}
             </p>
             <h3 className="mt-1 font-display text-lg font-bold text-ink-900">
               {admin.name}
             </h3>
             <p className="mt-1 text-xs text-ink-600">
-              Share these credentials securely with the new admin.
+              Share these credentials securely with the new {roleLabel}.
             </p>
           </div>
           <button
@@ -775,7 +781,7 @@ function CredentialsDialog({
         </div>
 
         <div className="space-y-3 px-6 py-5">
-          <Field label="Login URL" value="/admin" />
+          <Field label="Login URL" value={loginPath} />
           <Field
             label="Email"
             value={admin.email}
@@ -826,7 +832,7 @@ function CredentialsDialog({
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
             For security, this password will{" "}
             <strong>not be shown again</strong>. Copy it now and send it to the
-            admin via a secure channel.
+            {" "}{roleLabel} via a secure channel.
           </div>
         </div>
 

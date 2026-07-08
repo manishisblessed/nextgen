@@ -3,13 +3,31 @@ import { z } from "zod";
 import { requireAuth } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
+import { buildDeclarationData } from "@/lib/declaration/data";
+import { generateSuccessorDeclarationPdf } from "@/lib/declaration/generatePdf";
+import { uploadPdfToCloudinary } from "@/lib/cloudinary";
+import type { ApprovalEvidence } from "@/lib/declaration/types";
 
 const Body = z.object({
   signatureUrl: z.string().url(),
   selfieUrl: z.string().url(),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
+  // Raw image data URLs — embedded into the final signed PDF audit record.
+  signatureDataUrl: z.string().startsWith("data:").optional(),
+  selfieDataUrl: z.string().startsWith("data:").optional(),
 });
+
+function dataUrlToBuffer(dataUrl?: string): Buffer | undefined {
+  if (!dataUrl) return undefined;
+  const comma = dataUrl.indexOf(",");
+  if (comma === -1) return undefined;
+  try {
+    return Buffer.from(dataUrl.slice(comma + 1), "base64");
+  } catch {
+    return undefined;
+  }
+}
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -62,6 +80,39 @@ export async function POST(
       approvalLongitude: parsed.data.longitude,
     },
   });
+
+  // Generate + store the final, signed responsibility declaration as the audit
+  // record. Never let a PDF/upload hiccup roll back a completed approval.
+  try {
+    const data = await buildDeclarationData(approval.inviteId);
+    if (data) {
+      const approvedAtLabel = new Intl.DateTimeFormat("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Asia/Kolkata",
+      }).format(now);
+      const evidence: ApprovalEvidence = {
+        approverName: user.name,
+        signaturePng: dataUrlToBuffer(parsed.data.signatureDataUrl),
+        selfieJpg: dataUrlToBuffer(parsed.data.selfieDataUrl),
+        latitude: parsed.data.latitude,
+        longitude: parsed.data.longitude,
+        approvedAt: approvedAtLabel,
+        ip: ip ?? undefined,
+      };
+      const pdf = await generateSuccessorDeclarationPdf(data, evidence);
+      const uploaded = await uploadPdfToCloudinary(Buffer.from(pdf), {
+        userId: user.id,
+        type: "successor_declaration",
+      });
+      await prisma.declarationApproval.update({
+        where: { id },
+        data: { declarationDocUrl: uploaded.public_id },
+      });
+    }
+  } catch {
+    /* audit PDF is best-effort; approval already persisted */
+  }
 
   await prisma.auditLog.create({
     data: {

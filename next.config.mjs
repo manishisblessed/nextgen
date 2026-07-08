@@ -25,6 +25,9 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   eslint: { ignoreDuringBuilds: true },
+  // pdfkit loads its built-in AFM font-data files from disk at runtime; bundling
+  // it with webpack breaks those file reads, so keep it external on the server.
+  experimental: { serverComponentsExternalPackages: ["pdfkit"] },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },

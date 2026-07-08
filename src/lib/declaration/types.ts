@@ -1,14 +1,25 @@
-export type DeclarationRole = "SUPER_DISTRIBUTOR" | "MASTER_DISTRIBUTOR" | "DISTRIBUTOR" | "RETAILER";
+export type DeclarationRole =
+  | "SUPER_DISTRIBUTOR"
+  | "MASTER_DISTRIBUTOR"
+  | "DISTRIBUTOR"
+  | "RETAILER"
+  | "ADMIN"
+  | "SUPPORT"
+  | "MASTER_ADMIN";
 
 export const ROLE_LABELS: Record<DeclarationRole, { en: string; hi: string }> = {
   SUPER_DISTRIBUTOR: { en: "Super Distributor", hi: "Super Distributor" },
   MASTER_DISTRIBUTOR: { en: "Master Distributor", hi: "Master Distributor" },
   DISTRIBUTOR: { en: "Distributor", hi: "Distributor" },
   RETAILER: { en: "Retailer", hi: "Retailer" },
+  ADMIN: { en: "Company", hi: "Company" },
+  SUPPORT: { en: "Company", hi: "Company" },
+  MASTER_ADMIN: { en: "Company", hi: "Company" },
 };
 
 export type DeclarationData = {
   date: string;
+
   creatorName: string;
   creatorId: string;
   creatorCompany: string;
@@ -23,8 +34,22 @@ export type DeclarationData = {
   onboardeeId: string;
   onboardeeBusiness: string;
   onboardeeMobile: string;
+  onboardeeEmail: string;
   onboardeeAddress: string;
+  onboardeePan: string;
+  onboardeeAadhaar: string;
   onboardeeRole: DeclarationRole;
+};
+
+// Evidence baked into the final, approved successor declaration PDF.
+export type ApprovalEvidence = {
+  approverName: string;
+  signaturePng?: Uint8Array;
+  selfieJpg?: Uint8Array;
+  latitude?: number;
+  longitude?: number;
+  approvedAt?: string;
+  ip?: string;
 };
 
 export function needsSuccessorApproval(onboardeeRole: string, creatorRole: string): boolean {

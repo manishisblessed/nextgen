@@ -41,6 +41,38 @@ export async function uploadToCloudinary(
   });
 }
 
+/**
+ * Upload a server-generated PDF (e.g. a signed declaration) into a private,
+ * per-user folder. Stored as a private `image` asset so the original can be
+ * retrieved later with a short-lived signed URL (see `signedPdfUrl`).
+ */
+export async function uploadPdfToCloudinary(
+  buffer: Buffer,
+  opts: { userId: string; type: string }
+): Promise<UploadApiResponse> {
+  const folder = `nextgenpay/private/${opts.userId}/${opts.type.toLowerCase()}`;
+  const payload = `data:application/pdf;base64,${buffer.toString("base64")}`;
+  return cloudinary.uploader.upload(payload, {
+    folder,
+    resource_type: "image",
+    type: "private",
+    overwrite: false,
+    use_filename: false,
+    unique_filename: true,
+    invalidate: true,
+  });
+}
+
+/** Short-lived signed download URL for a private PDF stored via `uploadPdfToCloudinary`. */
+export function signedPdfUrl(publicId: string, opts?: { expiresInSec?: number }) {
+  const expires = Math.floor(Date.now() / 1000) + (opts?.expiresInSec ?? 60 * 5);
+  return cloudinary.utils.private_download_url(publicId, "pdf", {
+    resource_type: "image",
+    type: "private",
+    expires_at: expires,
+  });
+}
+
 /** Generate a short-lived signed URL for a private (sensitive) asset. */
 export function signedDeliveryUrl(publicId: string, opts?: { expiresInSec?: number; format?: string }) {
   const expires = Math.floor(Date.now() / 1000) + (opts?.expiresInSec ?? 60 * 5); // 5 min default
