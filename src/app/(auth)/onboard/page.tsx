@@ -303,7 +303,8 @@ function OnboardContent() {
       });
       setForm((f) => ({
         ...f,
-        name: f.name || aadhaarV.verifiedName || payload?.name || "",
+        // Full Name always comes from the verified Aadhaar record (overrides invite name).
+        name: aadhaarV.verifiedName || payload?.name || f.name || "",
         // Shop/Firm name must come from GST (or manual entry), never the Aadhaar name.
         shopName: f.shopName,
         shopAddress: f.shopAddress || payload?.address || "",
@@ -546,7 +547,8 @@ function OnboardContent() {
         }
         setForm((f) => ({
           ...f,
-          name: f.name || data.data.name || "",
+          // Full Name always comes from the verified Aadhaar record (overrides invite name).
+          name: data.data.name || f.name || "",
           // Shop/Firm name must come from GST (or manual entry), never the Aadhaar name.
           shopName: f.shopName,
           shopAddress: f.shopAddress || data.data.address || "",
@@ -939,7 +941,8 @@ function OnboardContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: form.name,
+          // Prefer the Aadhaar-verified name as the account's full name.
+          name: form.aadhaarName || form.name,
           password: form.password,
           shopName: form.shopName,
           shopAddress: form.shopAddress,
@@ -1102,6 +1105,18 @@ function OnboardContent() {
   }
 
   const StepIcon = STEPS[step].icon;
+
+  // Shop/Firm name supplied by a verified GST record (trade name preferred).
+  // Only when GST actually provided a name is the field locked; otherwise the
+  // user must enter it manually.
+  const gstShopName = gstResult
+    ? gstResult.trade_name ??
+      gstResult.trade_name_of_business ??
+      gstResult.legal_name ??
+      gstResult.legal_name_of_business ??
+      ""
+    : "";
+  const shopNameLocked = !!gstShopName;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-brand-50 px-3 py-6 sm:px-4 sm:py-8">
@@ -2098,13 +2113,16 @@ function OnboardContent() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label>Full Name (as per documents) *</Label>
+                  <Label>Full Name (as per Aadhaar) *</Label>
                   <Input
-                    value={form.name}
+                    value={form.aadhaarName || form.name}
                     readOnly
                     disabled
                     className="bg-ink-50"
                   />
+                  {aadhaarVerified && (
+                    <p className="mt-1 text-xs text-ink-500">Fetched from Aadhaar verification</p>
+                  )}
                 </div>
                 <div>
                   <Label>Shop / Firm Name *</Label>
@@ -2112,13 +2130,17 @@ function OnboardContent() {
                     required
                     value={form.shopName}
                     onChange={(e) => updateForm("shopName", e.target.value)}
-                    placeholder="Business name"
-                    readOnly={!!gstResult}
-                    disabled={!!gstResult}
-                    className={gstResult ? "bg-ink-50" : ""}
+                    placeholder="Enter your business name"
+                    readOnly={shopNameLocked}
+                    disabled={shopNameLocked}
+                    className={shopNameLocked ? "bg-ink-50" : ""}
                   />
-                  {gstResult && (
+                  {shopNameLocked ? (
                     <p className="mt-1 text-xs text-ink-500">Auto-filled from GST registration</p>
+                  ) : (
+                    <p className="mt-1 text-xs text-ink-500">
+                      GST not verified — please enter your shop/firm name manually
+                    </p>
                   )}
                 </div>
                 <div className="sm:col-span-2">
