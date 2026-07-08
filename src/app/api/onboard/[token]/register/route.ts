@@ -316,37 +316,142 @@ export async function POST(
 
   // ── Confirmation email to the registrant ──
   try {
+    const roleLabel = invite.role
+      .toLowerCase()
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+    const firstName = data.name.trim().split(/\s+/)[0] || data.name || "there";
+    const year = new Date().getFullYear();
+    const statusAccent = allVerified ? "#059669" : "#d97706";
+    const statusBg = allVerified ? "#ecfdf5" : "#fffbeb";
+    const statusBorder = allVerified ? "#a7f3d0" : "#fde68a";
+    const statusTitle = allVerified ? "Account under review" : "Awaiting admin approval";
+    const statusMessage = allVerified
+      ? "All your KYC checks have passed. Your account will be activated within 48\u201372 working hours, and you'll receive a confirmation email as soon as it goes live."
+      : "Some of your details need a manual review by our team. You'll receive another email as soon as your account is approved.";
+
+    const nextSteps = [
+      { n: "1", t: "KYC & documents review", d: "Our compliance team is reviewing your submission." },
+      { n: "2", t: "Approval within 48\u201372 hrs", d: "You'll be notified by email and SMS the moment it's approved." },
+      { n: "3", t: "Start transacting", d: "Log in to your dashboard and go live with NextGenPay services." },
+    ];
+    const nextStepsHtml = nextSteps
+      .map(
+        (r) => `
+                  <tr>
+                    <td width="44" valign="top" style="padding:8px 14px 8px 0;">
+                      <div style="width:32px;height:32px;line-height:32px;text-align:center;border-radius:999px;background:#eef2ff;color:#4f46e5;font-weight:700;font-size:13px;">${r.n}</div>
+                    </td>
+                    <td valign="top" style="padding:8px 0;">
+                      <p style="margin:0;font-size:14px;font-weight:600;color:#0f172a;">${r.t}</p>
+                      <p style="margin:2px 0 0;font-size:13px;line-height:1.5;color:#64748b;">${r.d}</p>
+                    </td>
+                  </tr>`
+      )
+      .join("");
+
     const emailProvider = getPartner("email");
     await emailProvider.send({
       to: invite.email,
-      subject: "NextGenPay — Onboarding Complete!",
-      html: `
-        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px;">
-          <div style="text-align:center;margin-bottom:24px;">
-            <h1 style="color:#1e293b;font-size:24px;margin:0;">Welcome to NextGenPay!</h1>
-          </div>
-          <p>Dear <strong>${data.name}</strong>,</p>
-          <p>Your onboarding as a <strong>${invite.role.replace(/_/g, " ")}</strong> has been completed successfully.${
-        !allVerified
-          ? " Your account is pending admin approval. You will be notified once approved."
-          : " Your account is now under review and will be activated shortly."
-      }</p>
-          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin:20px 0;">
-            <h3 style="margin:0 0 12px 0;color:#334155;font-size:16px;">Your Login Credentials</h3>
-            <table style="width:100%;border-collapse:collapse;">
-              <tr><td style="padding:6px 0;color:#64748b;width:120px;">Email</td><td style="padding:6px 0;font-weight:600;">${invite.email}</td></tr>
-              <tr><td style="padding:6px 0;color:#64748b;">Phone</td><td style="padding:6px 0;font-weight:600;">${invite.phone}</td></tr>
-              <tr><td style="padding:6px 0;color:#64748b;">Password</td><td style="padding:6px 0;font-style:italic;color:#475569;">Use the password you set during registration</td></tr>
-            </table>
-          </div>
-          <div style="text-align:center;margin:24px 0;">
-            <a href="${loginUrl}" style="display:inline-block;padding:14px 32px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Login to NextGenPay</a>
-          </div>
-          <p style="color:#64748b;font-size:13px;">If you did not initiate this registration, please contact us immediately at support@nxtgpay.com.</p>
-          <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;" />
-          <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NextGenPay Pvt. Ltd.</p>
-        </div>
-      `,
+      subject: `Welcome to NextGenPay, ${firstName} \u2014 you're onboarded!`,
+      html: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Welcome to NextGenPay</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#0f172a;">
+    <div style="display:none;font-size:1px;color:#f1f5f9;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">
+      You're onboarded! Sign in to your NextGenPay ${roleLabel} account.
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f5f9;padding:32px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.06);">
+            <tr>
+              <td style="background:#4f46e5;background-image:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);padding:36px 32px;text-align:center;">
+                <div style="display:inline-block;padding:6px 14px;background:rgba(255,255,255,0.18);border-radius:999px;font-size:11px;font-weight:700;letter-spacing:1.4px;color:#ffffff;text-transform:uppercase;">
+                  NextGenPay
+                </div>
+                <h1 style="margin:18px 0 6px;font-size:26px;line-height:1.25;color:#ffffff;font-weight:700;">You're all set, ${firstName}!</h1>
+                <p style="margin:0;font-size:14px;color:#e0e7ff;">Your ${roleLabel} onboarding is complete.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px 32px 8px;">
+                <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#334155;">
+                  Dear <strong style="color:#0f172a;">${data.name}</strong>,
+                </p>
+                <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#334155;">
+                  Thank you for choosing <strong>NextGenPay</strong>. We've successfully received your KYC, documents and business details for your <strong>${roleLabel}</strong> account.
+                </p>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;background:${statusBg};border:1px solid ${statusBorder};border-left:4px solid ${statusAccent};border-radius:12px;">
+                  <tr>
+                    <td style="padding:16px 18px;">
+                      <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:${statusAccent};text-transform:uppercase;letter-spacing:0.6px;">${statusTitle}</p>
+                      <p style="margin:0;font-size:14px;line-height:1.55;color:#334155;">${statusMessage}</p>
+                    </td>
+                  </tr>
+                </table>
+                <h3 style="margin:0 0 12px;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;">Your login credentials</h3>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;">
+                  <tr>
+                    <td style="padding:6px 18px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                        <tr>
+                          <td style="padding:12px 0;color:#64748b;font-size:13px;width:110px;">Email</td>
+                          <td style="padding:12px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right;">${invite.email}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:12px 0;color:#64748b;font-size:13px;border-top:1px solid #e2e8f0;">Phone</td>
+                          <td style="padding:12px 0;color:#0f172a;font-size:14px;font-weight:600;text-align:right;border-top:1px solid #e2e8f0;">${invite.phone}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding:12px 0;color:#64748b;font-size:13px;border-top:1px solid #e2e8f0;">Password</td>
+                          <td style="padding:12px 0;color:#475569;font-size:13px;font-style:italic;text-align:right;border-top:1px solid #e2e8f0;">The one you set during registration</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
+                  <tr>
+                    <td align="center">
+                      <a href="${loginUrl}" style="display:inline-block;padding:14px 34px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;background:#4f46e5;box-shadow:0 4px 12px rgba(79,70,229,0.35);">
+                        Login to your dashboard &rarr;
+                      </a>
+                      <p style="margin:14px 0 0;font-size:12px;color:#94a3b8;line-height:1.5;">Trouble with the button? Paste this into your browser:<br /><a href="${loginUrl}" style="color:#4f46e5;text-decoration:none;">${loginUrl}</a></p>
+                    </td>
+                  </tr>
+                </table>
+                <h3 style="margin:0 0 12px;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.8px;">What happens next</h3>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">${nextStepsHtml}
+                </table>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px;background:#f8fafc;border-radius:10px;">
+                  <tr>
+                    <td style="padding:16px 18px;font-size:13px;line-height:1.6;color:#475569;">
+                      <strong style="color:#0f172a;">Need help?</strong> Our team is a message away at <a href="mailto:support@nxtgpay.com" style="color:#4f46e5;font-weight:600;text-decoration:none;">support@nxtgpay.com</a>. If you did not initiate this registration, please reach out to us immediately.
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 32px 28px;background:#0f172a;color:#94a3b8;font-size:12px;line-height:1.6;text-align:center;">
+                <p style="margin:0 0 4px;color:#f1f5f9;font-weight:700;letter-spacing:0.4px;">NextGenPay</p>
+                <p style="margin:0 0 10px;color:#cbd5e1;">JMP NextGen Tech Private Limited</p>
+                <p style="margin:0;color:#64748b;">&copy; ${year} NextGenPay. All rights reserved.<br />This is an automated message &mdash; please do not reply.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
     });
   } catch {
     // Email failure shouldn't block registration

@@ -10,12 +10,48 @@ import {
   AlertTriangle,
   Loader2,
   X,
+  User,
+  Building2,
+  CreditCard,
+  Fingerprint,
+  Phone,
+  Mail,
+  MapPin,
+  Camera,
+  FileText,
+  Video,
+  ExternalLink,
+  Calendar,
+  Shield,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+
+type OnboardDoc = {
+  id: string;
+  type: string;
+  originalType: string;
+  status: string;
+  url: string | null;
+  format: string | null;
+  publicId: string | null;
+  resourceType: string;
+  gpsLatitude: number | null;
+  gpsLongitude: number | null;
+  createdAt: string;
+};
+
+type VerificationEntry = {
+  id: string;
+  type: string;
+  status: string;
+  verifiedName: string | null;
+  responsePayload: any;
+  createdAt: string;
+};
 
 type KycDoc = {
   id: string;
@@ -29,8 +65,24 @@ type KycRow = {
   id: string;
   status: "NOT_STARTED" | "PENDING_REVIEW" | "APPROVED" | "REJECTED";
   panNumber: string | null;
+  panName: string | null;
+  panVerifiedAt: string | null;
   aadhaarLast4: string | null;
+  aadhaarNumber: string | null;
+  aadhaarName: string | null;
+  aadhaarDob: string | null;
+  aadhaarGender: string | null;
+  aadhaarAddress: string | null;
+  aadhaarMobile: string | null;
+  aadhaarVerifiedAt: string | null;
+  bankAccountName: string | null;
+  bankAccountNumber: string | null;
+  bankIfsc: string | null;
+  bankAccountStatus: string | null;
   gstin: string | null;
+  msmeNumber: string | null;
+  nameMismatch: boolean;
+  dob: string | null;
   rejectedReason: string | null;
   submittedAt: string | null;
   reviewedAt: string | null;
@@ -42,10 +94,14 @@ type KycRow = {
     role: string;
     status: string;
     shopName: string | null;
+    shopAddress: string | null;
     city: string | null;
     state: string | null;
+    pincode: string | null;
   };
   documents: KycDoc[];
+  verifications: VerificationEntry[];
+  onboardingDocs: OnboardDoc[];
 };
 
 type Stats = { pending: number; approved: number; rejected: number };
@@ -75,10 +131,37 @@ const DOC_TYPE_LABEL: Record<string, string> = {
   AADHAAR_BACK: "Aadhaar (Back)",
   SHOP_PHOTO: "Shop Photo",
   BANK_PROOF: "Bank Proof",
+  CANCEL_CHEQUE: "Cancelled Cheque / Passbook",
+  PASSBOOK: "Bank Passbook",
   GST_CERT: "GST Certificate",
-  SELFIE: "Selfie",
+  SELFIE: "Live Selfie",
+  LIVE_VIDEO: "Liveness Video",
+  VIDEO: "Liveness Video",
   AGREEMENT: "Agreement",
-  OTHER: "Other",
+  SHOP_ESTABLISHMENT: "Shop & Establishment Certificate",
+  GUMASTA_LICENSE: "Gumasta License",
+  SIGNATURE: "Signature",
+  ELECTRICITY_BILL: "Electricity Bill",
+  ADDITIONAL_ID: "Additional ID Proof",
+  FAMILY_REFERENCE: "Family Reference Document",
+  PG_FORM: "PG Form",
+  GPS_PHOTO_OUTSIDE: "GPS Photo — Outside",
+  GPS_PHOTO_INSIDE: "GPS Photo — Inside",
+  GPS_SELFIE_DISTRIBUTOR: "GPS Selfie with Distributor",
+  DISTRIBUTOR_DECLARATION: "Distributor Declaration",
+  SELF_DECLARATION: "Self Declaration Form",
+  SUCCESSOR_DECLARATION: "Successor Declaration",
+  OTHER: "Other Document",
+};
+
+const VERIFICATION_LABEL: Record<string, string> = {
+  AADHAAR_DIGILOCKER: "Aadhaar (DigiLocker)",
+  AADHAAR_DIGILOCKER_INIT: "Aadhaar Init",
+  PAN_360: "PAN Verification",
+  BANK_PENNY_DROP: "Bank (Penny Drop)",
+  BANK_ADVANCE: "Bank (Advance)",
+  GST: "GST Verification",
+  CIN: "CIN Verification",
 };
 
 export default function AdminKycPage() {
@@ -134,6 +217,7 @@ export default function AdminKycPage() {
         return;
       }
       await fetchQueue();
+      if (viewing?.id === id) setViewing(null);
     } finally {
       setDeciding(null);
     }
@@ -219,7 +303,7 @@ export default function AdminKycPage() {
             <button
               onClick={() => setViewing(r)}
               className="grid h-8 w-8 place-items-center rounded-lg text-brand-700 hover:bg-brand-50"
-              title="View documents"
+              title="View full details"
             >
               <Eye className="h-4 w-4" />
             </button>
@@ -313,39 +397,112 @@ export default function AdminKycPage() {
       />
 
       {viewing && (
-        <DocViewerDialog kyc={viewing} onClose={() => setViewing(null)} />
+        <DetailDrawer
+          kyc={viewing}
+          deciding={deciding}
+          onDecide={decide}
+          onClose={() => setViewing(null)}
+        />
       )}
     </div>
   );
 }
 
-function DocViewerDialog({
+/* ─── Full Detail Drawer ─────────────────────────────────────────────── */
+
+function DetailDrawer({
   kyc,
+  deciding,
+  onDecide,
   onClose,
 }: {
   kyc: KycRow;
+  deciding: string | null;
+  onDecide: (id: string, action: "approve" | "reject") => void;
   onClose: () => void;
 }) {
+  const [activeTab, setActiveTab] = useState<"details" | "docs" | "verifications">("details");
+  const busy = deciding === kyc.id;
+  const s = STATUS_MAP[kyc.status];
+
+  const allDocs = [
+    ...kyc.onboardingDocs.map((d) => ({
+      id: d.id,
+      type: d.type,
+      url: d.url,
+      format: d.format,
+      resourceType: d.resourceType,
+      hasGps: !!(d.gpsLatitude && d.gpsLongitude),
+      gpsLatitude: d.gpsLatitude,
+      gpsLongitude: d.gpsLongitude,
+      uploadedAt: d.createdAt,
+      source: "onboarding" as const,
+    })),
+    ...kyc.documents.map((d) => ({
+      id: d.id,
+      type: d.type,
+      url: d.url,
+      format: d.format,
+      resourceType: "image",
+      hasGps: false,
+      gpsLatitude: null as number | null,
+      gpsLongitude: null as number | null,
+      uploadedAt: d.uploadedAt,
+      source: "direct" as const,
+    })),
+  ];
+
+  const uniqueDocs = new Map<string, (typeof allDocs)[0]>();
+  for (const doc of allDocs) {
+    if (!uniqueDocs.has(doc.type) && doc.url) {
+      uniqueDocs.set(doc.type, doc);
+    }
+  }
+  const docList = Array.from(uniqueDocs.values());
+
+  const tabs = [
+    { key: "details" as const, label: "Personal & Business", icon: User },
+    { key: "docs" as const, label: `Documents (${docList.length})`, icon: FileText },
+    { key: "verifications" as const, label: `KYC Results (${kyc.verifications.length})`, icon: Shield },
+  ];
+
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4 py-8"
+      className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4 py-6"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-ink-100 bg-gradient-to-br from-brand-50/50 to-white px-6 py-4">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-700">
-              KYC Documents
-            </p>
-            <h3 className="mt-0.5 font-display text-lg font-bold text-ink-900">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 border-b border-ink-100 bg-gradient-to-br from-brand-50/60 to-white px-6 py-5">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-700">
+                KYC Review
+              </p>
+              <Badge variant={s?.variant ?? "default"}>
+                {s?.label ?? kyc.status}
+              </Badge>
+              {kyc.nameMismatch && (
+                <Badge variant="warning">Name Mismatch</Badge>
+              )}
+            </div>
+            <h3 className="mt-1 font-display text-xl font-bold text-ink-900 truncate">
               {kyc.user.name}
             </h3>
-            <p className="text-xs text-ink-500">
-              {kyc.user.email} · {ROLE_LABEL[kyc.user.role] ?? kyc.user.role}
-            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
+              <span className="flex items-center gap-1">
+                <Mail className="h-3 w-3" /> {kyc.user.email}
+              </span>
+              <span className="flex items-center gap-1">
+                <Phone className="h-3 w-3" /> {kyc.user.phone}
+              </span>
+              <Badge variant={kyc.user.role === "DISTRIBUTOR" ? "brand" : "default"}>
+                {ROLE_LABEL[kyc.user.role] ?? kyc.user.role}
+              </Badge>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -355,78 +512,368 @@ function DocViewerDialog({
           </button>
         </div>
 
-        <div className="flex-1 overflow-auto p-6">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <InfoField label="PAN" value={kyc.panNumber ?? "—"} />
-            <InfoField
-              label="Aadhaar"
-              value={
-                kyc.aadhaarLast4 ? `XXXX-XXXX-${kyc.aadhaarLast4}` : "—"
-              }
-            />
-            <InfoField label="GSTIN" value={kyc.gstin ?? "—"} />
-            <InfoField
-              label="Submitted"
-              value={
-                kyc.submittedAt
-                  ? new Date(kyc.submittedAt).toLocaleDateString("en-IN", {
-                      dateStyle: "long",
-                    })
-                  : "—"
-              }
-            />
-          </div>
-
-          <h4 className="mt-6 text-xs font-bold uppercase tracking-widest text-ink-500">
-            Uploaded documents ({kyc.documents.length})
-          </h4>
-          {kyc.documents.length === 0 ? (
-            <p className="mt-3 text-sm text-ink-500">
-              No documents uploaded yet.
-            </p>
-          ) : (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {kyc.documents.map((d) => (
-                <a
-                  key={d.id}
-                  href={d.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group rounded-xl border border-ink-200 bg-ink-50/40 p-3 transition hover:border-brand-300"
-                >
-                  <p className="text-xs font-bold text-ink-700">
-                    {DOC_TYPE_LABEL[d.type] ?? d.type}
-                  </p>
-                  <p className="mt-1 text-[11px] text-ink-500">
-                    {d.format?.toUpperCase()} ·{" "}
-                    {new Date(d.uploadedAt).toLocaleDateString("en-IN")}
-                  </p>
-                  <p className="mt-1 text-[11px] font-medium text-brand-700 group-hover:underline">
-                    View document →
-                  </p>
-                </a>
-              ))}
-            </div>
-          )}
+        {/* Tabs */}
+        <div className="flex gap-0 border-b border-ink-100 bg-ink-50/40 px-6">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const active = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-xs font-semibold transition-colors ${
+                  active
+                    ? "border-brand-600 text-brand-700"
+                    : "border-transparent text-ink-500 hover:text-ink-700"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {t.label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-ink-100 bg-ink-50/40 px-6 py-3">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
+        {/* Body */}
+        <div className="flex-1 overflow-auto p-6">
+          {activeTab === "details" && <DetailsTab kyc={kyc} />}
+          {activeTab === "docs" && <DocsTab docs={docList} />}
+          {activeTab === "verifications" && <VerificationsTab verifications={kyc.verifications} />}
+        </div>
+
+        {/* Footer with actions */}
+        <div className="flex items-center justify-between gap-3 border-t border-ink-100 bg-ink-50/40 px-6 py-3">
+          <div className="text-xs text-ink-500">
+            {kyc.submittedAt && (
+              <>Submitted {new Date(kyc.submittedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onClose}>Close</Button>
+            {kyc.status === "PENDING_REVIEW" && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => onDecide(kyc.id, "reject")}
+                  disabled={busy}
+                  className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                  Reject
+                </Button>
+                <Button
+                  onClick={() => onDecide(kyc.id, "approve")}
+                  disabled={busy}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Approve
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function InfoField({ label, value }: { label: string; value: string }) {
+/* ─── Details Tab ────────────────────────────────────────────────────── */
+
+function DetailsTab({ kyc }: { kyc: KycRow }) {
   return (
-    <div className="rounded-xl border border-ink-100 bg-white px-4 py-2.5">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-ink-500">
+    <div className="space-y-6">
+      {/* Personal Info */}
+      <Section title="Personal Information" icon={User}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoField label="Full Name" value={kyc.user.name} />
+          <InfoField label="Email" value={kyc.user.email} />
+          <InfoField label="Phone" value={kyc.user.phone} />
+          <InfoField label="Date of Birth" value={kyc.aadhaarDob ?? (kyc.dob ? new Date(kyc.dob).toLocaleDateString("en-IN") : "—")} />
+          <InfoField label="Gender" value={kyc.aadhaarGender ?? "—"} />
+          <InfoField label="Role" value={ROLE_LABEL[kyc.user.role] ?? kyc.user.role} />
+        </div>
+      </Section>
+
+      {/* Business Info */}
+      <Section title="Business Details" icon={Building2}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <InfoField label="Shop / Firm Name" value={kyc.user.shopName ?? "—"} />
+          <InfoField label="GSTIN" value={kyc.gstin ?? "—"} />
+          <InfoField label="MSME / Udyam No." value={kyc.msmeNumber ?? "—"} />
+          <InfoField label="Shop Address" value={kyc.user.shopAddress ?? "—"} />
+          <InfoField label="City" value={kyc.user.city ?? "—"} />
+          <InfoField label="State" value={kyc.user.state ?? "—"} />
+          <InfoField label="Pincode" value={kyc.user.pincode ?? "—"} />
+        </div>
+      </Section>
+
+      {/* Aadhaar */}
+      <Section title="Aadhaar Details" icon={Fingerprint} verified={!!kyc.aadhaarVerifiedAt}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoField label="Name (as per Aadhaar)" value={kyc.aadhaarName ?? "—"} />
+          <InfoField label="Aadhaar No." value={kyc.aadhaarNumber ? `XXXX-XXXX-${kyc.aadhaarLast4}` : "—"} />
+          <InfoField label="DOB" value={kyc.aadhaarDob ?? "—"} />
+          <InfoField label="Gender" value={kyc.aadhaarGender ?? "—"} />
+          <InfoField label="Mobile (Aadhaar)" value={kyc.aadhaarMobile ?? "—"} />
+          <div className="sm:col-span-2 lg:col-span-3">
+            <InfoField label="Address (Aadhaar)" value={kyc.aadhaarAddress ?? "—"} />
+          </div>
+        </div>
+      </Section>
+
+      {/* PAN */}
+      <Section title="PAN Details" icon={CreditCard} verified={!!kyc.panVerifiedAt}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <InfoField label="PAN Number" value={kyc.panNumber ?? "—"} />
+          <InfoField label="Name (as per PAN)" value={kyc.panName ?? "—"} />
+        </div>
+      </Section>
+
+      {/* Bank */}
+      <Section title="Bank Account" icon={Building2} verified={!!kyc.bankAccountNumber}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoField label="Account Holder" value={kyc.bankAccountName ?? "—"} />
+          <InfoField label="Account Number" value={kyc.bankAccountNumber ?? "—"} />
+          <InfoField label="IFSC Code" value={kyc.bankIfsc ?? "—"} />
+          <InfoField label="Account Status" value={kyc.bankAccountStatus?.toUpperCase() ?? "—"} highlight={kyc.bankAccountStatus === "active" ? "success" : undefined} />
+        </div>
+      </Section>
+
+      {/* Name Mismatch Warning */}
+      {kyc.nameMismatch && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Name Mismatch Detected</p>
+            <p className="mt-1 text-xs text-amber-700">
+              The names across Aadhaar, PAN, and/or Bank records do not match exactly. Please compare them carefully before approving.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Documents Tab ──────────────────────────────────────────────────── */
+
+function DocsTab({ docs }: { docs: Array<{ id: string; type: string; url: string | null; format: string | null; resourceType: string; hasGps: boolean; gpsLatitude: number | null; gpsLongitude: number | null; uploadedAt: string; source: "onboarding" | "direct" }> }) {
+  if (docs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-ink-400">
+        <FileText className="h-10 w-10 mb-3" />
+        <p className="text-sm font-medium">No documents uploaded</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {docs.map((doc) => {
+        const isImage = doc.resourceType === "image" || ["jpg", "jpeg", "png", "webp", "gif"].includes(doc.format ?? "");
+        const isVideo = doc.resourceType === "video" || ["mp4", "webm", "mov"].includes(doc.format ?? "");
+        const isPdf = doc.format === "pdf";
+
+        return (
+          <div
+            key={doc.id}
+            className="group rounded-xl border border-ink-200 bg-white overflow-hidden transition hover:border-brand-300 hover:shadow-sm"
+          >
+            {/* Preview */}
+            {doc.url && isImage && (
+              <div className="relative h-40 w-full bg-ink-50 overflow-hidden">
+                <img
+                  src={doc.url}
+                  alt={DOC_TYPE_LABEL[doc.type] ?? doc.type}
+                  className="h-full w-full object-contain"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            {doc.url && isVideo && (
+              <div className="relative h-40 w-full bg-ink-900 flex items-center justify-center">
+                <Video className="h-10 w-10 text-white/60" />
+              </div>
+            )}
+            {doc.url && isPdf && (
+              <div className="relative h-24 w-full bg-rose-50 flex items-center justify-center">
+                <FileText className="h-8 w-8 text-rose-400" />
+                <span className="ml-2 text-xs font-bold text-rose-500 uppercase">PDF</span>
+              </div>
+            )}
+            {doc.url && !isImage && !isVideo && !isPdf && (
+              <div className="relative h-24 w-full bg-ink-50 flex items-center justify-center">
+                <FileText className="h-8 w-8 text-ink-300" />
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-ink-800 truncate">
+                  {DOC_TYPE_LABEL[doc.type] ?? doc.type.replace(/_/g, " ")}
+                </p>
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
+                {doc.format && (
+                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-medium uppercase">
+                    {doc.format}
+                  </span>
+                )}
+                <span>{new Date(doc.uploadedAt).toLocaleDateString("en-IN")}</span>
+                {doc.hasGps && (
+                  <span className="flex items-center gap-0.5 text-amber-600 font-medium">
+                    <MapPin className="h-3 w-3" /> GPS
+                  </span>
+                )}
+              </div>
+              {doc.url && (
+                <a
+                  href={doc.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  Open in new tab <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ─── Verifications Tab ──────────────────────────────────────────────── */
+
+function VerificationsTab({ verifications }: { verifications: VerificationEntry[] }) {
+  if (verifications.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-ink-400">
+        <Shield className="h-10 w-10 mb-3" />
+        <p className="text-sm font-medium">No verification results found</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {verifications.map((v) => {
+        const isSuccess = v.status === "Success";
+        const payload = v.responsePayload ?? {};
+        return (
+          <div
+            key={v.id}
+            className={`rounded-xl border p-4 ${
+              isSuccess
+                ? "border-emerald-200 bg-emerald-50/50"
+                : "border-rose-200 bg-rose-50/50"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {isSuccess ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-rose-600" />
+                )}
+                <span className="text-sm font-semibold text-ink-900">
+                  {VERIFICATION_LABEL[v.type] ?? v.type.replace(/_/g, " ")}
+                </span>
+              </div>
+              <Badge variant={isSuccess ? "success" : "danger"}>
+                {v.status}
+              </Badge>
+            </div>
+            {v.verifiedName && (
+              <p className="mt-2 text-xs text-ink-600">
+                <span className="font-medium">Verified Name:</span> {v.verifiedName}
+              </p>
+            )}
+            {/* Show key details from response payload for common types */}
+            {v.type === "GST" && payload && (
+              <div className="mt-2 grid gap-1 text-xs text-ink-600 sm:grid-cols-2">
+                {payload.trade_name && <p><span className="font-medium">Trade Name:</span> {payload.trade_name}</p>}
+                {payload.legal_name && <p><span className="font-medium">Legal Name:</span> {payload.legal_name}</p>}
+                {payload.gst_status && <p><span className="font-medium">Status:</span> {payload.gst_status}</p>}
+                {payload.taxpayer_type && <p><span className="font-medium">Type:</span> {payload.taxpayer_type}</p>}
+              </div>
+            )}
+            {(v.type === "BANK_PENNY_DROP" || v.type === "BANK_ADVANCE") && payload && (
+              <div className="mt-2 grid gap-1 text-xs text-ink-600 sm:grid-cols-2">
+                {payload.nameAtBank && <p><span className="font-medium">Name at Bank:</span> {payload.nameAtBank}</p>}
+                {payload.accountStatus && <p><span className="font-medium">Account Status:</span> {payload.accountStatus}</p>}
+                {payload.utr && <p><span className="font-medium">UTR:</span> {payload.utr}</p>}
+              </div>
+            )}
+            <p className="mt-2 text-[11px] text-ink-400">
+              {new Date(v.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ─── Helper Components ──────────────────────────────────────────────── */
+
+function Section({
+  title,
+  icon: Icon,
+  verified,
+  children,
+}: {
+  title: string;
+  icon: typeof User;
+  verified?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <Icon className="h-4 w-4 text-brand-600" />
+        <h4 className="text-xs font-bold uppercase tracking-widest text-ink-500">
+          {title}
+        </h4>
+        {verified && (
+          <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+            <CheckCircle2 className="h-3 w-3" /> Verified
+          </span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function InfoField({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: "success" | "danger";
+}) {
+  const highlightClass =
+    highlight === "success"
+      ? "text-emerald-700 font-bold"
+      : highlight === "danger"
+      ? "text-rose-700 font-bold"
+      : "text-ink-900";
+
+  return (
+    <div className="rounded-xl border border-ink-100 bg-ink-50/50 px-4 py-2.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-ink-400">
         {label}
       </p>
-      <p className="mt-0.5 text-sm font-semibold text-ink-900">{value}</p>
+      <p className={`mt-0.5 text-sm font-semibold ${highlightClass} break-words`}>
+        {value}
+      </p>
     </div>
   );
 }
