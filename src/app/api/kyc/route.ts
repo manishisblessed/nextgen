@@ -113,6 +113,34 @@ export async function POST(req: Request) {
     );
   }
 
+  // ── Fraud gate: reject if PAN or GST is already used by another user ──
+  const panUp = parsed.data.panNumber.toUpperCase();
+  const gstUp = parsed.data.gstin?.toUpperCase() || null;
+
+  const dupPan = await prisma.kyc.findFirst({
+    where: { panNumber: panUp, userId: { not: user.id } },
+    select: { userId: true },
+  });
+  if (dupPan) {
+    return NextResponse.json(
+      { error: "Another account is already registered with this PAN number" },
+      { status: 409 }
+    );
+  }
+
+  if (gstUp) {
+    const dupGst = await prisma.kyc.findFirst({
+      where: { gstin: gstUp, userId: { not: user.id } },
+      select: { userId: true },
+    });
+    if (dupGst) {
+      return NextResponse.json(
+        { error: "Another account is already registered with this GST number" },
+        { status: 409 }
+      );
+    }
+  }
+
   const kyc = await prisma.kyc.upsert({
     where: { userId: user.id },
     update: {

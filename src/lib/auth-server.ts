@@ -202,6 +202,7 @@ export const authOptions: NextAuthOptions = {
           const fresh = await prisma.user.findUnique({
             where: { id: token.id as string },
             select: {
+              name: true,
               tokenVersion: true,
               twoFactorEnabled: true,
               walletBalance: true,
@@ -217,6 +218,7 @@ export const authOptions: NextAuthOptions = {
           ) {
             return {} as typeof token;
           }
+          token.name = fresh.name;
           token.tokenVersion = fresh.tokenVersion;
           token.twoFactorEnabled = fresh.twoFactorEnabled;
           token.walletBalance = Number(fresh.walletBalance);

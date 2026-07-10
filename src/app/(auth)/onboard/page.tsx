@@ -356,6 +356,7 @@ function OnboardContent() {
     const gstV = vList.find(
       (v: Verification) => v.type === "GST" && v.status === "Success"
     );
+    let restoredShop = "";
     if (gstV) {
       const gp = (gstV.responsePayload ?? {}) as any;
       const tradeName =
@@ -366,9 +367,18 @@ function OnboardContent() {
         gstV.verifiedName ??
         "";
       setGstResult(gp);
-      if (tradeName) {
-        setForm((f) => ({ ...f, shopName: tradeName }));
-      }
+      restoredShop = tradeName;
+    }
+
+    // Manual business name when GST was skipped or returned no trade name.
+    if (!restoredShop) {
+      const bizV = vList.find(
+        (v: Verification) => v.type === "BUSINESS_NAME" && v.status === "Success"
+      );
+      if (bizV?.verifiedName) restoredShop = bizV.verifiedName;
+    }
+    if (restoredShop) {
+      setForm((f) => ({ ...f, shopName: restoredShop }));
     }
 
     // Restore uploaded documents / selfie / video / declaration so a page
@@ -834,6 +844,19 @@ function OnboardContent() {
 
   function editGst() {
     setGstResult(null);
+    // Keep a manually entered business name; clear only GST-sourced names.
+    setForm((f) => {
+      const fromGst =
+        gstResult?.trade_name ??
+        gstResult?.trade_name_of_business ??
+        gstResult?.legal_name ??
+        gstResult?.legal_name_of_business ??
+        "";
+      if (fromGst && f.shopName === fromGst) {
+        return { ...f, shopName: "", gstin: "" };
+      }
+      return { ...f, gstin: "" };
+    });
     setError("");
   }
 
@@ -1062,7 +1085,9 @@ function OnboardContent() {
       case 5:
         return !!bankResult;
       case 6:
-        return true;
+        // GST is optional, but a business / shop name is always required so the
+        // self-declaration and final registration have a firm name.
+        return form.shopName.trim().length >= 2;
       case 7:
         return selfieUploaded && videoCompleted;
       case 8: {
@@ -1097,8 +1122,37 @@ function OnboardContent() {
     return true;
   }
 
-  function handleNext() {
+  async function handleNext() {
     setError("");
+    // Persist business name before leaving the GST step so the self-declaration
+    // PDF (next steps) can include it when GST was skipped or returned no name.
+    const gstTrade =
+      gstResult?.trade_name ??
+      gstResult?.trade_name_of_business ??
+      gstResult?.legal_name ??
+      gstResult?.legal_name_of_business ??
+      "";
+    if (step === 6 && form.shopName.trim().length >= 2 && !gstTrade) {
+      setVerifying(true);
+      try {
+        const res = await fetch(`/api/onboard/${token}/business`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shopName: form.shopName.trim() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data.error ?? "Could not save business name");
+          setVerifying(false);
+          return;
+        }
+      } catch {
+        setError("Network error. Please try again.");
+        setVerifying(false);
+        return;
+      }
+      setVerifying(false);
+    }
     setOtpSent(false);
     setOtpCode("");
     setStep(step + 1);
@@ -1169,9 +1223,9 @@ function OnboardContent() {
 
   const StepIcon = STEPS[step].icon;
 
-  // Shop/Firm name supplied by a verified GST record (trade name preferred).
-  // Only when GST actually provided a name is the field locked; otherwise the
-  // user must enter it manually.
+  // Shop/Firm name from verified GST, or a required manual business name
+  // collected on the GST step when GST is skipped. Either way the final
+  // Details step should not ask the user to type it again.
   const gstShopName = gstResult
     ? gstResult.trade_name ??
       gstResult.trade_name_of_business ??
@@ -1179,7 +1233,7 @@ function OnboardContent() {
       gstResult.legal_name_of_business ??
       ""
     : "";
-  const shopNameLocked = !!gstShopName;
+  const shopNameLocked = form.shopName.trim().length >= 2;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-brand-50 px-3 py-6 sm:px-4 sm:py-8">
@@ -1265,7 +1319,7 @@ function OnboardContent() {
                   <li>Aadhaar card (for DigiLocker verification)</li>
                   <li>PAN card number</li>
                   <li>Bank account details (Account Number + IFSC)</li>
-                  <li>GSTIN / MSME number (optional for verification)</li>
+                  <li>GSTIN (optional) or Business Name (required if no GST)</li>
                   <li>Live selfie photo &amp; 10-second video</li>
                   <li>GST Certificate, Shop &amp; Establishment, Gumasta License</li>
                   <li>Signature, Electricity Bill, Cancelled Cheque copy</li>
@@ -1746,7 +1800,7 @@ function OnboardContent() {
             </div>
           )}
 
-          {/* Step 6: GST + MSME (Optional) */}
+          {/* Step 6: GST + MSME (Optional) — business name required if no GST */}
           {step === 6 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-brand-700">
@@ -1755,7 +1809,7 @@ function OnboardContent() {
               </div>
               <p className="text-sm text-ink-600">
                 If you have a GSTIN or Udyam (MSME) number, enter them here.
-                You can skip this step.
+                You can skip GST verification, but a business name is required.
               </p>
 
               {/* GST */}
@@ -1825,6 +1879,40 @@ function OnboardContent() {
                   </div>
                 )}
               </div>
+
+              {/* Business name — required when GST is not verified (or returned no trade name) */}
+              {(!gstResult || !gstShopName) && (
+                <div>
+                  <Label>Business Name *</Label>
+                  <Input
+                    required
+                    value={form.shopName}
+                    onChange={(e) => updateForm("shopName", e.target.value)}
+                    placeholder="Enter your business / shop / firm name"
+                    maxLength={120}
+                  />
+                  <p className="mt-1 text-xs text-ink-500">
+                    Required when GST is not verified. This name is used on your
+                    self-declaration form and saved to your profile.
+                  </p>
+                </div>
+              )}
+
+              {gstResult && gstShopName && (
+                <div>
+                  <Label>Business Name</Label>
+                  <Input
+                    value={gstShopName}
+                    readOnly
+                    disabled
+                    className="bg-ink-50"
+                  />
+                  <p className="mt-1 text-xs text-ink-500">
+                    Auto-filled from GST registration — will appear on your
+                    self-declaration form.
+                  </p>
+                </div>
+              )}
 
               {/* MSME */}
               <div>
@@ -2270,10 +2358,14 @@ function OnboardContent() {
                     className={shopNameLocked ? "bg-ink-50" : ""}
                   />
                   {shopNameLocked ? (
-                    <p className="mt-1 text-xs text-ink-500">Auto-filled from GST registration</p>
+                    <p className="mt-1 text-xs text-ink-500">
+                      {gstShopName
+                        ? "Auto-filled from GST registration"
+                        : "Auto-filled from business name entered earlier"}
+                    </p>
                   ) : (
                     <p className="mt-1 text-xs text-ink-500">
-                      GST not verified — please enter your shop/firm name manually
+                      Enter your shop / firm name to continue
                     </p>
                   )}
                 </div>
@@ -2460,8 +2552,11 @@ function OnboardContent() {
               <Button
                 type="button"
                 onClick={handleNext}
-                disabled={!canProceed()}
+                disabled={!canProceed() || verifying}
               >
+                {verifying && step === 6 ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
                 {step === 0 ? "Get Started" : "Continue"}{" "}
                 <ArrowRight className="h-4 w-4" />
               </Button>

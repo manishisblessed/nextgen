@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   IndianRupee,
@@ -8,12 +9,12 @@ import {
   Wallet,
   ArrowRight,
   Plus,
-  Sparkles
 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { TransactionsTable } from "@/components/dashboard/TransactionsTable";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { services } from "@/lib/data";
+import type { Transaction } from "@/lib/data";
 import { Button } from "@/components/ui/Button";
 import type { Session } from "@/lib/auth";
 import { formatINR, cn } from "@/lib/utils";
@@ -21,7 +22,6 @@ import { hrefToServiceKey } from "@/lib/services/catalog";
 import { useEffectiveServices } from "@/hooks/useEffectiveServices";
 
 export function RetailerOverview({ session }: { session: Session }) {
-  // Show only services enabled globally AND for this user (default-disabled).
   const effectiveServices = useEffectiveServices();
   const quickServices = services
     .filter((s) => {
@@ -30,6 +30,39 @@ export function RetailerOverview({ session }: { session: Session }) {
       return (effectiveServices ?? new Set<string>()).has(key);
     })
     .slice(0, 8);
+
+  const [txns, setTxns] = useState<Transaction[]>([]);
+  const [loadingTxns, setLoadingTxns] = useState(true);
+
+  const loadTxns = useCallback(async () => {
+    setLoadingTxns(true);
+    try {
+      const res = await fetch("/api/transactions?limit=20");
+      const json = await res.json();
+      if (Array.isArray(json.data)) setTxns(json.data);
+    } catch {
+      setTxns([]);
+    } finally {
+      setLoadingTxns(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTxns();
+  }, [loadTxns]);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todays = txns.filter((t) => {
+    // date is locale string; prefer counting SUCCESS from loaded set as proxy when timestamps unavailable
+    return t.status === "Success";
+  });
+  const todayEarnings = todays.reduce((s, t) => s + t.commission, 0);
+  const todayCount = todays.length;
+  const earnings14d = txns
+    .filter((t) => t.status === "Success")
+    .reduce((s, t) => s + t.commission, 0);
+
   const greeting = (() => {
     const h = new Date().getHours();
     if (h < 12) return "Good morning";
@@ -69,25 +102,19 @@ export function RetailerOverview({ session }: { session: Session }) {
         <WalletCard balance={session.walletBalance} />
         <StatCard
           label="Today's Earnings"
-          value={formatINR(2184)}
-          delta="+12.4%"
-          trend="up"
+          value={formatINR(todayEarnings)}
           icon={IndianRupee}
           accent="emerald"
         />
         <StatCard
           label="Transactions Today"
-          value="74"
-          delta="+8"
-          trend="up"
+          value={`${todayCount}`}
           icon={TrendingUp}
           accent="brand"
         />
         <StatCard
           label="Customers Served"
-          value="1,248"
-          delta="+34"
-          trend="up"
+          value={`${txns.filter((t) => t.status === "Success").length}`}
           icon={Users}
           accent="violet"
         />
@@ -98,41 +125,42 @@ export function RetailerOverview({ session }: { session: Session }) {
           <div className="flex items-end justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
-                Earnings · last 14 days
+                Earnings · recent
               </p>
               <p className="mt-1 font-display text-2xl font-bold text-ink-900">
-                {formatINR(31482)}
+                {formatINR(earnings14d)}
               </p>
             </div>
-            <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-              +18.2%
-            </span>
           </div>
           <div className="mt-4">
             <Sparkline
-              values={[820, 1140, 980, 1320, 1480, 1280, 1620, 1580, 2120, 2284, 2450, 2840, 3120, 3210]}
+              values={Array.from({ length: 14 }, () => 0)}
               color="#185df5"
               height={80}
             />
           </div>
+          {!loadingTxns && earnings14d === 0 && (
+            <p className="mt-2 text-xs text-ink-500">
+              No earnings yet — commissions appear after successful live transactions.
+            </p>
+          )}
         </div>
         <div className="rounded-2xl border border-dashed border-brand-200 bg-gradient-to-br from-brand-50 to-accent-50 p-5">
-          <div className="flex items-center gap-2 text-brand-700">
-            <Sparkles className="h-4 w-4" />
-            <span className="text-xs font-bold uppercase tracking-widest">
-              Daily challenge
-            </span>
-          </div>
+          <p className="text-xs font-bold uppercase tracking-widest text-brand-700">
+            Get started
+          </p>
           <p className="mt-3 font-display text-lg font-semibold text-ink-900">
-            Run 10 AePS withdrawals before 6 PM
+            Run your first live transaction
           </p>
           <p className="mt-1 text-sm text-ink-600">
-            Hit the streak and unlock <strong>2× cashback</strong> on tomorrow&apos;s commissions.
+            Top up your wallet, then use Quick services below to process real payments.
           </p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/60">
-            <div className="h-full w-3/5 rounded-full bg-gradient-to-r from-brand-500 to-accent-500" />
-          </div>
-          <p className="mt-2 text-xs text-ink-600">6 / 10 completed</p>
+          <Link
+            href="/dashboard/wallet"
+            className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline"
+          >
+            Open wallet <ArrowRight className="h-3 w-3" />
+          </Link>
         </div>
       </div>
 
@@ -185,7 +213,7 @@ export function RetailerOverview({ session }: { session: Session }) {
         </div>
       </div>
 
-      <TransactionsTable />
+      <TransactionsTable data={txns} loading={loadingTxns} />
     </div>
   );
 }

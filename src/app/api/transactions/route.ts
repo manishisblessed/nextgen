@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { TxnStatus } from "@prisma/client";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
 import { prisma } from "@/lib/db";
-import { recentTransactions } from "@/lib/data";
+import { toNumber } from "@/lib/money";
+import { isAdminRole } from "@/lib/security/ownership";
 
 const CreateBody = z.object({
   service: z.string().trim().min(1).max(64).optional(),
@@ -13,15 +15,79 @@ const CreateBody = z.object({
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+function displayStatus(status: TxnStatus): "Success" | "Pending" | "Failed" {
+  if (status === "SUCCESS") return "Success";
+  if (status === "FAILED" || status === "REFUNDED") return "Failed";
+  return "Pending";
+}
+
+function formatService(service: string, operator: string | null): string {
+  const label = service
+    .split("_")
+    .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+    .join(" ");
+  return operator ? `${label} - ${operator}` : label;
+}
+
+export async function GET(req: Request) {
+  let user;
   try {
-    await requireAuth();
+    user = await requireAuth();
   } catch (e) {
     if (e instanceof AuthError)
       return NextResponse.json({ error: e.message }, { status: e.statusCode });
     throw e;
   }
-  return NextResponse.json({ ok: true, data: recentTransactions });
+
+  const { searchParams } = new URL(req.url);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 50, 1), 200);
+  const q = (searchParams.get("q") ?? "").trim();
+  const statusFilter = searchParams.get("status");
+
+  const where: Record<string, unknown> = isAdminRole(user.role)
+    ? {}
+    : { userId: user.id };
+
+  if (statusFilter && statusFilter !== "All") {
+    const map: Record<string, TxnStatus[]> = {
+      Success: ["SUCCESS"],
+      Pending: ["INITIATED", "PROCESSING"],
+      Failed: ["FAILED", "REFUNDED"],
+    };
+    if (map[statusFilter]) where.status = { in: map[statusFilter] };
+  }
+
+  if (q) {
+    where.OR = [
+      { refId: { contains: q, mode: "insensitive" } },
+      { customer: { contains: q, mode: "insensitive" } },
+      { operator: { contains: q, mode: "insensitive" } },
+    ];
+  }
+
+  const rows = await prisma.transaction.findMany({
+    where: where as any,
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  const data = rows.map((t) => ({
+    id: t.refId,
+    service: formatService(t.service, t.operator),
+    amount: toNumber(t.amount),
+    status: displayStatus(t.status),
+    date: t.createdAt.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    customer: t.customer ?? "—",
+    commission: toNumber(t.commission),
+  }));
+
+  return NextResponse.json({ ok: true, data });
 }
 
 export async function POST(req: Request) {

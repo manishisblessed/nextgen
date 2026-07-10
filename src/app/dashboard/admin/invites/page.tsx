@@ -586,6 +586,19 @@ function InviteDetail({
   const { invite, verifications, registeredUser } = data;
   const documents = data.documents ?? [];
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(false);
+
+  async function openVideo() {
+    setVideoLoading(true);
+    try {
+      const res = await fetch(`/api/admin/invite/${invite.id}/video`);
+      if (res.ok) {
+        const data = await res.json();
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
+    } catch {}
+    setVideoLoading(false);
+  }
 
   return (
     <div className="rounded-2xl border border-ink-200 bg-white p-6 shadow-soft">
@@ -621,6 +634,34 @@ function InviteDetail({
       {verifications.length > 0 && (
         <div className="mt-4">
           <p className="mb-2 text-sm font-bold text-ink-700">Verification Results</p>
+          {(() => {
+            const biz = verifications.find(
+              (v: any) => v.type === "BUSINESS_NAME" && v.status === "Success"
+            );
+            const gst = verifications.find(
+              (v: any) => v.type === "GST" && v.status === "Success"
+            );
+            const gstPayload = (gst?.responsePayload ?? {}) as any;
+            const businessName =
+              gstPayload?.trade_name ??
+              gstPayload?.trade_name_of_business ??
+              gstPayload?.legal_name ??
+              gst?.verifiedName ??
+              biz?.verifiedName ??
+              null;
+            if (!businessName) return null;
+            return (
+              <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-brand-700">
+                  Business / Shop Name
+                </p>
+                <p className="mt-1 font-semibold text-ink-900">{businessName}</p>
+                <p className="text-xs text-ink-500">
+                  {gst ? "From GST verification" : "Entered manually (GST not verified)"}
+                </p>
+              </div>
+            );
+          })()}
           <div className="space-y-2">
             {verifications.map((v: any) => {
               // "Success" = verified check, "Uploaded" = successful media/file
@@ -644,28 +685,49 @@ function InviteDetail({
                   }`}
                 >
                   <div>
-                    <span className="font-medium">{v.type.replace(/_/g, " ")}</span>
+                    <span className="font-medium">
+                      {v.type === "BUSINESS_NAME"
+                        ? "Business Name"
+                        : v.type.replace(/_/g, " ")}
+                    </span>
                     {v.verifiedName && (
                       <span className="ml-2 text-sm text-ink-600">— {v.verifiedName}</span>
                     )}
                   </div>
-                  <span
-                    className={`text-sm font-semibold ${
-                      tone === "ok"
-                        ? "text-emerald-700"
+                  <div className="flex items-center gap-3">
+                    {v.type === "ONBOARD_VIDEO" && v.status === "Uploaded" && (
+                      <button
+                        type="button"
+                        onClick={openVideo}
+                        disabled={videoLoading}
+                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                      >
+                        {videoLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Video className="h-3 w-3" />
+                        )}
+                        Open
+                      </button>
+                    )}
+                    <span
+                      className={`text-sm font-semibold ${
+                        tone === "ok"
+                          ? "text-emerald-700"
+                          : tone === "pending"
+                          ? "text-amber-700"
+                          : "text-rose-700"
+                      }`}
+                    >
+                      {tone === "ok"
+                        ? v.status === "Uploaded"
+                          ? "✓ Uploaded"
+                          : "✓ Verified"
                         : tone === "pending"
-                        ? "text-amber-700"
-                        : "text-rose-700"
-                    }`}
-                  >
-                    {tone === "ok"
-                      ? v.status === "Uploaded"
-                        ? "✓ Uploaded"
-                        : "✓ Verified"
-                      : tone === "pending"
-                      ? "⏳ Pending"
-                      : "✕ Failed"}
-                  </span>
+                        ? "⏳ Pending"
+                        : "✕ Failed"}
+                    </span>
+                  </div>
                 </div>
               );
             })}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -8,21 +9,69 @@ import {
   IndianRupee,
   TrendingUp,
   Globe,
-  KeyRound
+  KeyRound,
+  Loader2,
 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { networkUsers } from "@/lib/data";
 import type { Session } from "@/lib/auth";
 import { formatINR } from "@/lib/utils";
+
+type NetworkRow = {
+  id: string;
+  name: string;
+  shop: string;
+  city: string;
+  state: string;
+  retailers: number;
+  status: string;
+  walletBalance: number;
+  monthlyTurnover: number;
+};
+
+type WhiteLabel = {
+  customDomain?: string | null;
+  subdomain?: string | null;
+  status?: string | null;
+};
 
 export function MasterOverview({ session }: { session: Session }) {
   const isSuper = session.role === "super-distributor";
   const childLabel = isSuper ? "master distributors" : "distributors";
-  const distributors = networkUsers.filter((u) => u.role === "distributor");
-  const totalRetailers = distributors.reduce((s, d) => s + (d.retailers ?? 0), 0);
+  const [children, setChildren] = useState<NetworkRow[]>([]);
+  const [wl, setWl] = useState<WhiteLabel | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [netRes, wlRes] = await Promise.all([
+        fetch("/api/network"),
+        fetch("/api/platform/whitelabel"),
+      ]);
+      const net = await netRes.json().catch(() => ({}));
+      const wlData = await wlRes.json().catch(() => ({}));
+      if (Array.isArray(net.users)) setChildren(net.users);
+      if (wlData?.profile) setWl(wlData.profile);
+      else if (wlData?.customDomain || wlData?.subdomain) setWl(wlData);
+    } catch {
+      // keep empty live state
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const totalRetailers = children.reduce((s, d) => s + (d.retailers ?? 0), 0);
+  const mtdTurnover = children.reduce((s, d) => s + (d.monthlyTurnover ?? 0), 0);
+  const domain =
+    wl?.customDomain ||
+    (wl?.subdomain ? `${wl.subdomain}.nxtgenpay.space` : null);
 
   return (
     <div className="space-y-8">
@@ -33,7 +82,8 @@ export function MasterOverview({ session }: { session: Session }) {
           </p>
           <h1 className="heading-md mt-1">{session.name}</h1>
           <p className="mt-1 text-sm text-ink-600">
-            {distributors.length} {childLabel} · {totalRetailers}+ retailers · API + white-label active
+            {children.length} {childLabel} · {totalRetailers} retailers
+            {domain ? " · white-label configured" : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -53,10 +103,30 @@ export function MasterOverview({ session }: { session: Session }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label={isSuper ? "Master Distributors" : "Distributors"} value={`${distributors.length}`} delta="+1" trend="up" icon={Network} accent="brand" />
-        <StatCard label="Retailers (network)" value={`${totalRetailers.toLocaleString("en-IN")}`} delta="+128" trend="up" icon={Users} accent="violet" />
-        <StatCard label="Override Earnings (MTD)" value={formatINR(1842500)} delta="+19.4%" trend="up" icon={IndianRupee} accent="emerald" />
-        <StatCard label="Network Turnover (MTD)" value={formatINR(session.monthlyTurnover ?? 0)} delta="+11.8%" trend="up" icon={TrendingUp} accent="accent" />
+        <StatCard
+          label={isSuper ? "Master Distributors" : "Distributors"}
+          value={loading ? "…" : `${children.length}`}
+          icon={Network}
+          accent="brand"
+        />
+        <StatCard
+          label="Retailers (network)"
+          value={loading ? "…" : `${totalRetailers.toLocaleString("en-IN")}`}
+          icon={Users}
+          accent="violet"
+        />
+        <StatCard
+          label="Override Earnings (MTD)"
+          value={formatINR(0)}
+          icon={IndianRupee}
+          accent="emerald"
+        />
+        <StatCard
+          label="Network Turnover (MTD)"
+          value={formatINR(mtdTurnover)}
+          icon={TrendingUp}
+          accent="accent"
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -67,20 +137,22 @@ export function MasterOverview({ session }: { session: Session }) {
                 Network turnover · last 14 days
               </p>
               <p className="mt-1 font-display text-2xl font-bold text-ink-900">
-                {formatINR(38400000)}
+                {formatINR(mtdTurnover)}
               </p>
             </div>
-            <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-              +11.8%
-            </span>
           </div>
           <div className="mt-4">
             <Sparkline
-              values={[2400000, 2510000, 2620000, 2580000, 2710000, 2820000, 2780000, 2940000, 3100000, 3050000, 3210000, 3280000, 3380000, 3450000]}
+              values={Array.from({ length: 14 }, () => 0)}
               color="#f97606"
               height={80}
             />
           </div>
+          {!loading && mtdTurnover === 0 && (
+            <p className="mt-2 text-xs text-ink-500">
+              No network turnover yet — figures update as live transactions clear.
+            </p>
+          )}
         </div>
         <div className="rounded-2xl border border-ink-100 bg-white p-5">
           <div className="flex items-center gap-2 text-brand-700">
@@ -90,16 +162,19 @@ export function MasterOverview({ session }: { session: Session }) {
             </p>
           </div>
           <p className="mt-3 font-display text-lg font-semibold text-ink-900">
-            kapoorpay.in
+            {domain ?? "Not configured"}
           </p>
           <p className="mt-1 text-sm text-ink-600">
-            Co-branded portal live for your distributors. SSL valid till Mar 2027.
+            {domain
+              ? "Manage co-branded portal settings for your downline."
+              : "Set a custom domain or subdomain for your distributors."}
           </p>
           <Link
             href="/dashboard/whitelabel"
             className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline"
           >
-            Manage branding <ArrowRight className="h-3 w-3" />
+            {domain ? "Manage branding" : "Set up branding"}{" "}
+            <ArrowRight className="h-3 w-3" />
           </Link>
         </div>
       </div>
@@ -110,43 +185,76 @@ export function MasterOverview({ session }: { session: Session }) {
             <h3 className="font-display text-base font-semibold text-ink-900">
               My {childLabel}
             </h3>
-            <p className="text-xs text-ink-500">Direct child {childLabel} with override earnings</p>
+            <p className="text-xs text-ink-500">
+              Direct child {childLabel} with live wallet &amp; turnover
+            </p>
           </div>
-          <Link href="/dashboard/network" className="text-xs font-semibold text-brand-700 hover:underline">
+          <Link
+            href="/dashboard/network"
+            className="text-xs font-semibold text-brand-700 hover:underline"
+          >
             View tree
           </Link>
         </div>
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50/60 text-left text-xs uppercase tracking-wider text-ink-500">
-            <tr>
-              <th className="px-5 py-3 font-semibold">Distributor</th>
-              <th className="px-5 py-3 font-semibold">Region</th>
-              <th className="px-5 py-3 font-semibold">Retailers</th>
-              <th className="px-5 py-3 font-semibold">Status</th>
-              <th className="px-5 py-3 font-semibold text-right">Wallet</th>
-              <th className="px-5 py-3 font-semibold text-right">MTD Turnover</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100 text-ink-800">
-            {distributors.map((d) => (
-              <tr key={d.id} className="hover:bg-ink-50/40">
-                <td className="px-5 py-3">
-                  <div className="font-semibold text-ink-900">{d.name}</div>
-                  <div className="text-xs text-ink-500">{d.shop} · {d.id}</div>
-                </td>
-                <td className="px-5 py-3 text-ink-600">{d.city}, {d.state}</td>
-                <td className="px-5 py-3 font-semibold">{d.retailers}</td>
-                <td className="px-5 py-3">
-                  <Badge variant={d.status === "Active" ? "success" : d.status === "Pending KYC" ? "warning" : "danger"}>
-                    {d.status}
-                  </Badge>
-                </td>
-                <td className="px-5 py-3 text-right font-semibold">{formatINR(d.walletBalance)}</td>
-                <td className="px-5 py-3 text-right font-semibold text-emerald-700">{formatINR(d.monthlyTurnover)}</td>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 px-5 py-12 text-sm text-ink-500">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading network…
+          </div>
+        ) : children.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-ink-500">
+            No {childLabel} yet. Onboard your first partner to build the network.
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50/60 text-left text-xs uppercase tracking-wider text-ink-500">
+              <tr>
+                <th className="px-5 py-3 font-semibold">
+                  {isSuper ? "Master distributor" : "Distributor"}
+                </th>
+                <th className="px-5 py-3 font-semibold">Region</th>
+                <th className="px-5 py-3 font-semibold">Downline</th>
+                <th className="px-5 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3 font-semibold text-right">Wallet</th>
+                <th className="px-5 py-3 font-semibold text-right">MTD Turnover</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-ink-100 text-ink-800">
+              {children.map((d) => (
+                <tr key={d.id} className="hover:bg-ink-50/40">
+                  <td className="px-5 py-3">
+                    <div className="font-semibold text-ink-900">{d.name}</div>
+                    <div className="text-xs text-ink-500">
+                      {d.shop} · {d.id.slice(0, 10)}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-ink-600">
+                    {d.city}, {d.state}
+                  </td>
+                  <td className="px-5 py-3 font-semibold">{d.retailers}</td>
+                  <td className="px-5 py-3">
+                    <Badge
+                      variant={
+                        d.status === "Active"
+                          ? "success"
+                          : d.status === "Pending KYC"
+                            ? "warning"
+                            : "danger"
+                      }
+                    >
+                      {d.status}
+                    </Badge>
+                  </td>
+                  <td className="px-5 py-3 text-right font-semibold">
+                    {formatINR(d.walletBalance)}
+                  </td>
+                  <td className="px-5 py-3 text-right font-semibold text-emerald-700">
+                    {formatINR(d.monthlyTurnover)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

@@ -100,7 +100,7 @@ model User {
   children User[]  @relation("Hierarchy")
 
   // org / shop info
-  shopName    String?
+  shopName    String?   @unique
   shopAddress String?
   pincode     String?
   state       String?
@@ -225,23 +225,23 @@ model Kyc {
   userId            String    @unique
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   status            KycStatus @default(NOT_STARTED)
-  panNumber         String?
+  panNumber         String?   @unique
   panVerifiedAt     DateTime?
   panName           String?
   aadhaarLast4      String?
   aadhaarVerifiedAt DateTime?
-  aadhaarNumber     String? // masked, e.g. XXXX-XXXX-1234
+  aadhaarNumber     String?   @unique
   aadhaarName       String?
   aadhaarDob        String?
   aadhaarGender     String?
   aadhaarAddress    String?
   aadhaarMobile     String? // Aadhaar-registered mobile for records
   bankAccountName   String?
-  bankAccountNumber String?
+  bankAccountNumber String?   @unique
   bankIfsc          String?
   bankAccountStatus String? // active | inactive
-  gstin             String?
-  msmeNumber        String? // Udyam number (optional, no API verification)
+  gstin             String?   @unique
+  msmeNumber        String?   @unique
   nameMismatch      Boolean   @default(false)
   dob               DateTime?
   rejectedReason    String?

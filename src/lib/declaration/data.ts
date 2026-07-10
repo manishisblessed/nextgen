@@ -36,11 +36,14 @@ export async function buildDeclarationData(inviteId: string): Promise<Declaratio
 
   const gstV = findV("GST");
   const gstPayload = gstV?.responsePayload as any;
+  const bizV = findV("BUSINESS_NAME");
   const businessName =
     gstPayload?.trade_name_of_business ??
     gstPayload?.trade_name ??
     gstPayload?.legal_name_of_business ??
     gstV?.verifiedName ??
+    bizV?.verifiedName ??
+    (bizV?.responsePayload as any)?.business_name ??
     "";
 
   const onboardeeAadhaar = aadhaarPayload?.uid

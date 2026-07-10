@@ -112,6 +112,61 @@ export async function POST(
     );
   }
 
+  // ── Fraud gate: enforce one-identity-per-user across all KYC & shop fields ──
+  const excludeUserId = invite.userId ?? undefined;
+
+  const duplicateChecks: { field: string; value: string | undefined; model: "kyc" | "user" }[] = [
+    { field: "panNumber", value: data.panNumber?.toUpperCase(), model: "kyc" },
+    { field: "aadhaarNumber", value: data.aadhaarNumber, model: "kyc" },
+    { field: "bankAccountNumber", value: data.bankAccountNumber, model: "kyc" },
+    { field: "gstin", value: data.gstin?.toUpperCase(), model: "kyc" },
+    { field: "msmeNumber", value: data.msmeNumber, model: "kyc" },
+    { field: "shopName", value: data.shopName, model: "user" },
+  ];
+
+  const fieldLabels: Record<string, string> = {
+    panNumber: "PAN number",
+    aadhaarNumber: "Aadhaar number",
+    bankAccountNumber: "bank account number",
+    gstin: "GST number",
+    msmeNumber: "Udyam number",
+    shopName: "shop name",
+  };
+
+  for (const { field, value, model } of duplicateChecks) {
+    if (!value) continue;
+
+    if (model === "kyc") {
+      const dup = await prisma.kyc.findFirst({
+        where: {
+          [field]: value,
+          ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+        },
+        select: { userId: true },
+      });
+      if (dup) {
+        return NextResponse.json(
+          { error: `Another account is already registered with this ${fieldLabels[field]}` },
+          { status: 409 }
+        );
+      }
+    } else {
+      const dup = await prisma.user.findFirst({
+        where: {
+          [field]: value,
+          ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
+        },
+        select: { id: true },
+      });
+      if (dup) {
+        return NextResponse.json(
+          { error: `Another account is already registered with this ${fieldLabels[field]}` },
+          { status: 409 }
+        );
+      }
+    }
+  }
+
   const verifications = await prisma.verificationResult.findMany({
     where: { inviteId: invite.id },
     select: { type: true, status: true },

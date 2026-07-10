@@ -50,6 +50,19 @@ export async function POST(req: Request) {
     );
   }
 
+  if (shopName) {
+    const dupShop = await prisma.user.findFirst({
+      where: { shopName: shopName.trim() },
+      select: { id: true },
+    });
+    if (dupShop) {
+      return NextResponse.json(
+        { error: "Another account is already registered with this shop name" },
+        { status: 409 }
+      );
+    }
+  }
+
   if (parentId) {
     const parent = await prisma.user.findUnique({ where: { id: parentId } });
     if (!parent)

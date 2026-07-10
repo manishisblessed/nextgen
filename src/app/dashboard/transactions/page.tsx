@@ -1,38 +1,47 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { History, Search, Filter } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { History, Search, Filter, Loader2 } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { Input, Select } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { TransactionsTable } from "@/components/dashboard/TransactionsTable";
 import { ReportActions } from "@/components/dashboard/ReportActions";
-import { recentTransactions } from "@/lib/data";
+import type { Transaction } from "@/lib/data";
 
 export default function TransactionsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("All");
+  const [rows, setRows] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const data = useMemo(() => {
-    return recentTransactions.filter((t) => {
-      const matchesQ =
-        !q ||
-        t.id.toLowerCase().includes(q.toLowerCase()) ||
-        t.service.toLowerCase().includes(q.toLowerCase()) ||
-        t.customer.toLowerCase().includes(q.toLowerCase());
-      const matchesStatus = status === "All" || t.status === status;
-      return matchesQ && matchesStatus;
-    });
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "200" });
+      if (q) params.set("q", q);
+      if (status !== "All") params.set("status", status);
+      const res = await fetch(`/api/transactions?${params}`);
+      const json = await res.json();
+      if (Array.isArray(json.data)) setRows(json.data);
+      else setRows([]);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
   }, [q, status]);
 
+  useEffect(() => {
+    const t = setTimeout(load, 250);
+    return () => clearTimeout(t);
+  }, [load]);
+
   const totals = useMemo(() => {
-    const total = recentTransactions.reduce((s, t) => s + t.amount, 0);
-    const commission = recentTransactions.reduce(
-      (s, t) => s + t.commission,
-      0
-    );
-    return { total, commission, count: recentTransactions.length };
-  }, []);
+    const total = rows.reduce((s, t) => s + t.amount, 0);
+    const commission = rows.reduce((s, t) => s + t.commission, 0);
+    return { total, commission, count: rows.length };
+  }, [rows]);
 
   return (
     <div>
@@ -48,7 +57,7 @@ export default function TransactionsPage() {
             Total transactions
           </p>
           <p className="mt-1 font-display text-2xl font-bold text-ink-900">
-            {totals.count}
+            {loading ? "…" : totals.count}
           </p>
         </div>
         <div className="rounded-2xl border border-ink-100 bg-white p-5">
@@ -88,14 +97,18 @@ export default function TransactionsPage() {
             <option key={s}>{s}</option>
           ))}
         </Select>
-        <Button variant="outline" size="md">
-          <Filter className="h-4 w-4" />
-          More filters
+        <Button variant="outline" size="md" onClick={load} disabled={loading}>
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Filter className="h-4 w-4" />
+          )}
+          Refresh
         </Button>
         <ReportActions
           filename="transactions"
-          title="JMP NextGenPay · Transactions"
-          subtitle={`Filtered view · ${data.length} of ${recentTransactions.length} records`}
+          title="NextGenPay · Transactions"
+          subtitle={`Live view · ${rows.length} records`}
           columns={[
             { key: "id", header: "Txn ID" },
             { key: "service", header: "Service" },
@@ -103,13 +116,13 @@ export default function TransactionsPage() {
             { key: "amount", header: "Amount (INR)" },
             { key: "commission", header: "Commission (INR)" },
             { key: "status", header: "Status" },
-            { key: "date", header: "Date" }
+            { key: "date", header: "Date" },
           ]}
-          rows={data}
+          rows={rows}
         />
       </div>
 
-      <TransactionsTable data={data} showHeader={false} />
+      <TransactionsTable data={rows} showHeader={false} loading={loading} />
     </div>
   );
 }
