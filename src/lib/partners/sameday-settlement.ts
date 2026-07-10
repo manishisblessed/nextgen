@@ -203,21 +203,44 @@ export async function settlementDeleteAccount(id: string): Promise<PartnerResult
   return { ok: true, data: { deleted: true }, raw: r.raw };
 }
 
+export type SettlementChargePreview = {
+  amount: number;
+  mode: string;
+  schemeName: string;
+  charges: number;
+  gstAmount: number;
+  totalCharge: number;
+  totalDebit: number;
+};
+
 export async function settlementCharges(
   amount: number,
   mode: SettlementMode = "IMPS"
-): Promise<PartnerResult<{ charges: number; totalDebit: number }>> {
-  const r = await samedayRequest<{ success: boolean; charges?: number; total_debit?: number }>(
-    creds(),
-    "GET",
-    `${P}/charges`,
-    undefined,
-    { amount: String(amount), mode }
-  );
+): Promise<PartnerResult<SettlementChargePreview>> {
+  const r = await samedayRequest<{
+    success: boolean;
+    amount?: number;
+    mode?: string;
+    scheme_name?: string;
+    charges?: number;
+    gst_amount?: number;
+    total_charge?: number;
+    total_debit?: number;
+  }>(creds(), "GET", `${P}/charges`, undefined, { amount: String(amount), mode });
   if (!r.ok) return r;
+  const baseCharge = Number(r.data.charges ?? 0);
+  const gst = Number(r.data.gst_amount ?? 0);
   return {
     ok: true,
-    data: { charges: Number(r.data.charges ?? 0), totalDebit: Number(r.data.total_debit ?? amount) },
+    data: {
+      amount: Number(r.data.amount ?? amount),
+      mode: r.data.mode ?? mode,
+      schemeName: r.data.scheme_name ?? "",
+      charges: baseCharge,
+      gstAmount: gst,
+      totalCharge: Number(r.data.total_charge ?? baseCharge + gst),
+      totalDebit: Number(r.data.total_debit ?? amount + baseCharge + gst),
+    },
     raw: r.raw,
   };
 }

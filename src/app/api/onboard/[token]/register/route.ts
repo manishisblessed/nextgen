@@ -262,13 +262,12 @@ export async function POST(
 
   const appUrl = env.NEXT_PUBLIC_APP_URL;
   const loginUrl = `${appUrl}/login`;
-  const adminDashUrl = `${appUrl}/admin`;
 
   // ── Notify the admin who sent the invite ──
   try {
     const inviter = await prisma.user.findUnique({
       where: { id: invite.invitedById },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, role: true },
     });
 
     if (inviter) {
@@ -301,9 +300,9 @@ export async function POST(
               </table>
             </div>
             <div style="text-align:center;margin:24px 0;">
-              <a href="${adminDashUrl}" style="display:inline-block;padding:14px 32px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Review &amp; Approve</a>
+              <a href="${appUrl}/dashboard" style="display:inline-block;padding:14px 32px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">View in Dashboard</a>
             </div>
-            <p style="color:#64748b;font-size:13px;">Please review and approve within 48–72 working hours.</p>
+            <p style="color:#64748b;font-size:13px;">${["MASTER_ADMIN", "ADMIN", "SUPPORT"].includes(inviter.role) ? "Please review and approve within 48–72 working hours." : "An admin will review and activate the account within 48–72 working hours."}</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;" />
             <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NextGenPay Pvt. Ltd.</p>
           </div>

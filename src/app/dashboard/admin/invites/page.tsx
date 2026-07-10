@@ -622,26 +622,53 @@ function InviteDetail({
         <div className="mt-4">
           <p className="mb-2 text-sm font-bold text-ink-700">Verification Results</p>
           <div className="space-y-2">
-            {verifications.map((v: any) => (
-              <div
-                key={v.id}
-                className={`flex items-center justify-between rounded-xl border px-4 py-2 ${
-                  v.status === "Success"
-                    ? "border-emerald-200 bg-emerald-50"
-                    : "border-rose-200 bg-rose-50"
-                }`}
-              >
-                <div>
-                  <span className="font-medium">{v.type.replace(/_/g, " ")}</span>
-                  {v.verifiedName && (
-                    <span className="ml-2 text-sm text-ink-600">— {v.verifiedName}</span>
-                  )}
+            {verifications.map((v: any) => {
+              // "Success" = verified check, "Uploaded" = successful media/file
+              // upload (e.g. ONBOARD VIDEO), "Pending" = awaiting completion
+              // (e.g. eSign). Only genuine failures should show red.
+              const tone =
+                v.status === "Success" || v.status === "Uploaded"
+                  ? "ok"
+                  : v.status === "Pending"
+                  ? "pending"
+                  : "fail";
+              return (
+                <div
+                  key={v.id}
+                  className={`flex items-center justify-between rounded-xl border px-4 py-2 ${
+                    tone === "ok"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : tone === "pending"
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-rose-200 bg-rose-50"
+                  }`}
+                >
+                  <div>
+                    <span className="font-medium">{v.type.replace(/_/g, " ")}</span>
+                    {v.verifiedName && (
+                      <span className="ml-2 text-sm text-ink-600">— {v.verifiedName}</span>
+                    )}
+                  </div>
+                  <span
+                    className={`text-sm font-semibold ${
+                      tone === "ok"
+                        ? "text-emerald-700"
+                        : tone === "pending"
+                        ? "text-amber-700"
+                        : "text-rose-700"
+                    }`}
+                  >
+                    {tone === "ok"
+                      ? v.status === "Uploaded"
+                        ? "✓ Uploaded"
+                        : "✓ Verified"
+                      : tone === "pending"
+                      ? "⏳ Pending"
+                      : "✕ Failed"}
+                  </span>
                 </div>
-                <span className={`text-sm font-semibold ${v.status === "Success" ? "text-emerald-700" : "text-rose-700"}`}>
-                  {v.status === "Success" ? "✓ Verified" : "✕ Failed"}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

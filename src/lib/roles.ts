@@ -35,6 +35,7 @@ import {
   Layers,
   Images,
   ShieldAlert,
+  FileSignature,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -161,6 +162,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/network", label: "My Retailers", icon: Users, badge: "New" },
         { href: "/dashboard/network/onboard", label: "Invite Retailer", icon: PackagePlus },
+        { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
         { href: "/dashboard/funds-request", label: "Fund Requests", icon: HandCoins, badge: "12" },
         { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
         { href: "/dashboard/commissions", label: "Commission Slabs", icon: CircleDollarSign },
@@ -178,6 +180,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/network", label: "My Network", icon: Users, badge: "New" },
         { href: "/dashboard/network/onboard", label: "Invite Master Distributor", icon: PackagePlus },
+        { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
         { href: "/dashboard/funds-request", label: "Fund Requests", icon: HandCoins },
         { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
         { href: "/dashboard/commissions", label: "Commission Master", icon: CircleDollarSign },
@@ -203,6 +206,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/network", label: "My Distributors", icon: Users, badge: "New" },
         { href: "/dashboard/network/onboard", label: "Invite Distributor", icon: PackagePlus },
+        { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
         { href: "/dashboard/funds-request", label: "Fund Requests", icon: HandCoins, badge: "47" },
         { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
         { href: "/dashboard/commissions", label: "Commission Master", icon: CircleDollarSign },

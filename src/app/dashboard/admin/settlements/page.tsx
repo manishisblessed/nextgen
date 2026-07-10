@@ -34,12 +34,23 @@ type TransferRow = {
   referenceId: string;
   utr?: string;
   amount: number;
+  charges?: number;
   totalDebited?: number;
   mode?: string;
   status: "SUCCESS" | "PENDING" | "FAILED";
   accountNumber?: string;
   accountHolderName?: string;
   createdAt?: string;
+};
+
+type ChargePreview = {
+  amount: number;
+  mode: string;
+  schemeName: string;
+  charges: number;
+  gstAmount: number;
+  totalCharge: number;
+  totalDebit: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +148,10 @@ function BankTransfersTab() {
   const [transferForm, setTransferForm] = useState({ accountId: "", amount: "", mode: "IMPS", narration: "" });
   const [transferBusy, setTransferBusy] = useState(false);
 
+  // Charge preview
+  const [chargePreview, setChargePreview] = useState<ChargePreview | null>(null);
+  const [chargeLoading, setChargeLoading] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -169,6 +184,32 @@ function BankTransfersTab() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    const amt = Number(transferForm.amount);
+    if (!amt || amt <= 0) {
+      setChargePreview(null);
+      return;
+    }
+    setChargeLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/settlement/transfer?amount=${amt}&mode=${encodeURIComponent(transferForm.mode)}`
+        );
+        if (res.ok) {
+          setChargePreview(await res.json());
+        } else {
+          setChargePreview(null);
+        }
+      } catch {
+        setChargePreview(null);
+      } finally {
+        setChargeLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [transferForm.amount, transferForm.mode]);
 
   async function addAccount(e: React.FormEvent) {
     e.preventDefault();
@@ -218,9 +259,12 @@ function BankTransfersTab() {
     const amt = Number(transferForm.amount);
     if (!transferForm.accountId || !amt || amt <= 0) return;
     const acc = accounts.find((a) => a.id === transferForm.accountId);
+    const debitInfo = chargePreview
+      ? ` — charges ${formatINR(chargePreview.totalCharge)}, total wallet debit ${formatINR(chargePreview.totalDebit)}`
+      : "";
     if (
       !window.confirm(
-        `Transfer ${formatINR(amt)} via ${transferForm.mode} to ${acc?.accountHolderName ?? "the selected account"} (${acc?.accountNumber ?? ""})?`
+        `Transfer ${formatINR(amt)} via ${transferForm.mode} to ${acc?.accountHolderName ?? "the selected account"} (${acc?.accountNumber ?? ""})${debitInfo}?`
       )
     )
       return;
@@ -251,6 +295,7 @@ function BankTransfersTab() {
           : `Transfer initiated (${t.status}) — reference ${t.referenceId}. Failed transfers auto-refund the partner wallet.`
       );
       setTransferForm((f) => ({ ...f, amount: "", narration: "" }));
+      setChargePreview(null);
       refresh();
     } catch {
       setError("Network error — check the transfer list before retrying.");
@@ -272,6 +317,8 @@ function BankTransfersTab() {
       ),
     },
     { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
+    { key: "charges", header: "Charges", align: "right", render: (r) => <span className="text-xs text-ink-500">{r.charges != null ? formatINR(r.charges) : "—"}</span> },
+    { key: "totalDebited", header: "Total Debit", align: "right", render: (r) => <span className="font-medium">{r.totalDebited != null ? formatINR(r.totalDebited) : "—"}</span> },
     { key: "mode", header: "Mode" },
     {
       key: "status",
@@ -478,6 +525,32 @@ function BankTransfersTab() {
                 onChange={(e) => setTransferForm((f) => ({ ...f, narration: e.target.value }))}
               />
             </div>
+            {chargePreview && (
+              <div className="sm:col-span-2 rounded-xl border border-ink-100 bg-ink-50/60 p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-ink-700">Charge breakdown</span>
+                  {chargePreview.schemeName && (
+                    <Badge variant="brand">{chargePreview.schemeName}</Badge>
+                  )}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-ink-600">
+                  <span>Transfer amount</span>
+                  <span className="text-right font-medium text-ink-900">{formatINR(chargePreview.amount)}</span>
+                  <span>Service charge</span>
+                  <span className="text-right">{formatINR(chargePreview.charges)}</span>
+                  <span>GST (18%)</span>
+                  <span className="text-right">{formatINR(chargePreview.gstAmount)}</span>
+                  <span>Total charge</span>
+                  <span className="text-right">{formatINR(chargePreview.totalCharge)}</span>
+                  <span className="font-semibold text-ink-900">Total wallet debit</span>
+                  <span className="text-right font-bold text-ink-900">{formatINR(chargePreview.totalDebit)}</span>
+                </div>
+              </div>
+            )}
+            {chargeLoading && !chargePreview && (
+              <p className="sm:col-span-2 text-xs text-ink-400">Fetching charges…</p>
+            )}
+
             <div className="sm:col-span-2">
               <Button
                 type="submit"
@@ -487,7 +560,9 @@ function BankTransfersTab() {
               >
                 {transferBusy
                   ? "Initiating transfer…"
-                  : `Transfer ${transferForm.amount ? formatINR(Number(transferForm.amount)) : ""}`}
+                  : chargePreview
+                    ? `Transfer ${formatINR(chargePreview.amount)} (total debit ${formatINR(chargePreview.totalDebit)})`
+                    : `Transfer ${transferForm.amount ? formatINR(Number(transferForm.amount)) : ""}`}
               </Button>
             </div>
           </form>

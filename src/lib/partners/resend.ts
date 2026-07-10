@@ -7,12 +7,13 @@ import type { EmailProvider, PartnerResult } from "./types";
 
 export const resendEmail: EmailProvider = {
   name: "RESEND",
-  async send({ to, subject, html, from }) {
+  async send({ to, subject, html, text, from }) {
     try {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${process.env.RESEND_API_KEY!}` },
-        body: JSON.stringify({ from: from ?? process.env.EMAIL_FROM, to, subject, html })
+        // A plain-text alternative improves spam scoring for OTP-style mails.
+        body: JSON.stringify({ from: from ?? process.env.EMAIL_FROM, to, subject, html, ...(text ? { text } : {}) })
       });
       const json = (await res.json()) as { id?: string; message?: string };
       if (!res.ok) {

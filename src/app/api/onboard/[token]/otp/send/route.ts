@@ -86,7 +86,10 @@ export async function POST(
     const email = getPartner("email");
     const r = await email.send({
       to: target,
-      subject: "NextGenPay — Verify your email",
+      // Code in the subject: visible in the inbox preview and prevents Gmail
+      // from collapsing repeated OTP mails into one stale-looking thread.
+      subject: `${otp} is your NextGenPay verification code`,
+      text: `Your NextGenPay verification code is ${otp}. It expires in 5 minutes. Do not share it with anyone.`,
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
           <h2 style="color:#1e293b;">Verify Your Email</h2>

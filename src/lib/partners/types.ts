@@ -300,5 +300,5 @@ export interface OtpVerifyProvider {
 // ---------- Email ----------
 export interface EmailProvider {
   name: string;
-  send(input: { to: string | string[]; subject: string; html: string; from?: string }): Promise<PartnerResult<{ messageId: string }>>;
+  send(input: { to: string | string[]; subject: string; html: string; text?: string; from?: string }): Promise<PartnerResult<{ messageId: string }>>;
 }

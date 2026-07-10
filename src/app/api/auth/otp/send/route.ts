@@ -81,7 +81,10 @@ export async function POST(req: Request) {
     const email = getPartner("email");
     const r = await email.send({
       to: parsed.data.target,
-      subject: "Your NextGenPay OTP",
+      // Code in the subject: visible in the inbox preview and prevents Gmail
+      // from collapsing repeated OTP mails into one stale-looking thread.
+      subject: `${otp} is your NextGenPay OTP`,
+      text: `Your OTP is ${otp}. Valid for 5 minutes. Do not share it with anyone.`,
       html: `<p>Your OTP is <strong>${otp}</strong>. Valid for 5 minutes.</p>`
     });
     if (!r.ok) return NextResponse.json({ error: r.message }, { status: 502 });
