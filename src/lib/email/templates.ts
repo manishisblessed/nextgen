@@ -133,7 +133,7 @@ export function renderInviteEmail(opts: {
   const roleLabel = fmtRole(opts.role);
   const expiry = fmtExpiry(opts.expiresAt);
   const firstName = opts.name?.split(" ")[0]?.trim();
-  const greeting = firstName ? `Hey ${firstName},` : "Hello,";
+  const greeting = firstName ? `Hello ${firstName},` : "Hello,";
 
   const preheader = opts.isReminder
     ? `Reminder — finish setting up your ${roleLabel} account on NextGenPay. Link expires ${expiry}.`
@@ -205,8 +205,8 @@ export function renderInviteEmail(opts: {
     <div style="font-size:13px;font-weight:700;color:${BRAND.ink};margin:8px 0 4px 0;">What you'll get</div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
       ${featureRow("&#8377;", "60+ digital services", "AePS, DMT, UPI collections, recharges, bill payments and more")}
-      ${featureRow("&#9635;", "POS &amp; QR payments", "Accept payments in-store with our POS machines and static QR")}
-      ${featureRow("&#9679;", "Live wallet &amp; ledger", "Real-time commissions, settlements and downloadable statements")}
+      ${featureRow("&#9635;", "PG, POS &amp; QR Payment Services", "Accept payments in-store with our POS machines and static QR")}
+      ${featureRow("&#9679;", "Live wallet, &amp; ledger support", "Real-time commissions, settlements and downloadable statements")}
     </table>
 
     <div style="background:#fff8ec;border:1px solid #fde3a4;border-radius:10px;padding:12px 14px;font-size:13px;color:#7a5300;line-height:19px;">
@@ -214,7 +214,7 @@ export function renderInviteEmail(opts: {
     </div>
 
     <p style="font-size:13px;color:${BRAND.inkMuted};line-height:20px;margin:24px 0 0 0;">
-      Need help? Just reply to this email &mdash; a real human on our team will get back to you.
+      Need help?, If this was not you Just reply to this email &mdash; Our custumer support executive will get back to you.
     </p>
     <p style="font-size:14px;color:${BRAND.ink};line-height:20px;margin:18px 0 8px 0;">
       Cheers,<br/>

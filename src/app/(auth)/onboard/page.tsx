@@ -1001,14 +1001,22 @@ function OnboardContent() {
     setUploading(null);
   }
 
+  function isValidPassword(pwd: string): boolean {
+    if (pwd.length < 8 || pwd.length > 20) return false;
+    // Alphanumeric with at least one special character
+    return /[A-Za-z]/.test(pwd) && /\d/.test(pwd) && /[^A-Za-z0-9]/.test(pwd);
+  }
+
   // ----- Submit -----
   async function handleSubmit() {
     if (form.password !== form.confirmPassword) {
       setError("Passwords do not match");
       return;
     }
-    if (form.password.length < 8) {
-      setError("Password must be at least 8 characters");
+    if (!isValidPassword(form.password)) {
+      setError(
+        "Password must be 8–20 characters and include letters, numbers, and a special character"
+      );
       return;
     }
     if (!form.name || !form.shopName || !form.pincode) {
@@ -1111,7 +1119,7 @@ function OnboardContent() {
   function allMandatoryComplete(): boolean {
     if (!form.password || !form.name || !form.shopName || !form.pincode) return false;
     if (form.password !== form.confirmPassword) return false;
-    if (form.password.length < 8) return false;
+    if (!isValidPassword(form.password)) return false;
     if (!phoneVerified || !emailVerified || !aadhaarVerified) return false;
     if (!panResult || !bankResult) return false;
     if (!selfieUploaded || !videoCompleted) return false;
@@ -2429,8 +2437,13 @@ function OnboardContent() {
                     <Input
                       type={showPassword ? "text" : "password"}
                       value={form.password}
-                      onChange={(e) => updateForm("password", e.target.value)}
-                      placeholder="Min 8 characters"
+                      onChange={(e) =>
+                        updateForm("password", e.target.value.slice(0, 20))
+                      }
+                      placeholder="8–20 characters"
+                      minLength={8}
+                      maxLength={20}
+                      autoComplete="new-password"
                       className="pr-10"
                     />
                     <button
@@ -2449,9 +2462,15 @@ function OnboardContent() {
                       type={showConfirmPassword ? "text" : "password"}
                       value={form.confirmPassword}
                       onChange={(e) =>
-                        updateForm("confirmPassword", e.target.value)
+                        updateForm(
+                          "confirmPassword",
+                          e.target.value.slice(0, 20)
+                        )
                       }
                       placeholder="Re-enter password"
+                      minLength={8}
+                      maxLength={20}
+                      autoComplete="new-password"
                       className="pr-10"
                     />
                     <button
@@ -2464,6 +2483,10 @@ function OnboardContent() {
                   </div>
                 </div>
               </div>
+              <p className="text-xs text-ink-500">
+                Password must be alphanumeric with special characters, minimum 8
+                and maximum 20 characters.
+              </p>
 
               {/* Summary */}
               <div className="mt-4 rounded-xl border border-ink-100 bg-ink-50 p-4">

@@ -8,7 +8,14 @@ import { env } from "@/lib/env";
 
 const RegisterBody = z.object({
   name: z.string().min(2).max(100),
-  password: z.string().min(8).max(72),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(20, "Password must be at most 20 characters")
+    .refine(
+      (pwd) => /[A-Za-z]/.test(pwd) && /\d/.test(pwd) && /[^A-Za-z0-9]/.test(pwd),
+      "Password must include letters, numbers, and a special character"
+    ),
   shopName: z.string().min(1),
   shopAddress: z.string().optional(),
   city: z.string().optional(),
