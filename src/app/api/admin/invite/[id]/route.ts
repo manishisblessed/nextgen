@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { getPartner } from "@/lib/partners";
 import { env } from "@/lib/env";
-import { renderInviteEmail } from "@/lib/email/templates";
+import { renderInviteEmail, renderAccountApprovedEmail } from "@/lib/email/templates";
 
 const PatchBody = z.object({
   action: z.enum(["approve", "reject", "resend", "update"]),
@@ -244,18 +244,52 @@ export async function PATCH(
       }
     });
 
+    let emailSent = false;
+    let emailError: string | undefined;
+    try {
+      const approvedUser = invite.userId
+        ? await prisma.user.findUnique({
+            where: { id: invite.userId },
+            select: { name: true, email: true },
+          })
+        : null;
+      const loginLink = `${env.NEXT_PUBLIC_APP_URL}/login`;
+      const { subject, html } = renderAccountApprovedEmail({
+        name: approvedUser?.name ?? invite.name ?? undefined,
+        role: invite.role,
+        loginLink,
+        email: approvedUser?.email ?? invite.email,
+      });
+      const emailProvider = getPartner("email");
+      const result = await emailProvider.send({
+        from: process.env.EMAIL_FROM_INFO || process.env.EMAIL_FROM,
+        to: approvedUser?.email ?? invite.email,
+        subject,
+        html,
+      });
+      emailSent = result.ok;
+      if (!result.ok) emailError = `${result.code}: ${result.message}`;
+    } catch (e) {
+      emailError = (e as Error).message;
+    }
+
     await prisma.auditLog.create({
       data: {
         userId: user.id,
         action: "invite.approved",
         entity: "Invite",
         entityId: id,
-        meta: { approvedUserId: invite.userId },
+        meta: { approvedUserId: invite.userId, emailSent, emailError },
         ip: clientIp(req),
       },
     });
 
-    return NextResponse.json({ ok: true, status: "APPROVED" });
+    return NextResponse.json({
+      ok: true,
+      status: "APPROVED",
+      emailSent,
+      ...(emailError ? { emailError } : {}),
+    });
   } else {
     await prisma.$transaction(async (tx) => {
       await tx.invite.update({

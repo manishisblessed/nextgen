@@ -224,3 +224,93 @@ export function renderInviteEmail(opts: {
 
   return { subject, html: shell({ preheader, bodyHtml: body }) };
 }
+
+/**
+ * Sent when an admin approves a registered network-tier account (SD/MD/DT/RT).
+ * Tells the user they can now log in.
+ */
+export function renderAccountApprovedEmail(opts: {
+  name?: string;
+  role: string;
+  loginLink: string;
+  email: string;
+}): { subject: string; html: string } {
+  const roleLabel = fmtRole(opts.role);
+  const firstName = opts.name?.split(" ")[0]?.trim();
+  const fullName = opts.name?.trim() || firstName || "there";
+  const greeting = firstName ? `Dear ${fullName},` : "Dear user,";
+
+  const subject = `Your NextGenPay ${roleLabel} account is approved`;
+  const preheader = `Good news — your ${roleLabel} account is live. Sign in and start using NextGenPay.`;
+
+  const body = `
+    <div style="display:inline-block;background:#ecfdf5;color:#059669;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;padding:6px 12px;border-radius:999px;">
+      Account approved
+    </div>
+    <h1 style="font-size:26px;line-height:34px;color:${BRAND.ink};margin:14px 0 10px 0;font-weight:800;letter-spacing:-0.3px;">
+      You're approved${firstName ? `, ${firstName}` : ""}!
+    </h1>
+    <p style="font-size:15px;line-height:24px;color:${BRAND.inkMuted};margin:0 0 8px 0;">${greeting}</p>
+    <p style="font-size:15px;line-height:24px;color:${BRAND.inkMuted};margin:0 0 20px 0;">
+      Great news &mdash; your <strong style="color:${BRAND.ink};">${roleLabel}</strong> account on NextGenPay has been approved by our team. You can now sign in and access your dashboard.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0 22px 0;width:100%;">
+      <tr>
+        <td style="background:#ecfdf5;border:1px solid #a7f3d0;border-left:4px solid #059669;padding:14px 18px;border-radius:12px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#059669;margin-bottom:4px;">Status</div>
+          <div style="font-size:16px;font-weight:800;color:${BRAND.ink};">Active &mdash; ready to log in</div>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;background:${BRAND.primarySoft};border:1px solid ${BRAND.border};border-radius:12px;">
+      <tr>
+        <td style="padding:6px 18px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="padding:12px 0;color:${BRAND.inkMuted};font-size:13px;width:110px;">Role</td>
+              <td style="padding:12px 0;color:${BRAND.ink};font-size:14px;font-weight:700;text-align:right;">${roleLabel}</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 0;color:${BRAND.inkMuted};font-size:13px;border-top:1px solid ${BRAND.border};">Email</td>
+              <td style="padding:12px 0;color:${BRAND.ink};font-size:14px;font-weight:600;text-align:right;border-top:1px solid ${BRAND.border};">${opts.email}</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 0;color:${BRAND.inkMuted};font-size:13px;border-top:1px solid ${BRAND.border};">Password</td>
+              <td style="padding:12px 0;color:${BRAND.inkMuted};font-size:13px;font-style:italic;text-align:right;border-top:1px solid ${BRAND.border};">The one you set during registration</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px 0;">
+      <tr>
+        <td align="left">
+          <a href="${opts.loginLink}" style="display:inline-block;background:linear-gradient(135deg,${BRAND.primary} 0%,${BRAND.primaryDark} 100%);color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:12px;box-shadow:0 8px 20px rgba(46,73,173,0.35);">
+            Login to your dashboard &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>
+
+    <div style="border:1px dashed ${BRAND.border};border-radius:10px;padding:12px 14px;margin:0 0 24px 0;font-size:12px;color:${BRAND.inkMuted};word-break:break-all;">
+      <div style="font-weight:700;color:${BRAND.ink};margin-bottom:4px;">Or paste this link in your browser</div>
+      <a href="${opts.loginLink}" style="color:${BRAND.primary};text-decoration:none;">${opts.loginLink}</a>
+    </div>
+
+    <p style="font-size:13px;color:${BRAND.inkMuted};line-height:20px;margin:8px 0 0 0;">
+      On first login you may be asked to set up two-factor authentication &mdash; this keeps your account secure.
+    </p>
+    <p style="font-size:13px;color:${BRAND.inkMuted};line-height:20px;margin:16px 0 0 0;">
+      Need help? Reply to this email or write to <a href="mailto:support@nxtgpay.com" style="color:${BRAND.primary};text-decoration:none;font-weight:600;">support@nxtgpay.com</a>.
+    </p>
+    <p style="font-size:14px;color:${BRAND.ink};line-height:20px;margin:18px 0 8px 0;">
+      Cheers,<br/>
+      <strong>Team NextGenPay</strong>
+    </p>
+  `;
+
+  return { subject, html: shell({ preheader, bodyHtml: body }) };
+}
