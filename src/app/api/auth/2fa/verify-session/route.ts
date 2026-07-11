@@ -11,6 +11,7 @@ import {
 } from "@/lib/two-factor";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { clientIp } from "@/lib/security/audit";
+import { getLoginBlock } from "@/lib/security/accountGate";
 
 const Body = z.object({
   tempToken: z.string().min(10),
@@ -73,8 +74,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    if (user.status === "CLOSED") {
-      return NextResponse.json({ error: "Account closed" }, { status: 403 });
+    const loginBlock = getLoginBlock(user.status);
+    if (loginBlock) {
+      return NextResponse.json(
+        { error: loginBlock.error, code: loginBlock.code },
+        { status: 403 }
+      );
     }
 
     // Rate limiting

@@ -20,6 +20,7 @@ import {
   clientIp,
 } from "@/lib/security/audit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
+import { getLoginBlock } from "@/lib/security/accountGate";
 
 const LocationSchema = z.object({
   lat: z.number(),
@@ -97,7 +98,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    if (user.status === "CLOSED") {
+    const loginBlock = getLoginBlock(user.status);
+    if (loginBlock) {
       await logSecurityEvent({
         action: "auth.login_blocked",
         severity: "warn",
@@ -106,9 +108,12 @@ export async function POST(req: Request) {
         entityId: user.id,
         ip,
         userAgent,
-        meta: { reason: "account_closed" },
+        meta: { reason: loginBlock.code },
       });
-      return NextResponse.json({ error: "Account has been closed" }, { status: 403 });
+      return NextResponse.json(
+        { error: loginBlock.error, code: loginBlock.code },
+        { status: 403 }
+      );
     }
 
     // Successful credential check — clear lockout counter.

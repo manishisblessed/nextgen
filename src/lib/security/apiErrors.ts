@@ -8,7 +8,7 @@ import { StepUpError } from "./stepUp";
 import { TxnPinError } from "./txnPin";
 import { ReKycRequiredError } from "./kycGate";
 import { LivenessRequiredError } from "./livenessGate";
-import { AccountSuspendedError } from "./accountGate";
+import { AccountSuspendedError, AccountPendingApprovalError } from "./accountGate";
 import { IdempotencyInProgressError } from "../idempotency";
 import { ServiceDisabledError } from "../services/guard";
 import { RiskError } from "../risk/engine";
@@ -71,6 +71,12 @@ export function toErrorResponse(e: unknown): NextResponse {
     );
   }
   if (e instanceof AccountSuspendedError) {
+    return NextResponse.json(
+      { error: e.message, code: e.code },
+      { status: e.statusCode }
+    );
+  }
+  if (e instanceof AccountPendingApprovalError) {
     return NextResponse.json(
       { error: e.message, code: e.code },
       { status: e.statusCode }

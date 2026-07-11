@@ -13,6 +13,7 @@ import {
   normalizeIdentifier,
 } from "./security/lockout";
 import { bumpTokenVersion } from "./security/session";
+import { isLoginAllowed } from "./security/accountGate";
 
 export type SessionUser = {
   id: string;
@@ -85,7 +86,7 @@ export const authOptions: NextAuthOptions = {
         const user = await prisma.user.findUnique({
           where: { id: userId },
         });
-        if (!user || user.status === "CLOSED") return null;
+        if (!user || !isLoginAllowed(user.status)) return null;
 
         return {
           id: user.id,
@@ -138,7 +139,7 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        if (user.status === "CLOSED") return null;
+        if (!isLoginAllowed(user.status)) return null;
 
         // If 2FA is enabled, block NextAuth session creation.
         // The frontend must use /api/auth/login → /api/auth/2fa/verify flow instead.
@@ -213,7 +214,7 @@ export const authOptions: NextAuthOptions = {
           });
           if (
             !fresh ||
-            fresh.status === "CLOSED" ||
+            !isLoginAllowed(fresh.status) ||
             (token.tokenVersion ?? -1) !== fresh.tokenVersion
           ) {
             return {} as typeof token;
@@ -341,7 +342,12 @@ export function verifyMobileToken(token: string): SessionUser | null {
 export async function requireAuth(): Promise<SessionUser> {
   // 1. Try NextAuth session (web)
   const session = await getServerAuth();
-  if (session?.user) return session.user;
+  if (session?.user) {
+    if (!isLoginAllowed(session.user.status)) {
+      throw new AuthError("Account is not active", 403);
+    }
+    return session.user;
+  }
 
   // 2. Try Bearer token (mobile / API)
   const h = headers();
@@ -357,6 +363,9 @@ export async function requireAuth(): Promise<SessionUser> {
       if (dbUser) {
         user.walletBalance = Number(dbUser.walletBalance);
         user.status = dbUser.status;
+      }
+      if (!isLoginAllowed(user.status)) {
+        throw new AuthError("Account is not active", 403);
       }
       return user;
     }
