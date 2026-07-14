@@ -45,6 +45,40 @@ export async function POST(
     return NextResponse.json({ ok: true, alreadyVerified: true });
   }
 
+  // Re-check uniqueness: another user/invite may have registered this
+  // phone or email between invite creation and OTP verification.
+  const contactField = channel === "SMS" ? "phone" : "email";
+  const normalizedTarget = channel === "EMAIL" ? target.toLowerCase() : target;
+
+  const dupUser = await prisma.user.findFirst({
+    where: {
+      [contactField]: normalizedTarget,
+      ...(invite.userId ? { id: { not: invite.userId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (dupUser) {
+    return NextResponse.json(
+      { error: `This ${channel === "SMS" ? "mobile number" : "email"} is already registered with another account` },
+      { status: 409 }
+    );
+  }
+
+  const dupInvite = await prisma.invite.findFirst({
+    where: {
+      [contactField]: normalizedTarget,
+      id: { not: invite.id },
+      status: { in: ["REGISTERED", "VERIFIED", "APPROVED"] },
+    },
+    select: { id: true },
+  });
+  if (dupInvite) {
+    return NextResponse.json(
+      { error: `This ${channel === "SMS" ? "mobile number" : "email"} is already used in another onboarding` },
+      { status: 409 }
+    );
+  }
+
   // Twilio Verify handles SMS verification end-to-end
   if (channel === "SMS" && isTwilioOtpEnabled()) {
     const phone = target.startsWith("+")

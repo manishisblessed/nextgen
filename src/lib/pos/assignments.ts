@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getPosMachines } from "@/lib/partners/sameday-pos";
 import { isAdminRole, scopeUserIdFilter } from "@/lib/security/ownership";
@@ -42,13 +43,17 @@ function toSyncedFields(m: ExternalMachineRow) {
 
 /**
  * Pull the full external machine inventory and upsert it into `PosMachine`.
- * Assignment fields are preserved across syncs. Returns sync counters.
+ * Assignment fields are preserved for machines that remain in the feed.
+ * Partner-synced rows missing from this pull are removed so credential /
+ * tenant switches don't leave the previous account's inventory behind.
+ * Manual inventory rows (`source = MANUAL`) are never deleted by sync.
  */
 export async function syncPosMachines(): Promise<PosSyncResult> {
   let page = 1;
   let scanned = 0;
   let created = 0;
   let updated = 0;
+  const seenIds = new Set<string>();
 
   for (; page <= MAX_PAGES; page++) {
     const res = await getPosMachines({ page, limit: SYNC_PAGE_LIMIT });
@@ -62,29 +67,108 @@ export async function syncPosMachines(): Promise<PosSyncResult> {
     if (machines.length === 0) break;
 
     const externalIds = machines.map((m) => m.id);
+    for (const id of externalIds) seenIds.add(id);
+
     const existing = await prisma.posMachine.findMany({
       where: { externalId: { in: externalIds } },
       select: { externalId: true },
     });
     const existingSet = new Set(existing.map((e) => e.externalId));
 
-    for (const m of machines) {
-      const fields = toSyncedFields(m);
-      await prisma.posMachine.upsert({
-        where: { externalId: m.id },
-        update: fields,
-        create: { externalId: m.id, ...fields },
-      });
-      scanned++;
-      if (existingSet.has(m.id)) updated++;
-      else created++;
+    // Upsert in parallel batches — full sequential upserts time out on first sync.
+    const BATCH = 25;
+    for (let i = 0; i < machines.length; i += BATCH) {
+      const slice = machines.slice(i, i + BATCH);
+      await Promise.all(
+        slice.map((m) => {
+          const fields = toSyncedFields(m);
+          return prisma.posMachine.upsert({
+            where: { externalId: m.id },
+            update: fields,
+            create: { externalId: m.id, source: "SYNC", ...fields },
+          });
+        })
+      );
+      for (const m of slice) {
+        scanned++;
+        if (existingSet.has(m.id)) updated++;
+        else created++;
+      }
     }
 
     const pg = res.data.pagination;
     if (!pg?.has_next_page) break;
   }
 
-  return { ok: true, scanned, created, updated };
+  // Drop stale partner rows after a successful crawl. Manual machines stay.
+  // `notIn: []` is treated as "match all" in Prisma, so empty feeds wipe the
+  // previous SYNC mirror — correct when switching to an account with no terminals.
+  const removed = (
+    await prisma.posMachine.deleteMany({
+      where:
+        seenIds.size === 0
+          ? { source: "SYNC" }
+          : { source: "SYNC", externalId: { notIn: Array.from(seenIds) } },
+    })
+  ).count;
+
+  return { ok: true, scanned, created, updated, removed };
+}
+
+/**
+ * Move a machine to a new holder (or back to stock when `toUserId` is null)
+ * inside an existing transaction, keeping the tracking-report lifecycle
+ * coherent: the previous ACTIVE assignment entry is closed as RETURNED, and
+ * the new entry starts ACTIVE (assign) or is a plain EVENT (unassign).
+ */
+export async function applyAssignment(
+  tx: Prisma.TransactionClient,
+  opts: {
+    machineId: string;
+    fromUserId: string | null;
+    toUserId: string | null;
+    byUserId: string;
+    note?: string;
+    returnReason?: string;
+  }
+) {
+  const now = new Date();
+  const action = opts.toUserId ? "assign" : "unassign";
+
+  const row = await tx.posMachine.update({
+    where: { id: opts.machineId },
+    data: {
+      assignedUserId: opts.toUserId,
+      assignedAt: opts.toUserId ? now : null,
+      assignedById: opts.toUserId ? opts.byUserId : null,
+    },
+    select: posMachineSelect,
+  });
+
+  await tx.posAssignmentLog.updateMany({
+    where: { machineId: opts.machineId, status: "ACTIVE" },
+    data: {
+      status: "RETURNED",
+      returnedDate: now,
+      ...(opts.returnReason ? { returnReason: opts.returnReason } : {}),
+    },
+  });
+
+  await tx.posAssignmentLog.create({
+    data: {
+      machineId: opts.machineId,
+      action,
+      fromUserId: opts.fromUserId ?? undefined,
+      toUserId: opts.toUserId ?? undefined,
+      byUserId: opts.byUserId,
+      note: opts.note ?? undefined,
+      status: action === "assign" ? "ACTIVE" : "EVENT",
+      assignedDate: action === "assign" ? now : undefined,
+      returnReason: action === "unassign" ? opts.returnReason ?? undefined : undefined,
+    },
+  });
+
+  return row;
 }
 
 type PosMachineWithAssignee = {
@@ -140,20 +224,30 @@ export const posMachineSelect = {
  * non-admins to the terminals assigned to them (and, for parents, their
  * downline). Admins are unrestricted.
  */
+export type ScopedTerminal = { tid: string; assignedAt: Date | null };
+
 export async function scopePosTerminals(
   user: SessionUser
-): Promise<{ all: boolean; tids: string[] }> {
-  if (isAdminRole(user.role)) return { all: true, tids: [] };
+): Promise<{ all: boolean; tids: string[]; terminals: ScopedTerminal[] }> {
+  if (isAdminRole(user.role))
+    return { all: true, tids: [], terminals: [] };
 
-  const scope = await scopeUserIdFilter(user); // { userId: { in: [...] } } for non-admins
+  const scope = await scopeUserIdFilter(user);
   const rows = await prisma.posMachine.findMany({
     where: { assignedUserId: scope.userId, tid: { not: null } },
-    select: { tid: true },
+    select: { tid: true, assignedAt: true },
   });
-  const tids = Array.from(
-    new Set(rows.map((r) => r.tid).filter((t): t is string => Boolean(t)))
-  );
-  return { all: false, tids };
+
+  const seen = new Set<string>();
+  const terminals: ScopedTerminal[] = [];
+  for (const r of rows) {
+    if (r.tid && !seen.has(r.tid)) {
+      seen.add(r.tid);
+      terminals.push({ tid: r.tid, assignedAt: r.assignedAt });
+    }
+  }
+
+  return { all: false, tids: terminals.map((t) => t.tid), terminals };
 }
 
 /** Serialize a DB row (with assignee) into the API/UI shape. */

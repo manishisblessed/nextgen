@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ScanFace, ArrowRight } from "lucide-react";
+import useSWR from "swr";
 import { Button } from "@/components/ui/Button";
 
 type LivenessStatus = {
@@ -13,34 +13,24 @@ type LivenessStatus = {
   required: boolean;
 };
 
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return res.json() as Promise<LivenessStatus>;
+};
+
 /**
- * Blocking onboarding liveness prompt (Phase 14). Polls the per-user status and,
- * when a network user (RT/DT/MD/SD) has not yet recorded their liveness video,
- * overlays a non-dismissible modal routing to /dashboard/liveness. Staff/admin
- * roles never trigger it (the API returns required=false for them). Hides itself
- * on the capture page so the user can complete the flow.
- *
- * This is what gates upline-onboarded users who land in the app with
- * hasLivenessVideo=false: they can log in and view, but must capture the video
- * before they can transact (the API enforces the same gate server-side).
+ * Blocking onboarding liveness prompt. Cached via SWR so sidebar navigation
+ * does not re-hit the API on every route change.
  */
 export function LivenessGate() {
   const router = useRouter();
   const pathname = usePathname();
-  const [status, setStatus] = useState<LivenessStatus | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    fetch("/api/kyc/video/status")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (active && d) setStatus(d);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
+  const { data: status } = useSWR("/api/kyc/video/status", fetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 10 * 60_000,
+    refreshInterval: 15 * 60_000,
+  });
 
   const onCapturePage = pathname?.startsWith("/dashboard/liveness");
   const show = !!status?.required && status.isNetworkTier && !onCapturePage;

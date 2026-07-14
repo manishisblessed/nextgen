@@ -174,6 +174,25 @@ export async function POST(
     }
   }
 
+  // Aadhaar last-4 fallback: catch legacy records where aadhaarNumber is NULL
+  if (data.aadhaarNumber) {
+    const last4 = data.aadhaarNumber.slice(-4);
+    const dupLast4 = await prisma.kyc.findFirst({
+      where: {
+        aadhaarLast4: last4,
+        aadhaarNumber: null,
+        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+      },
+      select: { userId: true },
+    });
+    if (dupLast4) {
+      return NextResponse.json(
+        { error: "Another account is already registered with this Aadhaar number" },
+        { status: 409 }
+      );
+    }
+  }
+
   const verifications = await prisma.verificationResult.findMany({
     where: { inviteId: invite.id },
     select: { type: true, status: true },

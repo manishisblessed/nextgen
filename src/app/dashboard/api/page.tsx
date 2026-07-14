@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Copy,
   Plus,
@@ -16,6 +17,7 @@ import {
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
 
 type Scope = { id: string; label: string };
@@ -90,6 +92,12 @@ export default function ApiKeysPage() {
   const [creatingEp, setCreatingEp] = useState(false);
   const [newEpSecret, setNewEpSecret] = useState<string | null>(null);
 
+  // Pending destructive actions (confirmed via dialog)
+  const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
+  const [revoking, setRevoking] = useState(false);
+  const [removeEpTarget, setRemoveEpTarget] = useState<EndpointRow | null>(null);
+  const [removingEp, setRemovingEp] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -144,9 +152,18 @@ export default function ApiKeysPage() {
   }
 
   async function revokeKey(id: string) {
-    if (!confirm("Revoke this key? Integrations using it will stop working immediately.")) return;
-    const res = await fetch(`/api/platform/keys/${id}`, { method: "DELETE" });
-    if (res.ok) await load();
+    setRevoking(true);
+    try {
+      const res = await fetch(`/api/platform/keys/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("API key revoked");
+        await load();
+      } else {
+        toast.error("Failed to revoke key");
+      }
+    } finally {
+      setRevoking(false);
+    }
   }
 
   async function createEndpoint() {
@@ -183,9 +200,18 @@ export default function ApiKeysPage() {
   }
 
   async function deleteEndpoint(id: string) {
-    if (!confirm("Remove this webhook endpoint? Pending deliveries will fail.")) return;
-    const res = await fetch(`/api/platform/webhooks?id=${id}`, { method: "DELETE" });
-    if (res.ok) await load();
+    setRemovingEp(true);
+    try {
+      const res = await fetch(`/api/platform/webhooks?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Webhook endpoint removed");
+        await load();
+      } else {
+        toast.error("Failed to remove endpoint");
+      }
+    } finally {
+      setRemovingEp(false);
+    }
   }
 
   if (forbidden) {
@@ -353,7 +379,7 @@ export default function ApiKeysPage() {
                   <td className="px-5 py-3 text-right">
                     {!k.revokedAt && (
                       <button
-                        onClick={() => revokeKey(k.id)}
+                        onClick={() => setRevokeTarget(k)}
                         className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
                         title="Revoke"
                       >
@@ -461,7 +487,7 @@ export default function ApiKeysPage() {
                         <Power className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => deleteEndpoint(ep.id)}
+                        onClick={() => setRemoveEpTarget(ep)}
                         className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
                         title="Delete"
                       >
@@ -524,6 +550,49 @@ export default function ApiKeysPage() {
         <div>  -H &quot;Content-Type: application/json&quot; \</div>
         <div>  -d &apos;{"{"}&quot;mode&quot;:&quot;IMPS&quot;,&quot;amount&quot;:5000,&quot;beneficiaryName&quot;:&quot;Ramesh Kumar&quot;,&quot;accountNumber&quot;:&quot;123456789012&quot;,&quot;ifsc&quot;:&quot;SBIN0001234&quot;{"}"}&apos;</div>
       </div>
+
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onClose={() => setRevokeTarget(null)}
+        busy={revoking}
+        title="Revoke this key?"
+        description={
+          revokeTarget && (
+            <>
+              <span className="font-semibold text-ink-900">{revokeTarget.label}</span>{" "}
+              (<span className="font-mono text-xs">{revokeTarget.keyId}</span>) — integrations using
+              it will stop working immediately.
+            </>
+          )
+        }
+        confirmLabel="Revoke"
+        onConfirm={async () => {
+          if (!revokeTarget) return;
+          await revokeKey(revokeTarget.id);
+          setRevokeTarget(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={removeEpTarget !== null}
+        onClose={() => setRemoveEpTarget(null)}
+        busy={removingEp}
+        title="Remove this webhook endpoint?"
+        description={
+          removeEpTarget && (
+            <>
+              <span className="font-mono text-xs text-ink-900">{removeEpTarget.url}</span> will stop
+              receiving events and pending deliveries will fail.
+            </>
+          )
+        }
+        confirmLabel="Remove"
+        onConfirm={async () => {
+          if (!removeEpTarget) return;
+          await deleteEndpoint(removeEpTarget.id);
+          setRemoveEpTarget(null);
+        }}
+      />
     </div>
   );
 }

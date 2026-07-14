@@ -10,7 +10,8 @@ import { clientIp } from "@/lib/security/audit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
-import { percentOf, round, lte, dec, toNumber } from "@/lib/money";
+import { getEffectiveRate } from "@/lib/scheme/resolver";
+import { toNumber } from "@/lib/money";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -53,17 +54,18 @@ export async function POST(req: Request) {
 
   const bbps = getPartner("bbps");
   try {
+    // Scheme-driven pricing (cascade model): the user's assigned scheme slab
+    // sets the charge (fee) and their own commission; ancestors earn margins
+    // via distributeCommission after success. No hardcoded rates.
+    const service = SERVICE[parsed.data.category];
+    const rate = await getEffectiveRate(user.id, service, parsed.data.amount);
+
     const result = await runTransaction({
       userId: user.id,
-      service: SERVICE[parsed.data.category],
+      service,
       amount: parsed.data.amount,
-      fee: 0,
-      // Server-side Decimal commission: 0.8% of amount, capped at ₹15.
-      commission: (() => {
-        const raw = round(percentOf(parsed.data.amount, 0.8));
-        const cap = dec(15);
-        return toNumber(lte(raw, cap) ? raw : cap);
-      })(),
+      fee: toNumber(rate.charge),
+      commission: toNumber(rate.commissionOwn),
       idempotencyKey: parsed.data.idempotencyKey,
       customer: Object.values(parsed.data.customerParams)[0],
       operator: parsed.data.billerCode,
@@ -72,7 +74,8 @@ export async function POST(req: Request) {
       call: () => bbps.pay({ userId: user.id, ...parsed.data })
     });
 
-    return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+    const httpStatus = result.status === "SUCCESS" ? 200 : result.status === "PROCESSING" ? 202 : 502;
+    return NextResponse.json(result, { status: httpStatus });
   } catch (e) {
     return toErrorResponse(e);
   }

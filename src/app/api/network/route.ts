@@ -30,6 +30,8 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q") ?? "";
     const status = searchParams.get("status");
+    const page = Math.max(1, Number(searchParams.get("page") ?? 1));
+    const pageSize = Math.min(100, Math.max(10, Number(searchParams.get("pageSize") ?? 50)));
 
     const where: Record<string, unknown> = {
       parentId: user.id,
@@ -53,22 +55,27 @@ export async function GET(req: Request) {
       ];
     }
 
-    const children = await prisma.user.findMany({
-      where: where as any,
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        status: true,
-        shopName: true,
-        city: true,
-        state: true,
-        walletBalance: true,
-        createdAt: true,
-        _count: { select: { children: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const [total, children] = await Promise.all([
+      prisma.user.count({ where: where as any }),
+      prisma.user.findMany({
+        where: where as any,
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          status: true,
+          shopName: true,
+          city: true,
+          state: true,
+          walletBalance: true,
+          createdAt: true,
+          _count: { select: { children: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
 
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -125,7 +132,7 @@ export async function GET(req: Request) {
       retailers: u._count.children,
     }));
 
-    return NextResponse.json({ users: mapped });
+    return NextResponse.json({ users: mapped, total, page, pageSize });
   } catch (e: any) {
     if (e?.name === "AuthError") return NextResponse.json({ error: e.message }, { status: 401 });
     console.error("[network] GET error:", e);

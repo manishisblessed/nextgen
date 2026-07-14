@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "../db";
+import { invalidateSessionValidation } from "./sessionValidationCache";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -28,6 +29,9 @@ export async function bumpTokenVersion(
       where: { id: userId },
       data: { tokenVersion: { increment: 1 } },
     });
+    // Drop the cached validation snapshot so the invalidation is instant on
+    // this instance instead of waiting out the cache TTL.
+    invalidateSessionValidation(userId);
   } catch (err) {
     if (!opts.swallow) throw err;
   }

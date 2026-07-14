@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   CheckCircle2,
   XCircle,
@@ -26,7 +27,9 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+import { Pagination } from "@/components/ui/Pagination";
 
 type OnboardDoc = {
   id: string;
@@ -178,35 +181,37 @@ export default function AdminKycPage() {
   const [error, setError] = useState<string | null>(null);
   const [deciding, setDeciding] = useState<string | null>(null);
   const [viewing, setViewing] = useState<KycRow | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 25;
 
   const fetchQueue = useCallback(async () => {
     try {
       setFetching(true);
       setError(null);
-      const res = await fetch("/api/kyc/queue");
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      const res = await fetch(`/api/kyc/queue?${params}`);
       if (!res.ok) throw new Error("Failed to fetch");
       const json = await res.json();
       setRows(json.kycs);
       setStats(json.stats);
+      setTotal(json.total ?? json.kycs?.length ?? 0);
     } catch {
       setError("Could not load KYC queue.");
     } finally {
       setFetching(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     fetchQueue();
   }, [fetchQueue]);
 
-  async function decide(id: string, action: "approve" | "reject") {
-    let reason: string | undefined;
-    if (action === "reject") {
-      const input = prompt("Rejection reason (required for the applicant):");
-      if (input === null) return;
-      reason = input || "Documents insufficient";
-    }
-
+  async function decide(id: string, action: "approve" | "reject", reason?: string) {
     setDeciding(id);
     try {
       const res = await fetch(`/api/kyc/${id}`, {
@@ -216,9 +221,10 @@ export default function AdminKycPage() {
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        alert(json.error ?? "Action failed");
+        toast.error(json.error ?? "Action failed");
         return;
       }
+      toast.success(action === "approve" ? "KYC approved." : "KYC rejected.");
       await fetchQueue();
       if (viewing?.id === id) setViewing(null);
     } finally {
@@ -323,7 +329,7 @@ export default function AdminKycPage() {
               )}
             </button>
             <button
-              onClick={() => decide(r.id, "reject")}
+              onClick={() => setRejectTarget(r.id)}
               disabled={r.status !== "PENDING_REVIEW" || busy}
               className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50 disabled:opacity-30"
               title="Reject"
@@ -392,21 +398,41 @@ export default function AdminKycPage() {
         title="KYC queue"
         columns={cols}
         data={rows}
-        empty={
-          fetching
-            ? "Loading KYC applications…"
-            : "No KYC applications found."
-        }
+        loading={fetching}
+        empty="No KYC applications found."
       />
+      <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
 
       {viewing && (
         <DetailDrawer
           kyc={viewing}
           deciding={deciding}
-          onDecide={decide}
+          onDecide={(id, action) => {
+            if (action === "reject") setRejectTarget(id);
+            else decide(id, action);
+          }}
           onClose={() => setViewing(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={rejectTarget !== null}
+        onClose={() => setRejectTarget(null)}
+        busy={rejectTarget !== null && deciding === rejectTarget}
+        title="Reject this KYC application?"
+        description="The applicant will see the reason you provide and can resubmit their documents."
+        confirmLabel="Reject"
+        input={{
+          label: "Rejection reason (required for the applicant)",
+          placeholder: "e.g. Documents insufficient",
+          required: true,
+        }}
+        onConfirm={async (reason) => {
+          if (!rejectTarget) return;
+          await decide(rejectTarget, "reject", reason);
+          setRejectTarget(null);
+        }}
+      />
     </div>
   );
 }

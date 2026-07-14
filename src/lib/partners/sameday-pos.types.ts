@@ -226,6 +226,16 @@ export interface LocalPosMachine {
   syncedAt: string;
 }
 
+/** Per-user fleet breakdown row (direct assignments + outstanding rental dues). */
+export interface PosFleetByUser {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+  machineCount: number;
+  outstandingDues: number;
+}
+
 export interface LocalPosMachinesResponse {
   data: LocalPosMachine[];
   pagination: {
@@ -241,6 +251,7 @@ export interface LocalPosMachinesResponse {
     assigned: number;
     unassigned: number;
   };
+  byUser?: PosFleetByUser[];
 }
 
 /** User-facing (ownership-scoped) list of assigned machines. */
@@ -265,4 +276,35 @@ export interface PosSyncResult {
   scanned: number;
   created: number;
   updated: number;
+  /** Partner-synced rows removed because they were absent from this pull. */
+  removed: number;
+}
+
+// ---------------------------------------------------------------------------
+// Terminal tree (cascading hierarchy filters for POS transactions page)
+// ---------------------------------------------------------------------------
+
+export interface TerminalTreeMember {
+  id: string;
+  name: string;
+  role: string;
+  parentId: string | null;
+}
+
+export interface TerminalTreeTerminal {
+  tid: string;
+  mid: string | null;
+  model: string | null;
+  location: string | null;
+  city: string | null;
+  ownerId: string | null;
+  ownerName?: string | null;
+  ownerRole?: string | null;
+  assignedAt: string | null;
+}
+
+export interface PosTerminalTreeResponse {
+  callerRole: string;
+  members: TerminalTreeMember[];
+  terminals: TerminalTreeTerminal[];
 }

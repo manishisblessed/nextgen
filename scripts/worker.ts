@@ -31,8 +31,13 @@ import { runMonthlyReKycSweep } from "@/lib/rekyc/sweep";
 import { processKycVideoBaseline } from "@/lib/kyc/video/service";
 import { runLedgerIntegrityAudit } from "@/lib/recon/integrity";
 import { runDailyPayoutReconciliation } from "@/lib/recon/payouts";
+import { runBbpsReconciliation } from "@/lib/recon/bbps";
 import { sweepDisputeSlas } from "@/lib/disputes/service";
 import { runSettlementAutosweep } from "@/lib/settlement/autosweep";
+import { runT1SettlementSweep } from "@/lib/settlement/t1";
+import { runPosT1SettlementSweep } from "@/lib/settlement/pos";
+import { runPosRentalBilling } from "@/lib/pos/rental";
+import { getSetting } from "@/lib/settings";
 import { deliverWebhook } from "@/lib/platform/webhooks";
 import { runAmlSweep } from "@/lib/aml/engine";
 import { runAuditAnchorJob } from "@/lib/audit/anchor";
@@ -78,6 +83,20 @@ async function main() {
   // Fallback for missed webhooks: poll every 5 minutes. `schedule` is
   // idempotent by queue name, so re-running on restart is safe.
   await boss.schedule(QUEUES.PAYOUT_RECONCILE, "*/5 * * * *");
+
+  // QUEUES.BBPS_RECONCILE — BulkPe BBPS has no webhooks; this sweep polls
+  // all PROCESSING bill payments and settles/refunds them. Also verifies
+  // recent terminal rows against the provider's books.
+  await boss.work(QUEUES.BBPS_RECONCILE, async () => {
+    const r = await runBbpsReconciliation();
+    if (!r.skipped) {
+      log(
+        `bbps.reconcile: drained=${r.drained} settled=${r.settled} refunded=${r.refunded} ` +
+          `stuck=${r.stuck} verified=${r.verified} mismatches=${r.mismatches}`
+      );
+    }
+  });
+  await boss.schedule(QUEUES.BBPS_RECONCILE, "*/5 * * * *");
 
   // QUEUES.REKYC_MONTHLY — flag all ACTIVE network users for re-verification.
   // The sweep is internally idempotent, so a duplicate/retried delivery is safe.
@@ -129,6 +148,18 @@ async function main() {
     }
 
     try {
+      const bbps = await runBbpsReconciliation();
+      log(
+        `recon.daily: bbps recon drained=${bbps.drained} settled=${bbps.settled} ` +
+          `refunded=${bbps.refunded} stuck=${bbps.stuck} verified=${bbps.verified} ` +
+          `mismatches=${bbps.mismatches}` +
+          (bbps.skipped ? " (skipped — partner disabled)" : "")
+      );
+    } catch (e) {
+      await captureError(e, { where: "recon.daily/bbps-recon", severity: "critical" });
+    }
+
+    try {
       const purgedRl = await purgeExpiredRateLimits();
       const purgedIdem = await prisma.idempotencyKey.deleteMany({
         where: { expiresAt: { lt: new Date() } },
@@ -165,6 +196,71 @@ async function main() {
     );
   });
   await boss.schedule(QUEUES.SETTLEMENT_AUTOSWEEP, "30 19 * * *", {}, { tz: "Asia/Kolkata" });
+
+  // QUEUES.SETTLEMENT_T1 — admin console Phase 4. Scheduled hourly; fires the
+  // AEPS→PRIMARY sweep only at the operator-configured IST hour. Safe to fire
+  // repeatedly: each (user, day) settles at most once via the SettlementRun
+  // unique key + ledger idempotency.
+  await boss.work(QUEUES.SETTLEMENT_T1, async () => {
+    const t1 = await getSetting("settlement.t1");
+    const istHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        hour12: false,
+      }).format(new Date())
+    );
+    if (!t1.enabled || t1.paused || istHour !== t1.hour) return;
+    const r = await runT1SettlementSweep();
+    log(
+      `settlement.t1: processed=${r.processed} settled=${r.settled} ` +
+        `skipped=${r.skipped} failed=${r.failed} amount=₹${r.totalAmount}`
+    );
+  });
+  await boss.schedule(QUEUES.SETTLEMENT_T1, "5 * * * *", {}, { tz: "Asia/Kolkata" });
+
+  // QUEUES.POS_SETTLEMENT_T1 — POS acquirer T+1 settlement. Scheduled hourly;
+  // fires the sweep only at the operator-configured IST hour (PlatformSetting
+  // "settlement.pos_t1"). Only entries captured before the current IST day are
+  // due (true T+1); each entry settles at most once via the pos-settle:<ref>
+  // ledger idempotency key, so duplicate fires are harmless.
+  await boss.work(QUEUES.POS_SETTLEMENT_T1, async () => {
+    const cfg = await getSetting("settlement.pos_t1");
+    const istHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        hour12: false,
+      }).format(new Date())
+    );
+    if (!cfg.enabled || cfg.paused || istHour !== cfg.hour) return;
+    const r = await runPosT1SettlementSweep();
+    if (r.processed > 0)
+      log(
+        `pos.settlement.t1: processed=${r.processed} settled=${r.settled} ` +
+          `failed=${r.failed} amount=₹${r.totalAmount}`
+      );
+  });
+  await boss.schedule(QUEUES.POS_SETTLEMENT_T1, "10 * * * *", {}, { tz: "Asia/Kolkata" });
+
+  // QUEUES.POS_RENTAL_BILLING — admin console Phase 5. Runs every hour; only
+  // fires billing when the current IST hour matches the admin-configured hour.
+  // Idempotent per (subscription, YYYY-MM) via the unique invoice key.
+  await boss.work(QUEUES.POS_RENTAL_BILLING, async () => {
+    const cfg = await getSetting("pos.rental_billing");
+    const istHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        hour12: false,
+      }).format(new Date())
+    );
+    if (istHour !== cfg.hour) return;
+    const r = await runPosRentalBilling();
+    if (r.processed > 0)
+      log(`pos.rental.billing: billed=${r.billed} failed=${r.failed} skipped=${r.skipped}`);
+  });
+  await boss.schedule(QUEUES.POS_RENTAL_BILLING, "0 * * * *", {}, { tz: "Asia/Kolkata" });
 
   // QUEUES.WEBHOOK_DELIVER — Phase 4. Signed partner webhook deliveries;
   // per-job retryLimit set at enqueue time, terminal failures alert ops.
@@ -211,7 +307,7 @@ async function main() {
   }
 
   log(
-    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
+    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.settlement.t1 (10 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
   );
 }
 

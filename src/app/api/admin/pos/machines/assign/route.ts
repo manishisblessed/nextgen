@@ -6,7 +6,8 @@ import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/ra
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { flags } from "@/lib/env";
-import { posMachineSelect, serializePosMachine } from "@/lib/pos/assignments";
+import { applyAssignment, posMachineSelect, serializePosMachine } from "@/lib/pos/assignments";
+import { dec } from "@/lib/money";
 
 export const fetchCache = "force-no-store";
 
@@ -14,19 +15,26 @@ export const dynamic = "force-dynamic";
 
 const AssignBody = z.object({
   machineId: z.string().min(1, "machineId is required"),
-  // null / absent userId unassigns the machine.
   userId: z.string().min(1).nullable().default(null),
   note: z.string().max(500).optional(),
+  // Subscription fields — when assigning to a super-distributor, admin must
+  // set a monthly rent. Subscription is auto-created on assignment.
+  subscription: z.object({
+    planId: z.string().min(1),
+    monthlyRent: z.number().nonnegative(),
+    includeGst: z.boolean().default(false),
+    billingDay: z.number().int().min(1).max(28).default(1),
+  }).optional(),
 }).strict();
 
-const ASSIGNABLE_ROLES = new Set(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]);
+const ASSIGNABLE_ROLES = new Set(["SUPER_DISTRIBUTOR"]);
 
 /**
  * POST /api/admin/pos/machines/assign
  *
  * Assign (or unassign when userId is null) a synced POS machine to a platform
- * user. Object-level authorization: the admin must be able to access the
- * target user (assertCanAccessUser). Audit-logged + assignment-log entry.
+ * user. When assigning, an optional subscription block auto-creates a monthly
+ * rental subscription with the specified rent and GST preference.
  */
 export async function POST(req: Request) {
   let admin;
@@ -55,7 +63,7 @@ export async function POST(req: Request) {
   const parsed = AssignBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const { machineId, userId, note } = parsed.data;
+  const { machineId, userId, note, subscription } = parsed.data;
 
   const machine = await prisma.posMachine.findUnique({
     where: { id: machineId },
@@ -64,7 +72,6 @@ export async function POST(req: Request) {
   if (!machine)
     return NextResponse.json({ error: "POS machine not found" }, { status: 404 });
 
-  // Validate + authorize the target user when assigning.
   if (userId) {
     const target = await prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
@@ -74,7 +81,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Target user not found" }, { status: 404 });
     if (!ASSIGNABLE_ROLES.has(target.role))
       return NextResponse.json(
-        { error: "POS machines can only be assigned to retailer/distributor accounts" },
+        { error: "Admin can only assign POS machines to Super-Distributors" },
         { status: 400 }
       );
     if (target.status === "CLOSED")
@@ -83,7 +90,6 @@ export async function POST(req: Request) {
         { status: 400 }
       );
 
-    // Object-level authorization (IDOR guard) on the assignment target.
     try {
       await assertCanAccessUser(userId, admin);
     } catch (e) {
@@ -96,7 +102,6 @@ export async function POST(req: Request) {
   const fromUserId = machine.assignedUserId;
   const action = userId ? "assign" : "unassign";
 
-  // No-op guard: nothing to do.
   if (fromUserId === userId) {
     const current = await prisma.posMachine.findUnique({
       where: { id: machineId },
@@ -106,26 +111,43 @@ export async function POST(req: Request) {
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.posMachine.update({
-      where: { id: machineId },
-      data: {
-        assignedUserId: userId,
-        assignedAt: userId ? new Date() : null,
-        assignedById: userId ? admin.id : null,
-      },
-      select: posMachineSelect,
+    const row = await applyAssignment(tx, {
+      machineId,
+      fromUserId,
+      toUserId: userId,
+      byUserId: admin.id,
+      note,
     });
 
-    await tx.posAssignmentLog.create({
-      data: {
-        machineId,
-        action,
-        fromUserId: fromUserId ?? undefined,
-        toUserId: userId ?? undefined,
-        byUserId: admin.id,
-        note: note ?? undefined,
-      },
-    });
+    // Cancel any active subscription on this machine when unassigning or reassigning.
+    if (fromUserId) {
+      await tx.posSubscription.updateMany({
+        where: { machineId, status: "ACTIVE" },
+        data: { status: "CANCELLED", cancelledAt: new Date() },
+      });
+    }
+
+    // Auto-create subscription when assigning with subscription params.
+    if (userId && subscription) {
+      const plan = await tx.posRentalPlan.findFirst({
+        where: { id: subscription.planId, active: true },
+      });
+      if (!plan) throw new Error("Rental plan not found or inactive");
+
+      await tx.posSubscription.create({
+        data: {
+          machineId,
+          userId,
+          planId: subscription.planId,
+          billingDay: subscription.billingDay,
+          monthlyRent: dec(subscription.monthlyRent),
+          includeGst: subscription.includeGst,
+          commission: dec(0),
+          createdById: admin.id,
+          status: "ACTIVE",
+        },
+      });
+    }
 
     return row;
   });
@@ -136,7 +158,13 @@ export async function POST(req: Request) {
       action: `pos.machine.${action}`,
       entity: "PosMachine",
       entityId: machineId,
-      meta: { fromUserId, toUserId: userId, by: admin.email, note: note ?? null },
+      meta: {
+        fromUserId,
+        toUserId: userId,
+        by: admin.email,
+        note: note ?? null,
+        subscription: subscription ?? null,
+      },
       ip: clientIp(req),
     },
   });

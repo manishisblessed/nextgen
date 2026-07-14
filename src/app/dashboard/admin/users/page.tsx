@@ -1,13 +1,31 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Filter, MoreHorizontal, ShieldOff, ShieldCheck, RefreshCw, Loader2, Power, X } from "lucide-react";
+import { toast } from "sonner";
+import Link from "next/link";
+import {
+  Search,
+  Filter,
+  MoreHorizontal,
+  ShieldOff,
+  ShieldCheck,
+  RefreshCw,
+  Loader2,
+  Power,
+  X,
+  BookOpen,
+  Network,
+  Copy,
+  Ban,
+} from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+import { Pagination } from "@/components/ui/Pagination";
 import { formatINR } from "@/lib/utils";
 
 type UserRow = {
@@ -29,11 +47,20 @@ export default function AdminUsersPage() {
   const [role, setRole] = useState("all");
   const [status, setStatus] = useState("all");
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [servicesUser, setServicesUser] = useState<UserRow | null>(null);
+  const [moreUser, setMoreUser] = useState<UserRow | null>(null);
+  const [closeTarget, setCloseTarget] = useState<UserRow | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -42,14 +69,23 @@ export default function AdminUsersPage() {
       if (q) params.set("q", q);
       if (role !== "all") params.set("role", role);
       if (status !== "all") params.set("status", status);
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
       const res = await fetch(`/api/admin/users?${params}`);
       const data = await res.json();
-      if (data.users) setUsers(data.users);
+      if (data.users) {
+        setUsers(data.users);
+        setTotal(data.total ?? data.users.length);
+      }
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
+  }, [q, role, status, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [q, role, status]);
 
   useEffect(() => {
@@ -69,6 +105,26 @@ export default function AdminUsersPage() {
       if (res.ok) fetchUsers();
     } catch {
       // silent
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function closeAccount(user: UserRow) {
+    setActing(user.id);
+    setMoreUser(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "close", reason: "Closed by admin from Users" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Close failed");
+      notify(`${user.name} closed.`, true);
+      fetchUsers();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Close failed", false);
     } finally {
       setActing(null);
     }
@@ -160,7 +216,16 @@ export default function AdminUsersPage() {
               <ShieldCheck className="h-4 w-4" />
             </button>
           )}
-          <button className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-ink-100" title="More">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMoreUser(r);
+            }}
+            className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-ink-100"
+            title="More"
+            aria-label={`More actions for ${r.name}`}
+          >
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </div>
@@ -262,18 +327,39 @@ export default function AdminUsersPage() {
       </div>
 
       <DataTable
-        title={loading ? "Loading..." : `${users.length} users`}
+        title={`${total} users`}
         description="Click on a row to view full profile, ledger and transactions."
         columns={columns}
         data={users}
+        loading={loading}
         empty="No users match your filters."
       />
+      <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
 
       {servicesUser && (
         <UserServicesDialog
           userId={servicesUser.id}
           userName={servicesUser.name}
           onClose={() => setServicesUser(null)}
+        />
+      )}
+
+      {moreUser && (
+        <UserMoreMenu
+          user={moreUser}
+          onClose={() => setMoreUser(null)}
+          onManageServices={() => {
+            setServicesUser(moreUser);
+            setMoreUser(null);
+          }}
+          onCloseAccount={() => {
+            setCloseTarget(moreUser);
+            setMoreUser(null);
+          }}
+          onCopied={() => {
+            notify("User ID copied", true);
+            setMoreUser(null);
+          }}
         />
       )}
 
@@ -288,6 +374,136 @@ export default function AdminUsersPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={closeTarget !== null}
+        onClose={() => setCloseTarget(null)}
+        busy={closeTarget !== null && acting === closeTarget.id}
+        title={closeTarget ? `Close account for ${closeTarget.name}?` : "Close account?"}
+        description="This permanently marks the user as Closed and ends their sessions."
+        confirmLabel="Close account"
+        onConfirm={async () => {
+          if (!closeTarget) return;
+          await closeAccount(closeTarget);
+          setCloseTarget(null);
+        }}
+      />
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------- */
+
+function UserMoreMenu({
+  user,
+  onClose,
+  onManageServices,
+  onCloseAccount,
+  onCopied,
+}: {
+  user: UserRow;
+  onClose: () => void;
+  onManageServices: () => void;
+  onCloseAccount: () => void;
+  onCopied: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(user.id);
+      onCopied();
+    } catch {
+      onCopied();
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        role="menu"
+        aria-label={`More actions for ${user.name}`}
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-ink-100 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-ink-500">More actions</p>
+            <h3 className="mt-1 truncate font-display text-base font-bold text-ink-900">{user.name}</h3>
+            <p className="truncate text-xs text-ink-500">
+              {user.shop} · {user.role}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-500 hover:bg-ink-100"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-2">
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-800 transition hover:bg-ink-50"
+            onClick={onManageServices}
+          >
+            <Power className="h-4 w-4 text-ink-500" />
+            Manage services
+          </button>
+          <Link
+            href={`/dashboard/admin/ledger?userId=${encodeURIComponent(user.id)}&q=${encodeURIComponent(user.name)}`}
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-800 transition hover:bg-ink-50"
+            onClick={onClose}
+          >
+            <BookOpen className="h-4 w-4 text-ink-500" />
+            View ledger
+          </Link>
+          <Link
+            href={`/dashboard/admin/network?q=${encodeURIComponent(user.name)}`}
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-800 transition hover:bg-ink-50"
+            onClick={onClose}
+          >
+            <Network className="h-4 w-4 text-ink-500" />
+            Open in Network Manager
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-800 transition hover:bg-ink-50"
+            onClick={copyId}
+          >
+            <Copy className="h-4 w-4 text-ink-500" />
+            Copy user ID
+          </button>
+
+          {user.status !== "Closed" && (
+            <button
+              type="button"
+              role="menuitem"
+              className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-rose-700 transition hover:bg-rose-50"
+              onClick={onCloseAccount}
+            >
+              <Ban className="h-4 w-4" />
+              Close account
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -315,7 +531,10 @@ function UserServicesDialog({
   const [enabledKeys, setEnabledKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -324,16 +543,18 @@ function UserServicesDialog({
         const res = await fetch(`/api/admin/users/${userId}/services`);
         const data = await res.json();
         if (res.ok) {
-          setAllServices(data.allServices ?? []);
-          setEnabledKeys(data.enabledServices ?? []);
+          const services: ServiceItem[] = data.allServices ?? [];
+          setAllServices(services);
+          const userKeys: string[] = data.enabledServices ?? [];
+          setEnabledKeys(userKeys.length === 0 ? services.map((s) => s.key) : userKeys);
         }
       } catch {
-        setNotice({ text: "Failed to load services", ok: false });
+        notify("Failed to load services", false);
       } finally {
         setLoading(false);
       }
     })();
-  }, [userId]);
+  }, [userId, notify]);
 
   function toggleService(key: string) {
     setEnabledKeys((prev) =>
@@ -352,17 +573,18 @@ function UserServicesDialog({
   async function handleSave() {
     setSaving(true);
     try {
+      const allEnabled = enabledKeys.length === allServices.length;
       const res = await fetch(`/api/admin/users/${userId}/services`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabledServices: enabledKeys }),
+        body: JSON.stringify({ enabledServices: allEnabled ? [] : enabledKeys }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Update failed");
-      setNotice({ text: "Services updated successfully!", ok: true });
+      notify("Services updated successfully!", true);
       setTimeout(onClose, 1200);
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Failed to save", ok: false });
+      notify(e instanceof Error ? e.message : "Failed to save", false);
     } finally {
       setSaving(false);
     }
@@ -392,7 +614,7 @@ function UserServicesDialog({
               {userName}
             </h3>
             <p className="mt-1 text-xs text-ink-600">
-              Services are OFF by default — tick the ones this user may access. Changes apply immediately.
+              All services are ON by default. Untick to restrict specific services for this user.
             </p>
           </div>
           <button
@@ -403,18 +625,6 @@ function UserServicesDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-
-        {notice && (
-          <div
-            className={`mx-6 mt-3 rounded-xl border px-4 py-2.5 text-sm font-medium ${
-              notice.ok
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
-          >
-            {notice.text}
-          </div>
-        )}
 
         <div className="overflow-y-auto flex-1 px-6 py-4">
           {loading ? (
@@ -492,8 +702,8 @@ function UserServicesDialog({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saving || loading}>
-            {saving ? "Saving..." : "Save services"}
+          <Button onClick={handleSave} disabled={saving || loading} isLoading={saving}>
+            Save services
           </Button>
         </div>
       </div>
@@ -516,7 +726,10 @@ function BulkServicesDialog({
   const [pickedKeys, setPickedKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<"enable" | "disable" | null>(null);
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -531,12 +744,12 @@ function BulkServicesDialog({
           setAllServices(items);
         }
       } catch {
-        setNotice({ text: "Failed to load services", ok: false });
+        notify("Failed to load services", false);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [notify]);
 
   function togglePicked(key: string) {
     setPickedKeys((prev) =>
@@ -546,7 +759,6 @@ function BulkServicesDialog({
 
   async function apply(action: "enable" | "disable") {
     setSaving(action);
-    setNotice(null);
     try {
       const res = await fetch(`/api/admin/users/services/bulk`, {
         method: "POST",
@@ -555,13 +767,13 @@ function BulkServicesDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Update failed");
-      setNotice({
-        text: `${action === "enable" ? "Enabled" : "Disabled"} ${pickedKeys.length} service(s) for ${data.updated} user(s).`,
-        ok: true,
-      });
+      notify(
+        `${action === "enable" ? "Enabled" : "Disabled"} ${pickedKeys.length} service(s) for ${data.updated} user(s).`,
+        true
+      );
       setTimeout(onDone, 1200);
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Failed to save", ok: false });
+      notify(e instanceof Error ? e.message : "Failed to save", false);
     } finally {
       setSaving(null);
     }
@@ -590,18 +802,6 @@ function BulkServicesDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-
-        {notice && (
-          <div
-            className={`mx-6 mt-3 rounded-xl border px-4 py-2.5 text-sm font-medium ${
-              notice.ok
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
-          >
-            {notice.text}
-          </div>
-        )}
 
         <div className="overflow-y-auto flex-1 px-6 py-4">
           {loading ? (

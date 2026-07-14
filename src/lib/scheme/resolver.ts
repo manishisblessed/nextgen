@@ -6,11 +6,15 @@ import { add, dec, gte, gt, lte, mul, round, type Money } from "../money";
  * Scheme resolver — the single source of truth for "what does this user pay
  * (charge) and earn (commission) for a given service + amount?".
  *
- * Resolution precedence (first hit wins):
- *   1. The user's explicitly-assigned Scheme (User.schemeId), if active.
- *   2. The platform default Scheme (Scheme.isDefault && active).
- * Within the chosen scheme we pick the active SchemeSlab for `service` whose
+ * Cascade model: ONLY the user's explicitly-assigned Scheme (User.schemeId,
+ * active) resolves. There is no platform-default fallback — a user without an
+ * assigned scheme is blocked from transacting (src/lib/scheme/gate.ts).
+ * Within the scheme we pick the active SchemeSlab for `service` whose
  * [minAmount, maxAmount] band contains `amount`.
+ *
+ * `resolvePricingChain` extends this up the network: each ancestor's gross
+ * commission = the margin between their child's scheme rate and their own
+ * scheme rate for the same service + band.
  *
  * All money math goes through money.ts Decimal helpers — never JS floats.
  *
@@ -19,7 +23,7 @@ import { add, dec, gte, gt, lte, mul, round, type Money } from "../money";
  * normalizes both into an absolute rupee figure for `amount`.
  */
 
-export type ResolvedRateSource = "USER_SCHEME" | "DEFAULT_SCHEME" | "NONE";
+export type ResolvedRateSource = "USER_SCHEME" | "NONE";
 
 export type CommissionSplit = {
   retailer: Money;
@@ -36,10 +40,16 @@ export type EffectiveRate = {
   /** Absolute customer-facing charge (₹) for `amount`. Zero when no slab. */
   charge: Money;
   chargeType: RateType | null;
-  /** Absolute commission (₹) for each level for `amount`. */
+  /** Absolute commission (₹) for each level for `amount` (legacy columns). */
   commission: CommissionSplit;
   /** Commission for the resolving user's own role, picked from the split. */
   commissionForUser: Money;
+  /**
+   * Cascade model: absolute commission (₹) the assigned user earns on this
+   * slab (SchemeSlab.commissionValue). This is what the transacting user is
+   * credited; ancestor margins come from resolvePricingChain.
+   */
+  commissionOwn: Money;
 };
 
 /** Map a payout mode to the ServiceCode used for scheme charge lookups. */
@@ -94,6 +104,7 @@ function emptyRate(role: string): EffectiveRate {
     chargeType: null,
     commission: ZERO_SPLIT(),
     commissionForUser: dec(0),
+    commissionOwn: dec(0),
   };
 }
 
@@ -122,13 +133,15 @@ function rateFromSlab(
     chargeType: slab.chargeType,
     commission,
     commissionForUser: commissionForRole(role, commission),
+    commissionOwn: applyRate(amount, slab.commissionType, slab.commissionValue),
   };
 }
 
 /**
  * Resolve the effective charge + commission for a user's service transaction.
- * Returns a zeroed `NONE` result if neither the user's scheme nor a default
- * scheme has a matching slab — callers may then fall back to legacy pricing.
+ * ONLY the user's assigned active scheme resolves (no default fallback).
+ * Returns a zeroed `NONE` result when the user has no scheme or the scheme has
+ * no matching slab — the scheme gate blocks transactions in that state.
  */
 export async function getEffectiveRate(
   userId: string,
@@ -143,7 +156,6 @@ export async function getEffectiveRate(
   });
   if (!user) return emptyRate("RETAILER");
 
-  // 1. The user's assigned scheme (only if active).
   if (user.schemeId) {
     const scheme = await prisma.scheme.findFirst({
       where: { id: user.schemeId, active: true },
@@ -155,17 +167,177 @@ export async function getEffectiveRate(
     }
   }
 
-  // 2. The platform default scheme.
-  const def = await prisma.scheme.findFirst({
-    where: { isDefault: true, active: true },
-    select: { id: true, name: true },
-  });
-  if (def) {
-    const slab = await findSlab(def.id, service, amt);
-    if (slab) return rateFromSlab(amt, slab, def.id, def.name, "DEFAULT_SCHEME", user.role);
+  return emptyRate(user.role);
+}
+
+// ---------------------------------------------------------------------------
+// Pricing chain (cascade model)
+// ---------------------------------------------------------------------------
+
+export type ChainMember = {
+  userId: string;
+  role: string;
+  /** 0 = transacting user, 1 = parent, 2 = grandparent, 3 = great-grandparent */
+  level: number;
+  schemeId: string | null;
+  slabId: string | null;
+  /** Absolute charge (₹) this member's own scheme prices for the txn. */
+  charge: Money;
+  /** Absolute own-commission (₹) this member's scheme grants (commissionValue). */
+  commission: Money;
+  /**
+   * Gross commission (₹) this member earns on the transaction:
+   *   level 0 → their own commissionValue;
+   *   level>0 → margin vs the child: max(0, childCharge − ownCharge)
+   *             + max(0, ownCommission − childCommission).
+   */
+  gross: Money;
+};
+
+export type PricingChain =
+  | {
+      ok: true;
+      schemeId: string;
+      schemeName: string;
+      slabId: string;
+      /** What the transacting user pays as service charge. */
+      userCharge: Money;
+      chargeType: RateType;
+      /** What the transacting user earns (own commissionValue). */
+      userCommission: Money;
+      members: ChainMember[];
+    }
+  | { ok: false; reason: "NO_USER" | "NO_SCHEME" | "NO_SLAB" };
+
+const NETWORK_ROLES = new Set([
+  "RETAILER",
+  "DISTRIBUTOR",
+  "MASTER_DISTRIBUTOR",
+  "SUPER_DISTRIBUTOR",
+]);
+
+/**
+ * Resolve the full network pricing chain for a transaction.
+ *
+ * The transacting user MUST have an active scheme with a matching slab (the
+ * gate enforces this before money moves). Each ancestor's margin is computed
+ * against the nearest descendant's effective rate; an ancestor with no
+ * scheme/slab earns zero and passes the child's rate through unchanged, so a
+ * hole in the chain can never inflate anyone else's margin.
+ */
+export async function resolvePricingChain(
+  userId: string,
+  service: ServiceCode,
+  amount: Money | string | number
+): Promise<PricingChain> {
+  const amt = round(amount);
+
+  // Walk self → parent → … (max 4 network tiers), skipping staff roles.
+  const walk: Array<{ id: string; role: string; schemeId: string | null }> = [];
+  let currentId: string | null = userId;
+  const seen = new Set<string>();
+  for (let depth = 0; depth < 4 && currentId; depth++) {
+    if (seen.has(currentId)) break;
+    seen.add(currentId);
+    const u: { id: string; role: string; schemeId: string | null; parentId: string | null; status: string } | null =
+      await prisma.user.findUnique({
+        where: { id: currentId },
+        select: { id: true, role: true, schemeId: true, parentId: true, status: true },
+      });
+    if (!u || u.status === "CLOSED" || !NETWORK_ROLES.has(u.role)) break;
+    walk.push({ id: u.id, role: u.role, schemeId: u.schemeId });
+    currentId = u.parentId;
   }
 
-  return emptyRate(user.role);
+  if (walk.length === 0) return { ok: false, reason: "NO_USER" };
+
+  // Resolve each member's own scheme slab for this service + amount.
+  type Resolved = {
+    schemeId: string | null;
+    schemeName: string | null;
+    slab: SchemeSlab | null;
+  };
+  const resolved: Resolved[] = [];
+  for (const member of walk) {
+    let r: Resolved = { schemeId: null, schemeName: null, slab: null };
+    if (member.schemeId) {
+      const scheme = await prisma.scheme.findFirst({
+        where: { id: member.schemeId, active: true },
+        select: { id: true, name: true },
+      });
+      if (scheme) {
+        r = { schemeId: scheme.id, schemeName: scheme.name, slab: await findSlab(scheme.id, service, amt) };
+      }
+    }
+    resolved.push(r);
+  }
+
+  const self = resolved[0];
+  if (!self.schemeId) return { ok: false, reason: "NO_SCHEME" };
+  if (!self.slab) return { ok: false, reason: "NO_SLAB" };
+
+  const members: ChainMember[] = [];
+  // Effective child values carried up the chain (pass-through on holes).
+  let childCharge = applyRate(amt, self.slab.chargeType, self.slab.chargeValue);
+  let childCommission = applyRate(amt, self.slab.commissionType, self.slab.commissionValue);
+
+  members.push({
+    userId: walk[0].id,
+    role: walk[0].role,
+    level: 0,
+    schemeId: self.schemeId,
+    slabId: self.slab.id,
+    charge: childCharge,
+    commission: childCommission,
+    gross: childCommission,
+  });
+
+  for (let i = 1; i < walk.length; i++) {
+    const r = resolved[i];
+    if (r.slab) {
+      const ownCharge = applyRate(amt, r.slab.chargeType, r.slab.chargeValue);
+      const ownCommission = applyRate(amt, r.slab.commissionType, r.slab.commissionValue);
+      const chargeMargin = gt(childCharge, ownCharge) ? round(childCharge.sub(ownCharge)) : dec(0);
+      const commissionMargin = gt(ownCommission, childCommission)
+        ? round(ownCommission.sub(childCommission))
+        : dec(0);
+      members.push({
+        userId: walk[i].id,
+        role: walk[i].role,
+        level: i,
+        schemeId: r.schemeId,
+        slabId: r.slab.id,
+        charge: ownCharge,
+        commission: ownCommission,
+        gross: round(add(chargeMargin, commissionMargin)),
+      });
+      childCharge = ownCharge;
+      childCommission = ownCommission;
+    } else {
+      // No scheme/slab for this ancestor — zero margin, pass child values up.
+      members.push({
+        userId: walk[i].id,
+        role: walk[i].role,
+        level: i,
+        schemeId: r.schemeId,
+        slabId: null,
+        charge: childCharge,
+        commission: childCommission,
+        gross: dec(0),
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    schemeId: self.schemeId,
+    schemeName: self.schemeName ?? "",
+    slabId: self.slab.id,
+    userCharge: members[0].charge,
+    chargeType: self.slab.chargeType,
+    userCommission: members[0].commission,
+    members,
+  };
 }
 
 /** Find the active slab in a scheme whose band contains `amount`. */

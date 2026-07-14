@@ -85,62 +85,77 @@ export async function GET() {
       }),
     ]);
 
-    // Best-effort: refresh the BulkPe vendor float so the "Vendor Balances"
-    // card shows live data. Never block the dashboard if BulkPe is unreachable.
+    // BulkPe balance refresh is intentionally NOT awaited here — it can take
+    // several seconds and was blocking the admin home. Cached route balance
+    // is shown immediately; a background refresh updates next load.
     const payoutRoute = serviceRoutes.find((r) => r.key === SERVICE_KEYS.PAYOUT);
     if (payoutRoute && flags.payout) {
-      try {
-        const provider = getPartner("payout");
-        if (typeof provider.fetchBalance === "function") {
-          const bal = await provider.fetchBalance();
-          if (bal.ok) {
-            const balance = dec(bal.data);
-            await prisma.serviceRoute.update({
-              where: { id: payoutRoute.id },
-              data: { balance },
-            });
-            payoutRoute.balance = balance;
+      void (async () => {
+        try {
+          const provider = getPartner("payout");
+          if (typeof provider.fetchBalance === "function") {
+            const bal = await provider.fetchBalance();
+            if (bal.ok) {
+              await prisma.serviceRoute.update({
+                where: { id: payoutRoute.id },
+                data: { balance: dec(bal.data) },
+              });
+            }
           }
+        } catch (err) {
+          console.warn("[admin/stats] BulkPe fetchBalance failed (non-fatal):", err);
         }
-      } catch (err) {
-        console.warn("[admin/stats] BulkPe fetchBalance failed (non-fatal):", err);
-      }
+      })();
     }
 
     const activeUsers =
       userCounts.find((c) => c.status === "ACTIVE")?._count ?? 0;
     const totalUsers = userCounts.reduce((sum, c) => sum + c._count, 0);
 
-    // Daily GMV for last 14 days (for sparkline)
+    // Daily GMV + payout sparklines: one query each for 14 days (not 28 loops).
+    const sparkStart = new Date(now);
+    sparkStart.setDate(sparkStart.getDate() - 13);
+    sparkStart.setHours(0, 0, 0, 0);
+
+    const [gmvRows, payoutRows] = await Promise.all([
+      prisma.$queryRaw<Array<{ day: Date; total: unknown }>>`
+        SELECT date_trunc('day', "createdAt") AS day, COALESCE(SUM(amount), 0) AS total
+        FROM "Transaction"
+        WHERE status = 'SUCCESS' AND "createdAt" >= ${sparkStart}
+        GROUP BY 1
+        ORDER BY 1
+      `,
+      prisma.$queryRaw<Array<{ day: Date; total: unknown }>>`
+        SELECT date_trunc('day', "completedAt") AS day, COALESCE(SUM(amount), 0) AS total
+        FROM "PayoutRequest"
+        WHERE status = 'SUCCESS' AND "completedAt" >= ${sparkStart}
+        GROUP BY 1
+        ORDER BY 1
+      `,
+    ]);
+
+    const gmvMap = new Map(
+      gmvRows.map((r) => [
+        new Date(r.day).toISOString().slice(0, 10),
+        Number(r.total ?? 0),
+      ])
+    );
+    const payoutMap = new Map(
+      payoutRows.map((r) => [
+        new Date(r.day).toISOString().slice(0, 10),
+        Number(r.total ?? 0),
+      ])
+    );
+
     const dailyGmv: number[] = [];
-    for (let i = 13; i >= 0; i--) {
-      const dayStart = new Date(now);
-      dayStart.setDate(dayStart.getDate() - i);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(dayStart);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const agg = await prisma.transaction.aggregate({
-        where: { status: "SUCCESS", createdAt: { gte: dayStart, lte: dayEnd } },
-        _sum: { amount: true },
-      });
-      dailyGmv.push(Number(agg._sum.amount ?? 0));
-    }
-
-    // Daily settled payout volume for last 14 days (for the payout sparkline).
     const dailyPayout: number[] = [];
     for (let i = 13; i >= 0; i--) {
-      const dayStart = new Date(now);
-      dayStart.setDate(dayStart.getDate() - i);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(dayStart);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const agg = await prisma.payoutRequest.aggregate({
-        where: { status: "SUCCESS", completedAt: { gte: dayStart, lte: dayEnd } },
-        _sum: { amount: true },
-      });
-      dailyPayout.push(toNumber(dec(agg._sum.amount ?? 0)));
+      const day = new Date(now);
+      day.setDate(day.getDate() - i);
+      day.setHours(0, 0, 0, 0);
+      const key = day.toISOString().slice(0, 10);
+      dailyGmv.push(gmvMap.get(key) ?? 0);
+      dailyPayout.push(payoutMap.get(key) ?? 0);
     }
 
     // ---- Service Overview + Vendor Balances (from ServiceRoute registry) ----

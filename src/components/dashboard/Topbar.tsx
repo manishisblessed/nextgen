@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Bell, Menu, Search, Wallet, LogOut } from "lucide-react";
@@ -12,6 +12,37 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const router = useRouter();
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
+  const [liveBalance, setLiveBalance] = useState<number | null>(null);
+
+  const lastFetchedAt = useRef(0);
+
+  const fetchBalance = useCallback(async (force = false) => {
+    // Background tabs skip polling entirely; focus refetches are throttled so
+    // rapid alt-tabbing doesn't hammer the API.
+    if (!force && document.hidden) return;
+    if (Date.now() - lastFetchedAt.current < 15_000) return;
+    lastFetchedAt.current = Date.now();
+    try {
+      const res = await fetch("/api/wallet?balanceOnly=1");
+      if (res.ok) {
+        const data = await res.json();
+        setLiveBalance(data.balance ?? null);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchBalance(true);
+    const interval = setInterval(() => fetchBalance(), 60_000);
+    const onFocus = () => fetchBalance();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [fetchBalance]);
 
   async function logout() {
     await signOut({ redirect: false });
@@ -57,7 +88,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
               Wallet
             </span>
             <span className="font-display text-sm font-bold text-ink-900">
-              {formatINR(user?.walletBalance ?? 0)}
+              {formatINR(liveBalance ?? user?.walletBalance ?? 0)}
             </span>
           </div>
         </div>

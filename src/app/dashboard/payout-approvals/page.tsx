@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   CheckCircle2,
   XCircle,
@@ -15,6 +16,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Label, Select } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { formatINR } from "@/lib/utils";
@@ -90,6 +92,7 @@ export default function PayoutApprovalsPage() {
   const [filter, setFilter] = useState<"PENDING" | "ALL">("PENDING");
   const [deciding, setDeciding] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [decisionTarget, setDecisionTarget] = useState<{ row: Payout; action: "approve" | "reject" } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -110,11 +113,7 @@ export default function PayoutApprovalsPage() {
     fetchData();
   }, [fetchData]);
 
-  async function decide(id: string, action: "approve" | "reject") {
-    const remarks =
-      action === "reject"
-        ? prompt("Reason for rejection (optional):") ?? undefined
-        : prompt("Approval remarks (optional):") ?? undefined;
+  async function decide(id: string, action: "approve" | "reject", remarks?: string) {
     setDeciding(id);
     try {
       const res = await fetch(`/api/payout/${id}`, {
@@ -124,9 +123,10 @@ export default function PayoutApprovalsPage() {
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        alert(typeof json.error === "string" ? json.error : "Action failed");
+        toast.error(typeof json.error === "string" ? json.error : "Action failed");
         return;
       }
+      toast.success(action === "approve" ? "Payout approved" : "Payout rejected — funds released back");
       await fetchData();
     } finally {
       setDeciding(null);
@@ -208,7 +208,7 @@ export default function PayoutApprovalsPage() {
             {r.status === "PENDING_APPROVAL" && (
               <>
                 <button
-                  onClick={() => decide(r.id, "approve")}
+                  onClick={() => setDecisionTarget({ row: r, action: "approve" })}
                   disabled={busy}
                   className="grid h-8 w-8 place-items-center rounded-lg text-emerald-700 hover:bg-emerald-50 disabled:opacity-30"
                   title="Approve"
@@ -216,7 +216,7 @@ export default function PayoutApprovalsPage() {
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 </button>
                 <button
-                  onClick={() => decide(r.id, "reject")}
+                  onClick={() => setDecisionTarget({ row: r, action: "reject" })}
                   disabled={busy}
                   className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50 disabled:opacity-30"
                   title="Reject"
@@ -288,10 +288,43 @@ export default function PayoutApprovalsPage() {
         title={fetching ? "Loading…" : `${visible.length} payout${visible.length === 1 ? "" : "s"}`}
         columns={cols}
         data={visible}
-        empty={fetching ? "Loading payouts…" : "Nothing here. The queue is clear."}
+        loading={fetching}
+        empty="Nothing here. The queue is clear."
       />
 
       {detailId && <DetailDrawer id={detailId} onClose={() => setDetailId(null)} />}
+
+      <ConfirmDialog
+        open={decisionTarget !== null}
+        onClose={() => setDecisionTarget(null)}
+        busy={decisionTarget ? deciding === decisionTarget.row.id : false}
+        tone={decisionTarget?.action === "reject" ? "danger" : "default"}
+        title={decisionTarget?.action === "reject" ? "Reject this payout?" : "Approve this payout?"}
+        description={
+          decisionTarget && (
+            <>
+              {formatINR(decisionTarget.row.amount)} to{" "}
+              <span className="font-semibold text-ink-900">{decisionTarget.row.beneficiaryName}</span>
+              {decisionTarget.action === "reject"
+                ? " — funds will be released back to the maker."
+                : " will be released for processing."}
+            </>
+          )
+        }
+        confirmLabel={decisionTarget?.action === "reject" ? "Reject" : "Approve"}
+        input={{
+          label:
+            decisionTarget?.action === "reject"
+              ? "Reason for rejection (optional)"
+              : "Approval remarks (optional)",
+          placeholder: "Add a note for the audit trail…",
+        }}
+        onConfirm={async (remarks) => {
+          if (!decisionTarget) return;
+          await decide(decisionTarget.row.id, decisionTarget.action, remarks || undefined);
+          setDecisionTarget(null);
+        }}
+      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { History, Search, Filter, Loader2 } from "lucide-react";
+import { History, Search, Filter } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { Input, Select } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -97,12 +97,8 @@ export default function TransactionsPage() {
             <option key={s}>{s}</option>
           ))}
         </Select>
-        <Button variant="outline" size="md" onClick={load} disabled={loading}>
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Filter className="h-4 w-4" />
-          )}
+        <Button variant="outline" size="md" onClick={load} isLoading={loading} disabled={loading}>
+          {loading ? "" : <Filter className="h-4 w-4" />}
           Refresh
         </Button>
         <ReportActions

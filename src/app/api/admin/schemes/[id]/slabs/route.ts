@@ -23,6 +23,8 @@ const SlabBody = z
     commissionRetailer: z.number().min(0).default(0),
     commissionDistributor: z.number().min(0).default(0),
     commissionMaster: z.number().min(0).default(0),
+    // Cascade model: commission the ASSIGNED user earns on this slab.
+    commissionValue: z.number().min(0).default(0),
   })
   .superRefine((v, ctx) => {
     if (v.maxAmount < v.minAmount)
@@ -31,7 +33,7 @@ const SlabBody = z
     if (v.chargeType === "PERCENT" && v.chargeValue > 1)
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["chargeValue"], message: "Percent charge must be a fraction ≤ 1 (e.g. 0.005 = 0.5%)" });
     if (v.commissionType === "PERCENT") {
-      for (const k of ["commissionRetailer", "commissionDistributor", "commissionMaster"] as const) {
+      for (const k of ["commissionRetailer", "commissionDistributor", "commissionMaster", "commissionValue"] as const) {
         if (v[k] > 1)
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: "Percent commission must be a fraction ≤ 1" });
       }
@@ -77,6 +79,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       commissionRetailer: body.commissionRetailer,
       commissionDistributor: body.commissionDistributor,
       commissionMaster: body.commissionMaster,
+      commissionValue: body.commissionValue,
     },
   });
 

@@ -87,7 +87,7 @@ export default function AdminSystemPage() {
       </div>
 
       <DataTable
-        title={loading ? "Loading..." : "Partner integrations"}
+        title="Partner integrations" loading={loading}
         columns={cols}
         data={services}
       />

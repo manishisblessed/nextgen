@@ -37,7 +37,9 @@ function buildCsp(): string {
 const ADMIN_PATHS: Array<{ prefix: string; roles: string[] }> = [
   { prefix: "/dashboard/master-admin", roles: ["MASTER_ADMIN"] },
   { prefix: "/dashboard/sub-admin", roles: ["SUPPORT", "MASTER_ADMIN"] },
-  { prefix: "/dashboard/admin", roles: ["MASTER_ADMIN", "ADMIN", "SUPPORT"] },
+  // FINANCE gets read access to the admin area; write APIs enforce their own
+  // stricter role checks (FINANCE is never accepted on mutating endpoints).
+  { prefix: "/dashboard/admin", roles: ["MASTER_ADMIN", "ADMIN", "SUPPORT", "FINANCE"] },
 ];
 
 export async function middleware(req: NextRequest) {

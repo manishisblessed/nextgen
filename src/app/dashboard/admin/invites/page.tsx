@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import {
   UserPlus,
   Send,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label, Select } from "@/components/ui/Input";
 
 type Invite = {
@@ -102,6 +104,8 @@ export default function AdminInvitesPage() {
   const [detailData, setDetailData] = useState<any>(null);
   const [resending, setResending] = useState<string | null>(null);
   const [editingInvite, setEditingInvite] = useState<Invite | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
 
   const fetchInvites = useCallback(async () => {
     setLoading(true);
@@ -129,20 +133,20 @@ export default function AdminInvitesPage() {
     }
   }
 
-  async function handleAction(id: string, action: "approve" | "reject") {
-    const reason =
-      action === "reject"
-        ? prompt("Rejection reason (optional):")
-        : undefined;
+  async function handleAction(id: string, action: "approve" | "reject", reason?: string) {
     const res = await fetch(`/api/admin/invite/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, reason }),
     });
     if (res.ok) {
+      toast.success(action === "approve" ? "Invite approved." : "Invite rejected.");
       fetchInvites();
       setSelectedInvite(null);
       setDetailData(null);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      toast.error(typeof data?.error === "string" ? data.error : `Failed to ${action} invite`);
     }
   }
 
@@ -156,18 +160,18 @@ export default function AdminInvitesPage() {
       });
       const data = await res.json();
       if (res.ok && data.emailSent) {
-        alert("Onboarding email resent successfully!");
+        toast.success("Onboarding email resent successfully!");
       } else if (res.ok && !data.emailSent) {
-        alert(
+        toast.error(
           data.emailError
             ? `Email delivery failed: ${data.emailError}`
             : "Invite found but email delivery failed. Please check email provider settings."
         );
       } else {
-        alert(data.error || "Failed to resend invite");
+        toast.error(data.error || "Failed to resend invite");
       }
     } catch {
-      alert("Network error — could not resend invite");
+      toast.error("Network error — could not resend invite");
     } finally {
       setResending(null);
     }
@@ -230,7 +234,10 @@ export default function AdminInvitesPage() {
             setSelectedInvite(null);
             setDetailData(null);
           }}
-          onAction={(action) => handleAction(selectedInvite, action)}
+          onAction={(action) => {
+            if (action === "reject") setRejectTarget(selectedInvite);
+            else handleAction(selectedInvite, action);
+          }}
         />
       )}
 
@@ -312,7 +319,7 @@ export default function AdminInvitesPage() {
                             <CheckCircle2 className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleAction(inv.id, "reject")}
+                            onClick={() => setRejectTarget(inv.id)}
                             className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"
                           >
                             <XCircle className="h-4 w-4" />
@@ -327,6 +334,26 @@ export default function AdminInvitesPage() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={rejectTarget !== null}
+        onClose={() => setRejectTarget(null)}
+        busy={rejectBusy}
+        title="Reject this invite?"
+        description="The applicant will be notified and cannot proceed with this invite."
+        confirmLabel="Reject"
+        input={{ label: "Rejection reason (optional)", placeholder: "e.g. Documents unclear" }}
+        onConfirm={async (reason) => {
+          if (!rejectTarget) return;
+          setRejectBusy(true);
+          try {
+            await handleAction(rejectTarget, "reject", reason || undefined);
+          } finally {
+            setRejectBusy(false);
+          }
+          setRejectTarget(null);
+        }}
+      />
     </div>
   );
 }

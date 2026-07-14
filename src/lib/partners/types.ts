@@ -10,7 +10,7 @@
 export type Money = number; // paise? rupees? — we use rupees with 2-decimal Decimal in DB
 
 export type PartnerResult<T> =
-  | { ok: true; data: T; partnerTxnId?: string; raw?: unknown }
+  | { ok: true; data: T; partnerTxnId?: string; raw?: unknown; pending?: boolean }
   | { ok: false; code: string; message: string; raw?: unknown };
 
 export interface IdempotencyContext {

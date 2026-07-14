@@ -241,8 +241,9 @@ export function CreditCardBillForm() {
               className="w-full"
               onClick={fetchBill}
               disabled={fetching || !inputsValid}
+              isLoading={fetching}
             >
-              {fetching ? "Fetching bill…" : "Fetch bill"}
+              Fetch bill
             </Button>
           ) : (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
@@ -298,10 +299,8 @@ export function CreditCardBillForm() {
               </div>
             </div>
             <div className="sm:col-span-2">
-              <Button type="submit" size="lg" className="w-full" disabled={paying || !amount}>
-                {paying
-                  ? "Processing payment…"
-                  : `Pay ${amount ? formatINR(Number(amount)) : "bill"}`}
+              <Button type="submit" size="lg" className="w-full" disabled={paying || !amount} isLoading={paying}>
+                Pay {amount ? formatINR(Number(amount)) : "bill"}
               </Button>
               <p className="mt-2 text-center text-[11px] text-ink-400">
                 Confirmed with your transaction PIN. Debited from your wallet — failed payments are auto-refunded.

@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   QrCode,
   IndianRupee,
   Clock,
   CheckCircle2,
   UploadCloud,
-  AlertCircle,
   RefreshCw,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
@@ -50,8 +50,6 @@ export default function QrCollectionsPage() {
   const [qr, setQr] = useState<ActiveQr | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   // Claim form
   const [amount, setAmount] = useState("");
@@ -68,7 +66,7 @@ export default function QrCollectionsPage() {
       if (qrRes.ok) setQr((await qrRes.json()).qr);
       if (clRes.ok) setClaims((await clRes.json()).claims ?? []);
     } catch {
-      setError("Could not load QR data — check your connection.");
+      toast.error("Could not load QR data — check your connection.");
     } finally {
       setLoading(false);
     }
@@ -82,7 +80,7 @@ export default function QrCollectionsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      setError("Screenshot must be under 5 MB");
+      toast.error("Screenshot must be under 5 MB");
       return;
     }
     const reader = new FileReader();
@@ -94,8 +92,6 @@ export default function QrCollectionsPage() {
     e.preventDefault();
     if (!qr || !screenshot) return;
     setBusy(true);
-    setError(null);
-    setNotice(null);
     try {
       const res = await fetch("/api/qr/claims", {
         method: "POST",
@@ -110,10 +106,10 @@ export default function QrCollectionsPage() {
       });
       const d = await res.json();
       if (!res.ok) {
-        setError(typeof d.error === "string" ? d.error : "Claim submission failed — check the details");
+        toast.error(typeof d.error === "string" ? d.error : "Claim submission failed — check the details");
         return;
       }
-      setNotice(
+      toast.success(
         `Claim submitted for ${formatINR(d.claim.amount)} (UTR ${d.claim.utr}). It will be credited to your wallet after verification.`
       );
       setAmount("");
@@ -123,7 +119,7 @@ export default function QrCollectionsPage() {
       if (fileRef.current) fileRef.current.value = "";
       refresh();
     } catch {
-      setError("Network error — check 'My claims' before retrying to avoid duplicates.");
+      toast.error("Network error — check 'My claims' before retrying to avoid duplicates.");
     } finally {
       setBusy(false);
     }
@@ -187,17 +183,6 @@ export default function QrCollectionsPage() {
         <StatCard label="Total claims" value={String(claims.length)} icon={IndianRupee} accent="brand" />
         <StatCard label="Active QR" value={qr ? "Live" : "—"} icon={QrCode} accent="violet" />
       </div>
-
-      {(error || notice) && (
-        <div
-          className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${
-            error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-          }`}
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error ?? notice}</span>
-        </div>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* The QR to collect on */}
@@ -324,17 +309,18 @@ export default function QrCollectionsPage() {
             edited screenshots lead to permanent account termination and recovery action.
           </div>
 
-          <Button type="submit" size="lg" className="w-full" disabled={busy || !qr || !screenshot}>
-            {busy ? "Submitting…" : `Submit claim${amount ? ` for ${formatINR(Number(amount) || 0)}` : ""}`}
+          <Button type="submit" size="lg" className="w-full" disabled={busy || !qr || !screenshot} isLoading={busy}>
+            Submit claim{amount ? ` for ${formatINR(Number(amount) || 0)}` : ""}
           </Button>
         </form>
       </div>
 
       <DataTable
-        title={loading ? "Loading…" : "My claims"}
+        title="My claims"
         description="Every payment you've claimed on the collection QR and its verification status."
         columns={cols}
         data={claims}
+        loading={loading}
         empty="No claims yet — collect a payment on the QR and claim it here."
       />
     </div>

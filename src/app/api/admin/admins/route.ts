@@ -15,6 +15,8 @@ const CreateBody = z.object({
   phone: z.string().min(10).max(15),
   password: z.string().min(8),
   allowedTabs: z.array(z.string()).default([]),
+  // FINANCE = read-only staff for money tabs (dashboard, ledger, reports).
+  role: z.enum(["ADMIN", "FINANCE"]).default("ADMIN"),
 });
 
 export async function GET(req: Request) {
@@ -29,7 +31,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") ?? "";
 
-  const where: Record<string, unknown> = { role: "ADMIN", deletedAt: null };
+  const where: Record<string, unknown> = { role: { in: ["ADMIN", "FINANCE"] }, deletedAt: null };
 
   if (q) {
     where.OR = [
@@ -46,6 +48,7 @@ export async function GET(req: Request) {
       name: true,
       email: true,
       phone: true,
+      role: true,
       status: true,
       allowedTabs: true,
       createdAt: true,
@@ -70,7 +73,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { name, email, phone, password, allowedTabs } = parsed.data;
+  const { name, email, phone, password, allowedTabs, role } = parsed.data;
 
   const existing = await prisma.user.findFirst({
     where: { OR: [{ email: email.toLowerCase() }, { phone }], deletedAt: null },
@@ -90,7 +93,7 @@ export async function POST(req: Request) {
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
       passwordHash,
-      role: "ADMIN",
+      role,
       status: "ACTIVE",
       allowedTabs,
     },
@@ -99,6 +102,7 @@ export async function POST(req: Request) {
       name: true,
       email: true,
       phone: true,
+      role: true,
       status: true,
       allowedTabs: true,
       createdAt: true,
@@ -108,10 +112,10 @@ export async function POST(req: Request) {
   await prisma.auditLog.create({
     data: {
       userId: user.id,
-      action: "admin.created",
+      action: role === "FINANCE" ? "finance_user.created" : "admin.created",
       entity: "User",
       entityId: admin.id,
-      meta: { name, email, phone, allowedTabs },
+      meta: { name, email, phone, allowedTabs, role },
       ip: clientIp(req),
     },
   });

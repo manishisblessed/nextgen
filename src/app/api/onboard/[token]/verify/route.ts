@@ -102,6 +102,29 @@ export async function POST(
     case "PAN_360": {
       const result = await verifyPan360({ pan: data.pan, orderid });
 
+      // PAN uniqueness gate — block before storing if already used
+      if (result.ok) {
+        const excludeUserId = invite.userId ?? undefined;
+        const dupPan = await prisma.kyc.findFirst({
+          where: {
+            panNumber: data.pan.toUpperCase(),
+            ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+          },
+          select: { userId: true },
+        });
+        if (dupPan) {
+          return NextResponse.json(
+            {
+              ok: false,
+              type: "PAN_360",
+              message: "This PAN is already linked to another NextGenPay account.",
+              code: "PAN_DUPLICATE",
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       await prisma.verificationResult.create({
         data: {
           inviteId: invite.id,
@@ -141,6 +164,28 @@ export async function POST(
         ifsc: data.ifsc,
         orderid,
       });
+
+      if (result.ok) {
+        const excludeUserId = invite.userId ?? undefined;
+        const dupBank = await prisma.kyc.findFirst({
+          where: {
+            bankAccountNumber: data.account_number,
+            ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+          },
+          select: { userId: true },
+        });
+        if (dupBank) {
+          return NextResponse.json(
+            {
+              ok: false,
+              type: "BANK_PENNY_DROP",
+              message: "This bank account is already linked to another NextGenPay account.",
+              code: "BANK_DUPLICATE",
+            },
+            { status: 409 }
+          );
+        }
+      }
 
       await prisma.verificationResult.create({
         data: {
@@ -182,6 +227,28 @@ export async function POST(
         orderid,
       });
 
+      if (result.ok) {
+        const excludeUserId = invite.userId ?? undefined;
+        const dupBank = await prisma.kyc.findFirst({
+          where: {
+            bankAccountNumber: data.account_number,
+            ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+          },
+          select: { userId: true },
+        });
+        if (dupBank) {
+          return NextResponse.json(
+            {
+              ok: false,
+              type: "BANK_ADVANCE",
+              message: "This bank account is already linked to another NextGenPay account.",
+              code: "BANK_DUPLICATE",
+            },
+            { status: 409 }
+          );
+        }
+      }
+
       await prisma.verificationResult.create({
         data: {
           inviteId: invite.id,
@@ -215,6 +282,28 @@ export async function POST(
 
     case "GST": {
       const result = await verifyGst({ gst: data.gst, orderid });
+
+      if (result.ok) {
+        const excludeUserId = invite.userId ?? undefined;
+        const dupGst = await prisma.kyc.findFirst({
+          where: {
+            gstin: data.gst.toUpperCase(),
+            ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+          },
+          select: { userId: true },
+        });
+        if (dupGst) {
+          return NextResponse.json(
+            {
+              ok: false,
+              type: "GST",
+              message: "This GST number is already linked to another NextGenPay account.",
+              code: "GST_DUPLICATE",
+            },
+            { status: 409 }
+          );
+        }
+      }
 
       await prisma.verificationResult.create({
         data: {
@@ -297,6 +386,80 @@ export async function POST(
            (result.raw as any)?.phone ??
            null)
         : null;
+
+      // ── Aadhaar uniqueness gate ──────────────────────────────────
+      // Block BEFORE storing the result if the same Aadhaar already
+      // belongs to another user. Checks:
+      //  1. Kyc.aadhaarNumber (full masked uid)
+      //  2. Kyc.aadhaarLast4  (catches legacy records with NULL aadhaarNumber)
+      //  3. Prior successful VerificationResult with matching uid
+      if (result.ok) {
+        const uid = result.data.uid;
+        const last4 = uid ? uid.slice(-4) : null;
+        const excludeUserId = invite.userId ?? undefined;
+
+        // Check 1 & 2: existing Kyc records
+        const dupKyc = await prisma.kyc.findFirst({
+          where: {
+            OR: [
+              ...(uid ? [{ aadhaarNumber: uid }] : []),
+              ...(last4 ? [{ aadhaarLast4: last4, aadhaarNumber: null }] : []),
+            ],
+            ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+          },
+          select: { userId: true },
+        });
+
+        if (dupKyc) {
+          return NextResponse.json(
+            {
+              ok: false,
+              type: "AADHAAR_COMPLETE",
+              message: "This Aadhaar is already linked to another NextGenPay account. Each Aadhaar can only be used once.",
+              code: "AADHAAR_DUPLICATE",
+            },
+            { status: 409 }
+          );
+        }
+
+        // Check 3: another invite's successful DigiLocker verification
+        const dupVerification = await prisma.verificationResult.findFirst({
+          where: {
+            type: "AADHAAR_DIGILOCKER",
+            status: "Success",
+            ...(invite.id ? { inviteId: { not: invite.id } } : {}),
+            responsePayload: { path: ["uid"], equals: uid },
+          },
+          select: { inviteId: true, userId: true },
+        });
+
+        if (dupVerification) {
+          // Only block if the other invite/user is still active
+          const otherInvite = dupVerification.inviteId
+            ? await prisma.invite.findUnique({
+                where: { id: dupVerification.inviteId },
+                select: { status: true },
+              })
+            : null;
+          const isOtherActive =
+            !otherInvite ||
+            ["PENDING", "REGISTERED", "VERIFIED", "APPROVED"].includes(
+              otherInvite.status
+            );
+
+          if (isOtherActive) {
+            return NextResponse.json(
+              {
+                ok: false,
+                type: "AADHAAR_COMPLETE",
+                message: "This Aadhaar is already linked to another NextGenPay account. Each Aadhaar can only be used once.",
+                code: "AADHAAR_DUPLICATE",
+              },
+              { status: 409 }
+            );
+          }
+        }
+      }
 
       await prisma.verificationResult.create({
         data: {

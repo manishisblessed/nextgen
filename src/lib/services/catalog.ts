@@ -195,9 +195,9 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     name: "Bill Payments (BBPS)",
     type: "SERVICE",
     kind: "BBPS",
-    provider: "SAMEDAY",
+    provider: "SAMEDAY+BULKPE",
     enabled: true,
-    note: "BBPS bill payments. Credit cards live via Same Day BBPS-2 (Pay2New); other categories pending an aggregator.",
+    note: "BBPS bill payments. Credit cards via Same Day BBPS-2 (Pay2New); all other categories via BulkPe BBPS.",
     sortOrder: 90,
   },
   {

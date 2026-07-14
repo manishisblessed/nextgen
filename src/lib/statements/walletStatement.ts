@@ -42,6 +42,7 @@ export const REASON_LABELS: Record<string, string> = {
   FEE: "Fee",
   PENALTY: "Penalty",
   PAYOUT: "Payout",
+  RENTAL: "POS rental",
 };
 
 const fmtINR = (n: number) =>

@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label, Select } from "@/components/ui/Input";
 import {
   RefreshCw,
@@ -116,8 +118,13 @@ const emptyForm = (kind: SliderKind, sortOrder: number): FormState => ({
 export default function AdminSliderPage() {
   const [sliders, setSliders] = useState<Slider[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
   const [form, setForm] = useState<FormState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Slider | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchSliders = useCallback(async () => {
     setLoading(true);
@@ -126,21 +133,15 @@ export default function AdminSliderPage() {
       const data = await res.json();
       if (Array.isArray(data.sliders)) setSliders(data.sliders);
     } catch {
-      setNotice({ text: "Failed to load sliders.", ok: false });
+      notify("Failed to load sliders.", false);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     fetchSliders();
   }, [fetchSliders]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 3500);
-    return () => clearTimeout(t);
-  }, [notice]);
 
   const slides = useMemo(
     () => sliders.filter((s) => s.kind === "SLIDE").sort((a, b) => a.sortOrder - b.sortOrder),
@@ -191,10 +192,10 @@ export default function AdminSliderPage() {
         setSliders((prev) => prev.map((x) => (x.id === s.id ? { ...x, ...data.slider } : x)));
       } catch (e) {
         setSliders((prev) => prev.map((x) => (x.id === s.id ? s : x)));
-        setNotice({ text: e instanceof Error ? e.message : "Update failed", ok: false });
+        notify(e instanceof Error ? e.message : "Update failed", false);
       }
     },
-    []
+    [notify]
   );
 
   const move = useCallback(
@@ -212,25 +213,27 @@ export default function AdminSliderPage() {
   );
 
   const remove = useCallback(async (s: Slider) => {
-    if (!confirm(`Delete "${s.title}"? Its image will be removed from Cloudinary.`)) return;
+    setDeleting(true);
     try {
       const res = await fetch(`/api/admin/sliders/${s.id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Delete failed");
       setSliders((prev) => prev.filter((x) => x.id !== s.id));
-      setNotice({ text: `"${s.title}" deleted — audit logged.`, ok: true });
+      notify(`"${s.title}" deleted — audit logged.`, true);
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Delete failed", ok: false });
+      notify(e instanceof Error ? e.message : "Delete failed", false);
+    } finally {
+      setDeleting(false);
     }
-  }, []);
+  }, [notify]);
 
   const onSaved = useCallback(
     (saved: Slider, isNew: boolean) => {
       setSliders((prev) => (isNew ? [...prev, saved] : prev.map((x) => (x.id === saved.id ? saved : x))));
       setForm(null);
-      setNotice({ text: `"${saved.title}" ${isNew ? "created" : "updated"} — audit logged.`, ok: true });
+      notify(`"${saved.title}" ${isNew ? "created" : "updated"} — audit logged.`, true);
     },
-    []
+    [notify]
   );
 
   return (
@@ -251,18 +254,6 @@ export default function AdminSliderPage() {
         }
       />
 
-      {notice && (
-        <div
-          className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-            notice.ok
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
-        >
-          {notice.text}
-        </div>
-      )}
-
       {loading ? (
         <div className="rounded-2xl border border-ink-100 bg-white p-10 text-center text-sm text-ink-500">
           Loading sliders…
@@ -277,7 +268,7 @@ export default function AdminSliderPage() {
             items={slides}
             onAdd={() => openCreate("SLIDE")}
             onEdit={openEdit}
-            onDelete={remove}
+            onDelete={setDeleteTarget}
             onToggle={(s) => patchSlider(s, { active: !s.active })}
             onMove={(i, dir) => move(slides, i, dir)}
           />
@@ -289,7 +280,7 @@ export default function AdminSliderPage() {
             items={popups}
             onAdd={() => openCreate("POPUP")}
             onEdit={openEdit}
-            onDelete={remove}
+            onDelete={setDeleteTarget}
             onToggle={(s) => patchSlider(s, { active: !s.active })}
             onMove={(i, dir) => move(popups, i, dir)}
           />
@@ -302,9 +293,23 @@ export default function AdminSliderPage() {
           setForm={setForm}
           onClose={() => setForm(null)}
           onSaved={onSaved}
-          onError={(text) => setNotice({ text, ok: false })}
+          onError={(text) => notify(text, false)}
         />
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        busy={deleting}
+        title={deleteTarget ? `Delete "${deleteTarget.title}"?` : "Delete?"}
+        description="Its image will be removed from Cloudinary."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await remove(deleteTarget);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

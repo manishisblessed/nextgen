@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -78,7 +79,10 @@ export default function AdminServicesPage() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [pending, setPending] = useState<Record<string, boolean>>({});
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
 
   const fetchServices = useCallback(async () => {
     setLoading(true);
@@ -87,21 +91,15 @@ export default function AdminServicesPage() {
       const data = await res.json();
       if (Array.isArray(data.services)) setServices(data.services);
     } catch {
-      setNotice({ text: "Failed to load services.", ok: false });
+      notify("Failed to load services.", false);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     fetchServices();
   }, [fetchServices]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 3500);
-    return () => clearTimeout(t);
-  }, [notice]);
 
   const toggle = useCallback(
     async (svc: ServiceRoute) => {
@@ -123,19 +121,13 @@ export default function AdminServicesPage() {
         setServices((prev) =>
           prev.map((s) => (s.id === svc.id ? { ...s, ...data.service } : s))
         );
-        setNotice({
-          text: `${svc.name} ${next ? "enabled" : "disabled"} — audit logged.`,
-          ok: true,
-        });
+        notify(`${svc.name} ${next ? "enabled" : "disabled"} — audit logged.`, true);
       } catch (e) {
         // Revert on failure.
         setServices((prev) =>
           prev.map((s) => (s.id === svc.id ? { ...s, enabled: svc.enabled } : s))
         );
-        setNotice({
-          text: e instanceof Error ? e.message : "Update failed",
-          ok: false,
-        });
+        notify(e instanceof Error ? e.message : "Update failed", false);
       } finally {
         setPending((p) => {
           const { [svc.id]: _omit, ...rest } = p;
@@ -143,7 +135,7 @@ export default function AdminServicesPage() {
         });
       }
     },
-    []
+    [notify]
   );
 
   const seedDefaults = useCallback(async () => {
@@ -156,14 +148,14 @@ export default function AdminServicesPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Seed failed");
-      setNotice({ text: `Seeded defaults: +${data.created} new, ${data.updated} refreshed.`, ok: true });
+      notify(`Seeded defaults: +${data.created} new, ${data.updated} refreshed.`, true);
       await fetchServices();
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Seed failed", ok: false });
+      notify(e instanceof Error ? e.message : "Seed failed", false);
     } finally {
       setSeeding(false);
     }
-  }, [fetchServices]);
+  }, [fetchServices, notify]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ServiceRoute[]>();
@@ -198,18 +190,6 @@ export default function AdminServicesPage() {
           </>
         }
       />
-
-      {notice && (
-        <div
-          className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-            notice.ok
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
-        >
-          {notice.text}
-        </div>
-      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-ink-100 bg-white p-4">

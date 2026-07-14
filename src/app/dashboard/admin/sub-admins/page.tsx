@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   UserCog,
   Plus,
@@ -19,6 +20,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { generateRandomPassword } from "@/lib/utils";
@@ -44,6 +46,8 @@ export default function AdminSubAdminsPage() {
     record: SubAdmin;
     password: string;
   } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SubAdmin | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -66,6 +70,19 @@ export default function AdminSubAdminsPage() {
     const with2FA = rows.filter((r) => r.twoFactorEnabled).length;
     return { total: rows.length, active, with2FA };
   }, [rows]);
+
+  async function handleDelete(r: SubAdmin) {
+    setDeleting(true);
+    try {
+      await fetch(`/api/admin/sub-admins/${r.id}`, {
+        method: "DELETE",
+      });
+      toast.success(`Sub-admin ${r.name} deleted.`);
+      refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const cols: Column<SubAdmin>[] = [
     {
@@ -175,16 +192,7 @@ export default function AdminSubAdminsPage() {
             </button>
           ) : null}
           <button
-            onClick={async () => {
-              if (
-                confirm(`Delete sub-admin ${r.name}? This cannot be undone.`)
-              ) {
-                await fetch(`/api/admin/sub-admins/${r.id}`, {
-                  method: "DELETE",
-                });
-                refresh();
-              }
-            }}
+            onClick={() => setDeleteTarget(r)}
             className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
             title="Delete"
           >
@@ -269,11 +277,26 @@ export default function AdminSubAdminsPage() {
       )}
 
       <DataTable
-        title={loading ? "Loading..." : `${rows.length} sub-admins`}
+        title={`${rows.length} sub-admins`}
+        loading={loading}
         description="Sub-admins log in at /sub-admin and inherit a restricted operations dashboard."
         columns={cols}
         data={rows}
         empty="No sub-admins created yet. Click 'Create sub-admin' to issue the first credentials."
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        busy={deleting}
+        title={deleteTarget ? `Delete sub-admin ${deleteTarget.name}?` : "Delete sub-admin?"}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await handleDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
       />
     </div>
   );
@@ -388,9 +411,9 @@ function NewSubAdminForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" isLoading={submitting}>
           <KeyRound className="h-4 w-4" />
-          {submitting ? "Creating..." : "Generate password & create"}
+          Generate password & create
         </Button>
       </div>
     </form>
@@ -496,8 +519,8 @@ function TabsDialog({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={saving}>
-            {saving ? "Saving..." : "Save tabs"}
+          <Button onClick={save} isLoading={saving}>
+            Save tabs
           </Button>
         </div>
       </div>

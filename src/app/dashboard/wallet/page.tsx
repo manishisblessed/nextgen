@@ -56,6 +56,7 @@ const REASON_LABELS: Record<string, string> = {
   FEE: "Fee",
   PENALTY: "Penalty",
   PAYOUT: "Payout",
+  RENTAL: "POS rental",
 };
 
 type PendingTopup = {
@@ -422,7 +423,7 @@ export default function WalletPage() {
               )}
 
               <div className="sm:col-span-2">
-                <Button type="submit" size="lg" className="w-full" disabled={loading}>
+                <Button type="submit" size="lg" className="w-full" isLoading={loading} disabled={loading}>
                   {loading
                     ? "Starting top-up…"
                     : `Add ${amount ? formatINR(Number(amount)) : "money"} to wallet`}

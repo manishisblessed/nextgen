@@ -17,9 +17,9 @@ import {
   XCircle,
   Globe,
   CalendarDays,
-  Loader2,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
+import { Spinner } from "@/components/ui/Spinner";
 import { formatINR } from "@/lib/utils";
 
 type PerformanceData = {
@@ -105,8 +105,8 @@ export default function PerformancePage() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
+      <div className="flex items-center justify-center py-20">
+        <Spinner size="page" label="Loading performance data…" />
       </div>
     );
   }

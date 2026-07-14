@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Send, CheckCircle2, Loader2, Link2, Copy } from "lucide-react";
+import { Send, CheckCircle2, Link2, Copy } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -175,8 +175,8 @@ export default function OnboardInvitePage() {
         </div>
 
         <div className="mt-6">
-          <Button type="submit" disabled={submitting} className="w-full">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          <Button type="submit" isLoading={submitting} className="w-full">
+            <Send className="h-4 w-4" />
             Send Onboarding Invite
           </Button>
         </div>

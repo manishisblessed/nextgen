@@ -20,6 +20,7 @@ import { clientIp } from "@/lib/security/audit";
 import { quotePayoutForUser } from "@/lib/payout/charges";
 import { assertServiceEnabled, ServiceDisabledError } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
+import { requireActiveScheme, NoSchemeError } from "@/lib/scheme/gate";
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_RE = /^\d{9,18}$/;
@@ -121,6 +122,8 @@ export async function POST(req: Request) {
     await assertKycCurrent(user);
     // Runtime admin kill-switch (On/Off Services panel) — hard-gates the rail.
     await assertServiceEnabled(SERVICE_KEYS.PAYOUT, { name: "Payout", userId: user.id, role: user.role });
+    // Scheme gate — network users may only transact once a scheme is assigned.
+    await requireActiveScheme(user.id);
     await enforceRateLimit(`payout:create:${user.id}`, RATE_LIMITS.payoutCreate);
     // Single-use submit nonce (replay defense for the web form). Bearer/mobile
     // callers are exempt and rely on Idempotency-Key instead.
@@ -139,6 +142,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: e.message, code: e.code, reKycDueAt: e.dueAt }, { status: e.statusCode });
     if (e instanceof ServiceDisabledError)
       return NextResponse.json({ error: e.message }, { status: e.statusCode });
+    if (e instanceof NoSchemeError)
+      return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
     if (e instanceof RateLimitError)
       return NextResponse.json({ error: e.message, retryAfterSec: e.result.retryAfterSec }, { status: 429 });
     if (e instanceof SubmitNonceError)

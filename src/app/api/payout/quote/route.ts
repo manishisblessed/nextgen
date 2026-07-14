@@ -4,6 +4,7 @@ import { requireAuth, AuthError } from "@/lib/auth-server";
 import { assertKycCurrent, ReKycRequiredError } from "@/lib/security/kycGate";
 import { toNumber } from "@/lib/money";
 import { quotePayoutForUser, GST_PERCENT } from "@/lib/payout/charges";
+import { requireActiveScheme, NoSchemeError } from "@/lib/scheme/gate";
 
 const QuerySchema = z.object({
   amount: z.coerce.number().positive().max(500000),
@@ -19,10 +20,14 @@ export async function GET(req: Request) {
   try {
     user = await requireAuth();
     await assertKycCurrent(user);
+    // Scheme gate — quote is only meaningful once a scheme is assigned.
+    await requireActiveScheme(user.id);
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
     if (e instanceof ReKycRequiredError)
       return NextResponse.json({ error: e.message, code: e.code, reKycDueAt: e.dueAt }, { status: e.statusCode });
+    if (e instanceof NoSchemeError)
+      return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
     throw e;
   }
 

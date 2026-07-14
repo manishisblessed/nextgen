@@ -47,6 +47,22 @@ export const QUEUES = {
   // Phase 5 — KYC-video retention purger (daily, opt-in via env). Deletes raw
   // biometric video from S3 after the retention window; metadata retained.
   KYC_VIDEO_RETENTION: "kyc.video.retention",
+  // Admin console Phase 4 — T+1 AEPS→PRIMARY settlement sweep. Scheduled
+  // hourly; the handler fires the sweep only at the configured IST hour
+  // (PlatformSetting "settlement.t1"), and each (user, day) settles at most
+  // once. See src/lib/settlement/t1.ts.
+  SETTLEMENT_T1: "settlement.t1",
+  // Admin console Phase 5 — monthly POS rental billing (1st, 03:00 IST).
+  // Debits each active subscription and raises invoices; idempotent per
+  // (subscription, period). See src/lib/pos/rental.ts.
+  POS_RENTAL_BILLING: "pos.rental.billing",
+  // POS acquirer T+1 settlement — sweeps PENDING PosSettlementEntries into
+  // retailer wallets daily at the configured IST hour.
+  POS_SETTLEMENT_T1: "pos.settlement.t1",
+  // BBPS bill payment reconciliation — polls PROCESSING BBPS transactions
+  // and settles them. BulkPe BBPS has no webhooks, so this sweep is the
+  // only way to finalize PENDING payments. Runs every 5 minutes.
+  BBPS_RECONCILE: "bbps.reconcile",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

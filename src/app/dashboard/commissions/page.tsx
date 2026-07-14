@@ -94,9 +94,10 @@ export default function CommissionsPage() {
       />
 
       <DataTable
-        title={loading ? "Loading..." : "Service rate-card"}
+        title="Service rate-card"
         columns={cols}
         data={slabs}
+        loading={loading}
         empty="No commission slabs found."
       />
     </div>

@@ -2,10 +2,12 @@ import { Prisma, type ServiceCode, type TxnStatus } from "@prisma/client";
 import { nanoid } from "nanoid";
 import { prisma } from "../db";
 import { creditWallet, debitWallet, LedgerError } from "../ledger";
-import { add, gt, round } from "../money";
+import { add, round } from "../money";
 import { assertTransactionRisk } from "../risk/engine";
 import { assertAccountActive } from "../security/accountGate";
+import { requireActiveScheme } from "../scheme/gate";
 import { emitWebhookEvent } from "../platform/webhooks";
+import { distributeCommission } from "../commission/distribute";
 import type { PartnerResult } from "../partners/types";
 
 /**
@@ -50,7 +52,6 @@ export async function runTransaction<TIn, TOut>(
   // two users happen to send the same client-supplied idempotencyKey.
   const baseKey = `txn:${input.userId}:${input.idempotencyKey}`;
   const reserveKey = `${baseKey}:reserve`;
-  const commissionKey = `${baseKey}:commission`;
   const reversalKey = `${baseKey}:reversal`;
 
   // Exact Decimal amounts (never JS float math on money).
@@ -80,6 +81,11 @@ export async function runTransaction<TIn, TOut>(
   //     a suspension bites even for sessions minted before it. Throws
   //     AccountSuspendedError (403) which routes map via toErrorResponse.
   await assertAccountActive(input.userId);
+
+  // 1a2. Scheme gate — network users (RT/DT/MD/SD) may only move money once
+  //      their parent (or admin) has assigned them an ACTIVE scheme. Throws
+  //      NoSchemeError (403) which routes map via toErrorResponse.
+  await requireActiveScheme(input.userId);
 
   // 1b. Risk rules (velocity / daily caps) — evaluated on genuinely NEW
   //     movements only (idempotent replays above are exempt). Throws RiskError
@@ -142,7 +148,21 @@ export async function runTransaction<TIn, TOut>(
     result = { ok: false, code: "EXCEPTION", message: (e as Error).message };
   }
 
-  // 4. Settle: mark SUCCESS and credit commission, or refund the reservation.
+  // 4a. Pending path — partner accepted but hasn't confirmed yet. Keep the
+  // transaction in PROCESSING (money stays reserved); the reconciliation
+  // sweep will finalize it once the provider returns a terminal state.
+  if (result.ok && result.pending) {
+    await prisma.transaction.update({
+      where: { id: txn.id },
+      data: {
+        response: result.raw as Prisma.InputJsonValue,
+        partnerTxnId: result.partnerTxnId,
+      },
+    });
+    return { status: "PROCESSING" as const, refId, data: result.data };
+  }
+
+  // 4. Settle: mark SUCCESS and distribute commission up the chain, or refund.
   if (result.ok) {
     await prisma.$transaction(async (tx) => {
       await tx.transaction.update({
@@ -153,19 +173,30 @@ export async function runTransaction<TIn, TOut>(
           partnerTxnId: result.partnerTxnId,
         },
       });
-      if (gt(commissionAmount, 0)) {
-        await creditWallet(
-          {
-            userId: input.userId,
-            amount: commissionAmount,
-            reason: "COMMISSION",
-            refType: "Transaction",
-            refId: txn.id,
-            idempotencyKey: commissionKey,
-          },
+
+      // Multi-tier commission distribution (cascade model): the transacting
+      // user earns their scheme's own commission and each ancestor earns the
+      // margin between their child's scheme and their own — all net of 2%
+      // TDS. Commission comes ONLY from the scheme chain (no hardcoded
+      // fallback); the txn row records the user's actual net credit.
+      try {
+        const credits = await distributeCommission(
+          txn.id,
+          input.userId,
+          input.service,
+          input.amount,
           tx
         );
+        const own = credits.find((c) => c.userId === input.userId);
+        await tx.transaction.update({
+          where: { id: txn.id },
+          data: { commission: new Prisma.Decimal(round(own?.amount ?? 0)) },
+        });
+      } catch {
+        // Scheme lookup or chain walk failed — commission stays uncredited;
+        // the recon sweep / support can replay distribution idempotently.
       }
+
       await tx.auditLog.create({
         data: {
           userId: input.userId,

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldAlert, CalendarClock, ArrowRight } from "lucide-react";
+import useSWR from "swr";
 import { Button } from "@/components/ui/Button";
 
 type ReKycStatus = {
@@ -13,30 +13,24 @@ type ReKycStatus = {
   isNetworkTier: boolean;
 };
 
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return res.json() as Promise<ReKycStatus>;
+};
+
 /**
- * Blocking monthly Re-KYC prompt (Phase 13). Polls the per-user status and, when
- * a network user owes re-verification, overlays a non-dismissible modal routing
- * to /dashboard/rekyc. Staff/admin roles never trigger it (the API returns
- * reKycRequired=false for them). The modal hides itself on the re-KYC page so
- * the user can actually complete the flow.
+ * Blocking monthly Re-KYC prompt. Cached via SWR so sidebar navigation does
+ * not re-hit the API on every route change.
  */
 export function ReKycGate() {
   const router = useRouter();
   const pathname = usePathname();
-  const [status, setStatus] = useState<ReKycStatus | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    fetch("/api/rekyc/status")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (active && d) setStatus(d);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
+  const { data: status } = useSWR("/api/rekyc/status", fetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 10 * 60_000,
+    refreshInterval: 15 * 60_000,
+  });
 
   const onReKycPage = pathname?.startsWith("/dashboard/rekyc");
   const show = !!status?.reKycRequired && status.isNetworkTier && !onReKycPage;

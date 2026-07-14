@@ -13,6 +13,7 @@ import {
 import { StatCard } from "@/components/dashboard/StatCard";
 import { TransactionsTable } from "@/components/dashboard/TransactionsTable";
 import { Sparkline } from "@/components/dashboard/Sparkline";
+import { StatSkeleton } from "@/components/ui/Skeleton";
 import { services } from "@/lib/data";
 import type { Transaction } from "@/lib/data";
 import { Button } from "@/components/ui/Button";
@@ -99,25 +100,36 @@ export function RetailerOverview({ session }: { session: Session }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <WalletCard balance={session.walletBalance} />
-        <StatCard
-          label="Today's Earnings"
-          value={formatINR(todayEarnings)}
-          icon={IndianRupee}
-          accent="emerald"
-        />
-        <StatCard
-          label="Transactions Today"
-          value={`${todayCount}`}
-          icon={TrendingUp}
-          accent="brand"
-        />
-        <StatCard
-          label="Customers Served"
-          value={`${txns.filter((t) => t.status === "Success").length}`}
-          icon={Users}
-          accent="violet"
-        />
+        {loadingTxns ? (
+          <>
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+          </>
+        ) : (
+          <>
+            <WalletCard balance={session.walletBalance} />
+            <StatCard
+              label="Today's Earnings"
+              value={formatINR(todayEarnings)}
+              icon={IndianRupee}
+              accent="emerald"
+            />
+            <StatCard
+              label="Transactions Today"
+              value={`${todayCount}`}
+              icon={TrendingUp}
+              accent="brand"
+            />
+            <StatCard
+              label="Customers Served"
+              value={`${txns.filter((t) => t.status === "Success").length}`}
+              icon={Users}
+              accent="violet"
+            />
+          </>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

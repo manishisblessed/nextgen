@@ -67,16 +67,31 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    // Clamp date_from so users only see transactions from after the terminal
+    // was assigned to them (or their downline). Prevents viewing the previous
+    // holder's transactions.
+    const match = scope.terminals.find((t) => t.tid === parsed.data.terminal_id);
+    if (match?.assignedAt) {
+      const assignedIso = match.assignedAt.toISOString();
+      if (parsed.data.date_from < assignedIso) {
+        parsed.data.date_from = assignedIso;
+      }
+    }
   }
 
-  const result = await getPosTransactions(parsed.data);
+  try {
+    const result = await getPosTransactions(parsed.data);
 
-  if (!result.ok) {
-    return NextResponse.json(
-      { error: result.error.error?.message ?? "Failed to fetch POS transactions" },
-      { status: result.status }
-    );
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error.error?.message ?? "Failed to fetch POS transactions" },
+        { status: result.status >= 400 ? result.status : 502 }
+      );
+    }
+
+    return NextResponse.json(result.data);
+  } catch (e) {
+    return toErrorResponse(e);
   }
-
-  return NextResponse.json(result.data);
 }

@@ -20,6 +20,8 @@ const UpdateBody = z
     commissionRetailer: z.number().min(0).optional(),
     commissionDistributor: z.number().min(0).optional(),
     commissionMaster: z.number().min(0).optional(),
+    // Cascade model: commission the ASSIGNED user earns on this slab.
+    commissionValue: z.number().min(0).optional(),
     active: z.boolean().optional(),
   })
   .strict();

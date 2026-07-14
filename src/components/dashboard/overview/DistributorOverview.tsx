@@ -10,10 +10,10 @@ import {
   TrendingUp,
   CheckCircle2,
   XCircle,
-  Loader2,
 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { Sparkline } from "@/components/dashboard/Sparkline";
+import { StatSkeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import type { Session } from "@/lib/auth";
@@ -102,30 +102,41 @@ export function DistributorOverview({ session }: { session: Session }) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Active Retailers"
-          value={loading ? "…" : `${retailers.length}`}
-          icon={Users}
-          accent="brand"
-        />
-        <StatCard
-          label="Network Wallet"
-          value={formatINR(session.walletBalance)}
-          icon={HandCoins}
-          accent="violet"
-        />
-        <StatCard
-          label="Override Earnings"
-          value={formatINR(0)}
-          icon={IndianRupee}
-          accent="emerald"
-        />
-        <StatCard
-          label="Network Turnover (MTD)"
-          value={formatINR(mtdTurnover)}
-          icon={TrendingUp}
-          accent="accent"
-        />
+        {loading ? (
+          <>
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+          </>
+        ) : (
+          <>
+            <StatCard
+              label="Active Retailers"
+              value={`${retailers.length}`}
+              icon={Users}
+              accent="brand"
+            />
+            <StatCard
+              label="Network Wallet"
+              value={formatINR(session.walletBalance)}
+              icon={HandCoins}
+              accent="violet"
+            />
+            <StatCard
+              label="Override Earnings"
+              value={formatINR(0)}
+              icon={IndianRupee}
+              accent="emerald"
+            />
+            <StatCard
+              label="Network Turnover (MTD)"
+              value={formatINR(mtdTurnover)}
+              icon={TrendingUp}
+              accent="accent"
+            />
+          </>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -226,11 +237,7 @@ export function DistributorOverview({ session }: { session: Session }) {
             Manage all
           </Link>
         </div>
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 px-5 py-12 text-sm text-ink-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading retailers…
-          </div>
-        ) : retailers.length === 0 ? (
+        {retailers.length === 0 && !loading ? (
           <div className="px-5 py-12 text-center text-sm text-ink-500">
             No retailers yet. Onboard a retailer to start live transactions.
           </div>
@@ -246,40 +253,48 @@ export function DistributorOverview({ session }: { session: Session }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100 text-ink-800">
-              {[...retailers]
-                .sort((a, b) => b.monthlyTurnover - a.monthlyTurnover)
-                .map((r) => (
-                  <tr key={r.id} className="hover:bg-ink-50/40">
-                    <td className="px-5 py-3">
-                      <div className="font-semibold text-ink-900">{r.name}</div>
-                      <div className="text-xs text-ink-500">
-                        {r.shop} · {r.id.slice(0, 10)}
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-ink-600">
-                      {r.city}, {r.state}
-                    </td>
-                    <td className="px-5 py-3">
-                      <Badge
-                        variant={
-                          r.status === "Active"
-                            ? "success"
-                            : r.status === "Pending KYC"
-                              ? "warning"
-                              : "danger"
-                        }
-                      >
-                        {r.status}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3 text-right font-semibold">
-                      {formatINR(r.walletBalance)}
-                    </td>
-                    <td className="px-5 py-3 text-right font-semibold text-emerald-700">
-                      {formatINR(r.monthlyTurnover)}
-                    </td>
-                  </tr>
-                ))}
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center text-sm text-ink-500">
+                    Loading retailers…
+                  </td>
+                </tr>
+              ) : (
+                [...retailers]
+                  .sort((a, b) => b.monthlyTurnover - a.monthlyTurnover)
+                  .map((r) => (
+                    <tr key={r.id} className="hover:bg-ink-50/40">
+                      <td className="px-5 py-3">
+                        <div className="font-semibold text-ink-900">{r.name}</div>
+                        <div className="text-xs text-ink-500">
+                          {r.shop} · {r.id.slice(0, 10)}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-ink-600">
+                        {r.city}, {r.state}
+                      </td>
+                      <td className="px-5 py-3">
+                        <Badge
+                          variant={
+                            r.status === "Active"
+                              ? "success"
+                              : r.status === "Pending KYC"
+                                ? "warning"
+                                : "danger"
+                          }
+                        >
+                          {r.status}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-3 text-right font-semibold">
+                        {formatINR(r.walletBalance)}
+                      </td>
+                      <td className="px-5 py-3 text-right font-semibold text-emerald-700">
+                        {formatINR(r.monthlyTurnover)}
+                      </td>
+                    </tr>
+                  ))
+              )}
             </tbody>
           </table>
         )}

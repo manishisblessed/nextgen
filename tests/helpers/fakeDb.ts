@@ -26,18 +26,58 @@ export class FakeDb {
   auditLogs: Row[] = [];
   staticQrs: Row[] = [];
   qrClaims: Row[] = [];
+  schemes: Row[] = [];
+  schemeSlabs: Row[] = [];
+  commissionCredits: Row[] = [];
 
   addUser(
     id: string,
     walletBalance: number | string = 0,
     heldBalance: number | string = 0,
-    status: string = "ACTIVE"
+    status: string = "ACTIVE",
+    aepsBalance: number | string = 0,
+    // Cascade-model fields (role/schemeId/parentId) for the pricing chain.
+    opts: { role?: string; schemeId?: string | null; parentId?: string | null } = {}
   ) {
     this.users.set(id, {
       id,
       status,
       walletBalance: decOf(walletBalance),
       heldBalance: decOf(heldBalance),
+      aepsBalance: decOf(aepsBalance),
+      // Left undefined unless set: a role-less fake user is treated as staff
+      // by the scheme gate, so legacy tests that don't care about schemes
+      // keep working. Cascade tests pass role: "RETAILER" etc. explicitly.
+      role: opts.role,
+      schemeId: opts.schemeId ?? null,
+      parentId: opts.parentId ?? null,
+    });
+  }
+
+  /** Register a scheme + one FLAT slab, for cascade commission tests. */
+  addScheme(
+    id: string,
+    slab: {
+      service: string;
+      minAmount?: number;
+      maxAmount?: number;
+      chargeValue?: number;
+      commissionValue?: number;
+    }
+  ) {
+    this.schemes.push({ id, name: id, active: true, isDefault: false });
+    this.schemeSlabs.push({
+      id: `${id}-slab`,
+      schemeId: id,
+      service: slab.service,
+      minAmount: decOf(slab.minAmount ?? 0),
+      maxAmount: decOf(slab.maxAmount ?? 10_000_000),
+      chargeType: "FLAT",
+      chargeValue: decOf(slab.chargeValue ?? 0),
+      commissionType: "FLAT",
+      commissionValue: decOf(slab.commissionValue ?? 0),
+      parentSlabId: null,
+      active: true,
     });
   }
 
@@ -54,17 +94,27 @@ export class FakeDb {
     return decOf(this.users.get(id)?.heldBalance).toFixed(2);
   }
 
+  aepsBalanceOf(id: string): string {
+    return decOf(this.users.get(id)?.aepsBalance).toFixed(2);
+  }
+
   // ── prisma.user ───────────────────────────────────────────────────────────
   user = {
     findUnique: async ({ where }: { where: { id: string } }) => {
       const row = this.users.get(where.id);
-      return row ? { ...row } : null;
+      if (!row) return null;
+      // Emulate the `scheme`/`mdrScheme` relations read by the scheme gate.
+      const scheme = row.schemeId
+        ? this.schemes.find((s) => s.id === row.schemeId) ?? null
+        : null;
+      return { ...row, scheme: scheme ? { ...scheme } : null, mdrScheme: null };
     },
     update: async ({ where, data }: { where: { id: string }; data: Row }) => {
       const row = this.users.get(where.id);
       if (!row) throw new Error(`FakeDb: user ${where.id} not found`);
       if (data.walletBalance !== undefined) row.walletBalance = decOf(data.walletBalance);
       if (data.heldBalance !== undefined) row.heldBalance = decOf(data.heldBalance);
+      if (data.aepsBalance !== undefined) row.aepsBalance = decOf(data.aepsBalance);
       return { ...row };
     },
   };
@@ -120,11 +170,57 @@ export class FakeDb {
     count: async () => 0,
   };
 
+  // ── prisma.scheme / schemeSlab / commissionCredit (cascade model) ─────────
+  scheme = {
+    findFirst: async ({ where }: { where: { id?: string; active?: boolean; isDefault?: boolean } }) => {
+      const row = this.schemes.find(
+        (s) =>
+          (where.id === undefined || s.id === where.id) &&
+          (where.active === undefined || s.active === where.active) &&
+          (where.isDefault === undefined || s.isDefault === where.isDefault)
+      );
+      return row ? { ...row } : null;
+    },
+  };
+
+  schemeSlab = {
+    findMany: async ({ where }: { where: { schemeId?: string; service?: string; active?: boolean } }) =>
+      this.schemeSlabs
+        .filter(
+          (s) =>
+            (where.schemeId === undefined || s.schemeId === where.schemeId) &&
+            (where.service === undefined || s.service === where.service) &&
+            (where.active === undefined || s.active === where.active)
+        )
+        .map((s) => ({ ...s })),
+  };
+
+  commissionCredit = {
+    create: async ({ data }: { data: Row }) => {
+      const row = { id: nextId(), createdAt: new Date(), ...data };
+      this.commissionCredits.push(row);
+      return { ...row };
+    },
+  };
+
   // ── prisma.payoutRequest (risk-engine reads only) ─────────────────────────
   payoutRequest = {
     aggregate: async () => ({ _sum: { totalDebit: null } }),
     count: async () => 0,
     findFirst: async () => null,
+  };
+
+  // ── prisma.platformSetting — no rows in unit tests, so every setting
+  //    resolves to its schema default (see src/lib/settings.ts). ─────────────
+  platformSetting = {
+    findUnique: async () => null,
+    findMany: async () => [] as Row[],
+  };
+
+  // ── prisma.userLimit — no admin-assigned limits in unit tests, so the
+  //    risk engine and wallet-cap hooks fall back to platform defaults. ──────
+  userLimit = {
+    findUnique: async () => null,
   };
 
   // ── prisma.webhookEndpoint (Phase 4) — no subscribers in unit tests, so

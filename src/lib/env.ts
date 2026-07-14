@@ -159,7 +159,26 @@ const schema = z.object({
   KYC_VIDEO_RETENTION_DAYS: z.string().default("180")
 });
 
-const parsed = schema.safeParse(process.env);
+/**
+ * Empty strings in `.env` (e.g. `FOO=""`) fail `z.string().min(1).optional()`
+ * and used to invalidate the *entire* schema.safeParse. The old fallback then
+ * exposed raw `process.env`, which drops every Zod default — including
+ * `SAMEDAY_POS_BASE_URL` → `undefined/api/partner/...` 500s.
+ */
+function normalizeEnv(raw: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value == null) {
+      out[key] = undefined;
+      continue;
+    }
+    const trimmed = value.trim();
+    out[key] = trimmed === "" ? undefined : value;
+  }
+  return out;
+}
+
+const parsed = schema.safeParse(normalizeEnv(process.env));
 
 if (!parsed.success) {
   // Soft-warn; the build/runtime continues. Individual call sites that
@@ -169,7 +188,17 @@ if (!parsed.success) {
   console.warn(`[env] Some environment variables look invalid: ${issues}`);
 }
 
-export const env = (parsed.success ? parsed.data : (process.env as unknown as z.infer<typeof schema>));
+// Always prefer a successful Zod parse (defaults applied). If parse still
+// fails after normalization, merge defaults with whatever non-empty values
+// we have so optional secrets never wipe required defaults.
+export const env: z.infer<typeof schema> = parsed.success
+  ? parsed.data
+  : ({
+      ...schema.parse({}),
+      ...Object.fromEntries(
+        Object.entries(normalizeEnv(process.env)).filter(([, v]) => v != null && v !== "")
+      ),
+    } as z.infer<typeof schema>);
 
 /**
  * Throw a clear error if a required env var is missing at the moment a

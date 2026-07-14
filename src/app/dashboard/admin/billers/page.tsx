@@ -117,7 +117,7 @@ export default function AdminBillersPage() {
       </div>
 
       <DataTable
-        title={loading ? "Loading..." : "Categories"}
+        title="Categories" loading={loading}
         columns={cols}
         data={billers}
         empty="No billers found in the database. Seed billers to see data here."

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
   } catch (e) {
@@ -14,41 +14,60 @@ export async function GET() {
     throw e;
   }
 
-  const kycs = await prisma.kyc.findMany({
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          role: true,
-          status: true,
-          shopName: true,
-          shopAddress: true,
-          city: true,
-          state: true,
-          pincode: true,
-          documents: {
-            select: {
-              id: true,
-              type: true,
-              publicId: true,
-              url: true,
-              format: true,
-              resourceType: true,
-              uploadedAt: true,
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, Number(searchParams.get("page") ?? 1));
+  const pageSize = Math.min(50, Math.max(10, Number(searchParams.get("pageSize") ?? 25)));
+  const statusFilter = searchParams.get("status");
+
+  const where =
+    statusFilter && ["PENDING_REVIEW", "APPROVED", "REJECTED"].includes(statusFilter)
+      ? { status: statusFilter as "PENDING_REVIEW" | "APPROVED" | "REJECTED" }
+      : undefined;
+
+  const [total, kycs, pendingCount, approvedCount, rejectedCount] = await Promise.all([
+    prisma.kyc.count({ where }),
+    prisma.kyc.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            role: true,
+            status: true,
+            shopName: true,
+            shopAddress: true,
+            city: true,
+            state: true,
+            pincode: true,
+            documents: {
+              select: {
+                id: true,
+                type: true,
+                publicId: true,
+                url: true,
+                format: true,
+                resourceType: true,
+                uploadedAt: true,
+              },
+              orderBy: { uploadedAt: "desc" as const },
             },
-            orderBy: { uploadedAt: "desc" },
           },
         },
       },
-    },
-    orderBy: [
-      { status: "asc" },
-      { submittedAt: "desc" },
-    ],
-  });
+      orderBy: [
+        { status: "asc" as const },
+        { submittedAt: "desc" as const },
+      ],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.kyc.count({ where: { status: "PENDING_REVIEW" } }),
+    prisma.kyc.count({ where: { status: "APPROVED" } }),
+    prisma.kyc.count({ where: { status: "REJECTED" } }),
+  ]);
 
   const userIds = kycs.map((k) => k.userId);
 
@@ -76,13 +95,10 @@ export async function GET() {
     verificationsByUser.set(v.userId, list);
   }
 
-  const [pendingCount, approvedCount, rejectedCount] = await Promise.all([
-    prisma.kyc.count({ where: { status: "PENDING_REVIEW" } }),
-    prisma.kyc.count({ where: { status: "APPROVED" } }),
-    prisma.kyc.count({ where: { status: "REJECTED" } }),
-  ]);
-
   return NextResponse.json({
+    page,
+    pageSize,
+    total,
     kycs: kycs.map((k) => {
       const vResults = verificationsByUser.get(k.userId) ?? [];
       const kycVerifications = vResults.filter(

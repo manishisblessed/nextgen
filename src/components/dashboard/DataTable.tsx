@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 export type Column<T> = {
   key: keyof T | string;
@@ -17,7 +18,9 @@ export function DataTable<T>({
   columns,
   data,
   action,
-  empty = "No records to show."
+  empty = "No records to show.",
+  loading = false,
+  loadingRows = 5,
 }: {
   title?: string;
   description?: string;
@@ -25,6 +28,8 @@ export function DataTable<T>({
   data: T[];
   action?: ReactNode;
   empty?: string;
+  loading?: boolean;
+  loadingRows?: number;
 }) {
   return (
     <div className="min-w-0 overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-sm">
@@ -62,7 +67,22 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody className="divide-y divide-ink-100 text-ink-800">
-            {data.length === 0 ? (
+            {loading ? (
+              Array.from({ length: loadingRows }).map((_, r) => (
+                <tr key={`sk-${r}`}>
+                  {columns.map((c, i) => (
+                    <td key={String(c.key)} className="px-5 py-3">
+                      <Skeleton
+                        className={cn(
+                          "h-3.5",
+                          i === 0 ? "w-28" : i === columns.length - 1 ? "w-16 ml-auto" : "w-24"
+                        )}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : data.length === 0 ? (
               <tr>
                 <td
                   colSpan={columns.length}

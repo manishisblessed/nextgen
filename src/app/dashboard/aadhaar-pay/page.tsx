@@ -137,8 +137,8 @@ export default function AadhaarPayPage() {
         </div>
 
         <div className="mt-6">
-          <Button type="submit" size="lg" className="w-full" disabled={loading}>
-            {loading ? "Capturing biometric..." : "Capture biometric & continue"}
+          <Button type="submit" size="lg" className="w-full" disabled={loading} isLoading={loading}>
+            Capture biometric & continue
           </Button>
         </div>
       </form>

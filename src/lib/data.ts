@@ -233,6 +233,22 @@ export const services: ServiceItem[] = [
     icon: GraduationCap,
     href: "/dashboard/bill-pay/education",
     category: "bills"
+  },
+  {
+    slug: "insurance",
+    title: "Insurance Premium",
+    description: "Pay life insurance premiums across major insurers instantly.",
+    icon: ShieldCheck,
+    href: "/dashboard/bill-pay/insurance",
+    category: "bills"
+  },
+  {
+    slug: "broadband-bill",
+    title: "Broadband Bill",
+    description: "Pay postpaid broadband & landline bills via BBPS.",
+    icon: Wifi,
+    href: "/dashboard/bill-pay/broadband",
+    category: "bills"
   }
 ];
 

@@ -187,7 +187,7 @@ export default function TxnPinPage() {
             </div>
           )}
 
-          <Button type="submit" size="lg" className="w-full" disabled={!canSubmit}>
+          <Button type="submit" size="lg" className="w-full" isLoading={saving} disabled={!canSubmit}>
             {saving ? "Saving…" : isChange ? "Update PIN" : "Activate PIN"}
           </Button>
         </form>

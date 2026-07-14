@@ -61,6 +61,16 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    // Clamp date_from so exports only include transactions from after the
+    // terminal was assigned to this user/downline.
+    const match = scope.terminals.find((t) => t.tid === parsed.data.terminal_id);
+    if (match?.assignedAt) {
+      const assignedIso = match.assignedAt.toISOString();
+      if (parsed.data.date_from < assignedIso) {
+        parsed.data.date_from = assignedIso;
+      }
+    }
   }
 
   const result = await createPosExport(parsed.data);

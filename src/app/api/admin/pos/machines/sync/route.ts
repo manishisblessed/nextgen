@@ -11,6 +11,8 @@ export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
+export const maxDuration = 120;
+
 /**
  * POST /api/admin/pos/machines/sync
  *
@@ -62,6 +64,7 @@ export async function POST(req: Request) {
         scanned: result.scanned,
         created: result.created,
         updated: result.updated,
+        removed: result.removed,
         by: admin.email,
       },
       ip: clientIp(req),

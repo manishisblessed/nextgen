@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { SERVICE_CODES, serviceGroup } from "@/lib/scheme/constants";
 import {
@@ -35,6 +37,8 @@ type Slab = {
   commissionRetailer: number;
   commissionDistributor: number;
   commissionMaster: number;
+  /** Cascade model: commission the ASSIGNED user earns on this slab. */
+  commissionValue: number;
   active: boolean;
 };
 
@@ -57,7 +61,10 @@ export default function SchemeEditorPage() {
   const [slabs, setSlabs] = useState<Slab[]>([]);
   const [assigned, setAssigned] = useState<AssignedUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
 
   const [slabModal, setSlabModal] = useState<{ open: boolean; editing: Slab | null }>({ open: false, editing: null });
 
@@ -71,21 +78,15 @@ export default function SchemeEditorPage() {
       setSlabs(data.scheme.slabs ?? []);
       setAssigned(data.assignedUsers ?? []);
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Failed to load", ok: false });
+      notify(e instanceof Error ? e.message : "Failed to load", false);
     } finally {
       setLoading(false);
     }
-  }, [schemeId]);
+  }, [schemeId, notify]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 3500);
-    return () => clearTimeout(t);
-  }, [notice]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, Slab[]>();
@@ -104,10 +105,10 @@ export default function SchemeEditorPage() {
       const res = await fetch(`/api/admin/schemes/${schemeId}/slabs/${slab.id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Delete failed");
-      setNotice({ text: "Slab removed.", ok: true });
+      notify("Slab removed.", true);
       load();
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Delete failed", ok: false });
+      notify(e instanceof Error ? e.message : "Delete failed", false);
     }
   }
 
@@ -120,10 +121,10 @@ export default function SchemeEditorPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Update failed");
-      setNotice({ text: okMsg, ok: true });
+      notify(okMsg, true);
       load();
     } catch (e) {
-      setNotice({ text: e instanceof Error ? e.message : "Update failed", ok: false });
+      notify(e instanceof Error ? e.message : "Update failed", false);
     }
   }
 
@@ -187,16 +188,6 @@ export default function SchemeEditorPage() {
         <Badge variant="default">{assigned.length} users assigned</Badge>
       </div>
 
-      {notice && (
-        <div
-          className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-            notice.ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
-        >
-          {notice.text}
-        </div>
-      )}
-
       {/* Slab grid grouped by service */}
       {grouped.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-ink-200 bg-white p-10 text-center">
@@ -225,6 +216,7 @@ export default function SchemeEditorPage() {
                     <tr>
                       <th className="px-5 py-2.5 font-semibold">Range</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Charge</th>
+                      <th className="px-5 py-2.5 text-right font-semibold">User Commission</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Retailer</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Distributor</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Master Dist.</th>
@@ -239,6 +231,7 @@ export default function SchemeEditorPage() {
                           ₹{s.minAmount.toLocaleString("en-IN")} – ₹{s.maxAmount.toLocaleString("en-IN")}
                         </td>
                         <td className="px-5 py-3 text-right">{fmtRate(s.chargeType, s.chargeValue)}</td>
+                        <td className="px-5 py-3 text-right font-semibold text-emerald-700">{fmtRate(s.commissionType, s.commissionValue)}</td>
                         <td className="px-5 py-3 text-right">{fmtRate(s.commissionType, s.commissionRetailer)}</td>
                         <td className="px-5 py-3 text-right">{fmtRate(s.commissionType, s.commissionDistributor)}</td>
                         <td className="px-5 py-3 text-right">{fmtRate(s.commissionType, s.commissionMaster)}</td>
@@ -277,10 +270,10 @@ export default function SchemeEditorPage() {
         schemeId={schemeId}
         assigned={assigned}
         onChange={(msg) => {
-          setNotice({ text: msg, ok: true });
+          notify(msg, true);
           load();
         }}
-        onError={(msg) => setNotice({ text: msg, ok: false })}
+        onError={(msg) => notify(msg, false)}
       />
 
       {slabModal.open && (
@@ -290,7 +283,7 @@ export default function SchemeEditorPage() {
           onClose={() => setSlabModal({ open: false, editing: null })}
           onSaved={(msg) => {
             setSlabModal({ open: false, editing: null });
-            setNotice({ text: msg, ok: true });
+            notify(msg, true);
             load();
           }}
         />
@@ -334,6 +327,10 @@ function SlabModal({
   const [comM, setComM] = useState(
     String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionMaster * 100 : editing.commissionMaster) : 0)
   );
+  // Cascade model: commission the assigned user earns on this slab.
+  const [comOwn, setComOwn] = useState(
+    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionValue * 100 : editing.commissionValue) : 0)
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -367,6 +364,7 @@ function SlabModal({
       commissionRetailer: toStored(commissionType, comR),
       commissionDistributor: toStored(commissionType, comD),
       commissionMaster: toStored(commissionType, comM),
+      commissionValue: toStored(commissionType, comOwn),
     };
 
     try {
@@ -457,6 +455,14 @@ function SlabModal({
                 <option value="FLAT">Flat (₹)</option>
               </Select>
             </div>
+            <div className="mb-3">
+              <Label>Assigned user&apos;s commission (cascade)</Label>
+              <Input type="number" min={0} step="0.0001" value={comOwn} onChange={(e) => setComOwn(e.target.value)} />
+              <p className="mt-1 text-xs text-ink-400">
+                What the user this scheme is assigned to earns per transaction. Parents up the
+                chain earn scheme-difference margins automatically.
+              </p>
+            </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>Retailer</Label>
@@ -498,15 +504,15 @@ function AssignmentPanel({
   onChange: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
-  const [role, setRole] = useState("RETAILER");
+  const [role, setRole] = useState("SUPER_DISTRIBUTOR");
   const [assigningRole, setAssigningRole] = useState(false);
+  const [assignRoleConfirmOpen, setAssignRoleConfirmOpen] = useState(false);
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ id: string; name: string; role: string }[]>([]);
   const [searching, setSearching] = useState(false);
 
   async function assignByRole() {
-    if (!confirm(`Assign this scheme to ALL ${role.replace(/_/g, " ").toLowerCase()} users? This overrides their current scheme.`)) return;
     setAssigningRole(true);
     try {
       const res = await fetch("/api/admin/schemes/assign", {
@@ -562,7 +568,7 @@ function AssignmentPanel({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Unassign failed");
-      onChange("User unassigned (falls back to default scheme).");
+      onChange("User unassigned — they are blocked from transacting until a scheme is assigned.");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Unassign failed");
     }
@@ -583,13 +589,14 @@ function AssignmentPanel({
             <div className="flex-1">
               <Label>Role</Label>
               <Select value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="RETAILER">Retailer</option>
-                <option value="DISTRIBUTOR">Distributor</option>
-                <option value="MASTER_DISTRIBUTOR">Master Distributor</option>
                 <option value="SUPER_DISTRIBUTOR">Super Distributor</option>
               </Select>
+              <p className="mt-1 text-xs text-ink-400">
+                Cascade model: admin assigns platform schemes to super-distributors only. Lower
+                tiers receive schemes derived by their parent.
+              </p>
             </div>
-            <Button onClick={assignByRole} disabled={assigningRole}>
+            <Button onClick={() => setAssignRoleConfirmOpen(true)} disabled={assigningRole}>
               {assigningRole ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Assign
             </Button>
           </div>
@@ -631,7 +638,7 @@ function AssignmentPanel({
           <p className="text-xs font-bold uppercase tracking-widest text-ink-500">Currently assigned ({assigned.length})</p>
           {assigned.length === 0 ? (
             <p className="rounded-xl border border-dashed border-ink-200 px-3 py-6 text-center text-sm text-ink-500">
-              No users assigned. Users without a scheme use the platform default.
+              No users assigned. Users without a scheme are blocked from transacting.
             </p>
           ) : (
             <ul className="max-h-72 divide-y divide-ink-100 overflow-y-auto rounded-xl border border-ink-100">
@@ -655,6 +662,24 @@ function AssignmentPanel({
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={assignRoleConfirmOpen}
+        onClose={() => setAssignRoleConfirmOpen(false)}
+        busy={assigningRole}
+        tone="default"
+        title={`Assign scheme to all ${role.replace(/_/g, " ").toLowerCase()}s?`}
+        description={
+          <>
+            This scheme will be assigned to <span className="font-semibold text-ink-900">ALL {role.replace(/_/g, " ").toLowerCase()}</span> users, overriding their current scheme.
+          </>
+        }
+        confirmLabel="Assign to all"
+        onConfirm={async () => {
+          await assignByRole();
+          setAssignRoleConfirmOpen(false);
+        }}
+      />
     </section>
   );
 }

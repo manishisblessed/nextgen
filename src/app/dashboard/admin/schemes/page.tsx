@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -46,7 +47,10 @@ export default function SchemesPage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
 
   const fetchSchemes = useCallback(async () => {
     setLoading(true);
@@ -55,21 +59,15 @@ export default function SchemesPage() {
       const data = await res.json();
       if (Array.isArray(data.schemes)) setSchemes(data.schemes);
     } catch {
-      setNotice({ text: "Failed to load schemes.", ok: false });
+      notify("Failed to load schemes.", false);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     fetchSchemes();
   }, [fetchSchemes]);
-
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 3500);
-    return () => clearTimeout(t);
-  }, [notice]);
 
   const makeDefault = useCallback(
     async (s: Scheme) => {
@@ -83,15 +81,15 @@ export default function SchemesPage() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error ?? "Update failed");
-        setNotice({ text: `"${s.name}" is now the default scheme.`, ok: true });
+        notify(`"${s.name}" is now the default scheme.`, true);
         await fetchSchemes();
       } catch (e) {
-        setNotice({ text: e instanceof Error ? e.message : "Update failed", ok: false });
+        notify(e instanceof Error ? e.message : "Update failed", false);
       } finally {
         setBusyId(null);
       }
     },
-    [fetchSchemes]
+    [fetchSchemes, notify]
   );
 
   const activeCount = schemes.filter((s) => s.active).length;
@@ -114,18 +112,6 @@ export default function SchemesPage() {
           </>
         }
       />
-
-      {notice && (
-        <div
-          className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-            notice.ok
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
-        >
-          {notice.text}
-        </div>
-      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Total schemes" value={schemes.length} tone="brand" />
@@ -169,7 +155,7 @@ export default function SchemesPage() {
           onClose={() => setCreating(false)}
           onCreated={(msg) => {
             setCreating(false);
-            setNotice({ text: msg, ok: true });
+            notify(msg, true);
             fetchSchemes();
           }}
         />
@@ -358,8 +344,8 @@ function CreateSchemeModal({
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Create
+          <Button onClick={submit} disabled={saving} isLoading={saving}>
+            <Plus className="h-4 w-4" /> Create
           </Button>
         </div>
       </div>

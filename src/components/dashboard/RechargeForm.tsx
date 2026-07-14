@@ -157,10 +157,8 @@ export function RechargeForm({
         )}
 
         <div className="sm:col-span-2">
-          <Button type="submit" size="lg" className="w-full" disabled={loading}>
-            {loading
-              ? "Recharging..."
-              : `Pay ${amount ? formatINR(Number(amount)) : "now"}`}
+          <Button type="submit" size="lg" className="w-full" disabled={loading} isLoading={loading}>
+            Pay {amount ? formatINR(Number(amount)) : "now"}
           </Button>
           <p className="mt-2 text-center text-[11px] text-ink-400">
             Confirmed with your transaction PIN. Debited from your wallet — failed recharges are auto-refunded.

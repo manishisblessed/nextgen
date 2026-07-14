@@ -56,8 +56,11 @@ export async function isServiceEnabled(
 }
 
 /**
- * True if the service is enabled for this user (in their allowlist, or the
- * user holds a staff role). Does NOT consider the global switch.
+ * True if the service is enabled for this user. Staff roles always pass.
+ * For network users: empty `enabledServices` means ALL services are allowed
+ * (no restriction configured); a non-empty list means ONLY those keys are
+ * allowed (admin explicitly configured the user's access).
+ * Does NOT consider the global switch.
  */
 export async function isServiceEnabledForUser(
   key: string,
@@ -72,6 +75,7 @@ export async function isServiceEnabledForUser(
   });
   if (!user) return false;
   if (STAFF_ROLES.has(user.role)) return true;
+  if (user.enabledServices.length === 0) return true;
   return user.enabledServices.includes(key);
 }
 
@@ -104,9 +108,11 @@ export async function assertServiceEnabled(
 }
 
 /**
- * Effective service keys for a user: globally-enabled rails intersected with
- * the user's allowlist (staff roles get every globally-enabled rail). Used by
- * the sidebar/overview to show only usable services.
+ * Effective service keys for a user: globally-enabled rails filtered by the
+ * user's access config. Staff roles get every globally-enabled rail.
+ * For network users: empty `enabledServices` means ALL globally-enabled
+ * services are available; a non-empty list means ONLY those keys are allowed
+ * (admin explicitly configured the user's access).
  */
 export async function getEffectiveServiceKeys(
   userId: string,
@@ -126,6 +132,8 @@ export async function getEffectiveServiceKeys(
   });
   if (!user) return [];
   if (STAFF_ROLES.has(user.role)) return globallyOn;
+
+  if (user.enabledServices.length === 0) return globallyOn;
 
   const allowed = new Set(user.enabledServices);
   return globallyOn.filter((k) => allowed.has(k));

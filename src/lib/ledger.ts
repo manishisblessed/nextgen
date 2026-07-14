@@ -1,4 +1,4 @@
-import { Prisma, type WalletReason, type WalletTxn } from "@prisma/client";
+import { Prisma, type WalletReason, type WalletTxn, type WalletType } from "@prisma/client";
 import { prisma } from "./db";
 import { add, sub, gte, dec, type Money } from "./money";
 
@@ -53,7 +53,7 @@ async function lockUser(tx: Tx, userId: string) {
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
   const user = await tx.user.findUnique({
     where: { id: userId },
-    select: { id: true, walletBalance: true, heldBalance: true },
+    select: { id: true, walletBalance: true, heldBalance: true, aepsBalance: true },
   });
   if (!user) throw new LedgerError("INVALID_AMOUNT", "User not found");
   return user;
@@ -77,25 +77,34 @@ export type WalletMovement = {
   note?: string;
   /** Strongly recommended for any retryable / externally-triggered movement. */
   idempotencyKey?: string;
+  /**
+   * Which wallet book to move money in. PRIMARY (default) = the spendable
+   * wallet; AEPS = the secondary AEPS-proceeds wallet. Holds only exist on
+   * the PRIMARY book.
+   */
+  walletType?: WalletType;
 };
 
-/** Credit (add) funds to a user's wallet. */
+/** Credit (add) funds to a user's wallet (PRIMARY or AEPS book). */
 export async function creditWallet(m: WalletMovement, tx?: Tx): Promise<WalletTxn> {
   assertPositive(m.amount);
+  const walletType: WalletType = m.walletType ?? "PRIMARY";
   return withTx(tx, async (t) => {
     if (m.idempotencyKey) {
       const existing = await findByIdempotencyKey(t, m.idempotencyKey);
       if (existing) return existing;
     }
     const user = await lockUser(t, m.userId);
-    const newBalance = add(user.walletBalance, m.amount);
+    const current = walletType === "AEPS" ? user.aepsBalance : user.walletBalance;
+    const newBalance = add(current, m.amount);
     await t.user.update({
       where: { id: m.userId },
-      data: { walletBalance: newBalance },
+      data: walletType === "AEPS" ? { aepsBalance: newBalance } : { walletBalance: newBalance },
     });
     return t.walletTxn.create({
       data: {
         userId: m.userId,
+        walletType,
         direction: "CREDIT",
         reason: m.reason,
         amount: new Prisma.Decimal(dec(m.amount)),
@@ -109,27 +118,32 @@ export async function creditWallet(m: WalletMovement, tx?: Tx): Promise<WalletTx
   });
 }
 
-/** Debit (remove) funds from a user's spendable balance. */
+/** Debit (remove) funds from a user's spendable balance (PRIMARY or AEPS book). */
 export async function debitWallet(m: WalletMovement, tx?: Tx): Promise<WalletTxn> {
   assertPositive(m.amount);
+  const walletType: WalletType = m.walletType ?? "PRIMARY";
   return withTx(tx, async (t) => {
     if (m.idempotencyKey) {
       const existing = await findByIdempotencyKey(t, m.idempotencyKey);
       if (existing) return existing;
     }
     const user = await lockUser(t, m.userId);
-    const spendable = sub(user.walletBalance, user.heldBalance);
+    // AEPS book has no holds — the whole balance is spendable.
+    const spendable =
+      walletType === "AEPS" ? user.aepsBalance : sub(user.walletBalance, user.heldBalance);
     if (!gte(spendable, m.amount)) {
       throw new LedgerError("INSUFFICIENT_FUNDS");
     }
-    const newBalance = sub(user.walletBalance, m.amount);
+    const current = walletType === "AEPS" ? user.aepsBalance : user.walletBalance;
+    const newBalance = sub(current, m.amount);
     await t.user.update({
       where: { id: m.userId },
-      data: { walletBalance: newBalance },
+      data: walletType === "AEPS" ? { aepsBalance: newBalance } : { walletBalance: newBalance },
     });
     return t.walletTxn.create({
       data: {
         userId: m.userId,
+        walletType,
         direction: "DEBIT",
         reason: m.reason,
         amount: new Prisma.Decimal(dec(m.amount)),
@@ -230,12 +244,13 @@ export async function captureHold(m: WalletMovement, tx?: Tx): Promise<WalletTxn
 export async function getBalances(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { walletBalance: true, heldBalance: true },
+    select: { walletBalance: true, heldBalance: true, aepsBalance: true },
   });
   if (!user) throw new LedgerError("INVALID_AMOUNT", "User not found");
   return {
     walletBalance: user.walletBalance as Money,
     heldBalance: user.heldBalance as Money,
+    aepsBalance: user.aepsBalance as Money,
     spendable: sub(user.walletBalance, user.heldBalance),
   };
 }

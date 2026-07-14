@@ -63,9 +63,13 @@ export async function bulkpePost<T>(path: string, body: unknown): Promise<Partne
   }
 }
 
-async function bulkpeGet<T>(path: string): Promise<PartnerResult<T>> {
+export async function bulkpeGet<T>(path: string, params?: Record<string, string>): Promise<PartnerResult<T>> {
   try {
-    const res = await fetch(`${baseUrl()}${path}`, {
+    let url = `${baseUrl()}${path}`;
+    if (params && Object.keys(params).length > 0) {
+      url += `?${new URLSearchParams(params).toString()}`;
+    }
+    const res = await fetch(url, {
       method: "GET",
       headers: { authorization: `Bearer ${token()}` },
     });

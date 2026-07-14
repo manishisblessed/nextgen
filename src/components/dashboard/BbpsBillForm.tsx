@@ -172,9 +172,7 @@ export function BbpsBillForm({
         }),
       });
       const data = await res.json();
-      if (!res.ok || data.status === "FAILED") {
-        // PIN problems stay inside the dialog; anything else closes it and
-        // surfaces on the form.
+      if (data.status === "FAILED" || (res.status >= 400 && res.status !== 402)) {
         if (data.txnPin) return typeof data.error === "string" ? data.error : "PIN verification failed";
         setPinOpen(false);
         setError(
@@ -185,6 +183,7 @@ export function BbpsBillForm({
         return null;
       }
       setPinOpen(false);
+      const isPending = data.status === "PROCESSING" || res.status === 202;
       setResult({
         refId: data.refId,
         service: `${serviceTitle} — ${biller?.name ?? billerCode}`,
@@ -193,6 +192,7 @@ export function BbpsBillForm({
         meta: {
           Biller: biller?.name ?? billerCode,
           ...(data.data?.receipt ? { "Operator ref": data.data.receipt } : {}),
+          ...(isPending ? { Status: "Processing — will be confirmed shortly" } : {}),
         },
       });
       resetBill();
@@ -287,8 +287,9 @@ export function BbpsBillForm({
               className="w-full"
               onClick={fetchBill}
               disabled={fetching || !requiredFilled || !billerCode}
+              isLoading={fetching}
             >
-              {fetching ? "Fetching bill…" : "Fetch bill"}
+              Fetch bill
             </Button>
           ) : (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
@@ -337,8 +338,8 @@ export function BbpsBillForm({
               </div>
             </div>
             <div className="sm:col-span-2">
-              <Button type="submit" size="lg" className="w-full" disabled={paying || !amount}>
-                {paying ? "Processing payment…" : `Pay ${amount ? formatINR(Number(amount)) : "bill"}`}
+              <Button type="submit" size="lg" className="w-full" disabled={paying || !amount} isLoading={paying}>
+                Pay {amount ? formatINR(Number(amount)) : "bill"}
               </Button>
               <p className="mt-2 text-center text-[11px] text-ink-400">
                 Confirmed with your transaction PIN. Debited from your wallet — failed payments are auto-refunded.

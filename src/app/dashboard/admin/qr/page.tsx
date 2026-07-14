@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   QrCode,
   Clock,
   ShieldCheck,
   Banknote,
-  AlertCircle,
   RefreshCw,
   ExternalLink,
   CheckCircle2,
@@ -17,6 +17,7 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
 import { formatINR } from "@/lib/utils";
 
@@ -68,8 +69,6 @@ function ReviewQueueTab() {
   const [threshold, setThreshold] = useState(10000);
   const [statusFilter, setStatusFilter] = useState<"REVIEWABLE" | "ALL">("REVIEWABLE");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   // Review panel state
   const [selected, setSelected] = useState<ClaimRow | null>(null);
@@ -88,7 +87,7 @@ function ReviewQueueTab() {
         if (d.secondApprovalThreshold) setThreshold(d.secondApprovalThreshold);
       }
     } catch {
-      setError("Could not load the review queue.");
+      toast.error("Could not load the review queue.");
     } finally {
       setLoading(false);
     }
@@ -102,18 +101,15 @@ function ReviewQueueTab() {
     setSelected(c);
     setPortalVerified(false);
     setNote("");
-    setError(null);
-    setNotice(null);
   }
 
   async function act(action: "approve" | "reject") {
     if (!selected) return;
     if (action === "reject" && note.trim().length < 3) {
-      setError("A rejection note is required (shown to the retailer).");
+      toast.error("A rejection note is required (shown to the retailer).");
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(`/api/admin/qr/claims/${selected.id}/${action}`, {
         method: "POST",
@@ -124,20 +120,22 @@ function ReviewQueueTab() {
       });
       const d = await res.json();
       if (!res.ok) {
-        setError(typeof d.error === "string" ? d.error : "Action failed");
+        toast.error(typeof d.error === "string" ? d.error : "Action failed");
         return;
       }
-      setNotice(
-        d.status === "APPROVED"
-          ? `Approved — ${formatINR(selected.amount)} credited to ${selected.retailer.name}'s wallet.`
-          : d.status === "AWAITING_SECOND_APPROVAL"
-            ? `First approval recorded — a DIFFERENT admin must approve this ${formatINR(selected.amount)} claim before money moves.`
-            : "Claim rejected."
-      );
+      if (d.status === "APPROVED") {
+        toast.success(`Approved — ${formatINR(selected.amount)} credited to ${selected.retailer.name}'s wallet.`);
+      } else if (d.status === "AWAITING_SECOND_APPROVAL") {
+        toast.warning(
+          `First approval recorded — a DIFFERENT admin must approve this ${formatINR(selected.amount)} claim before money moves.`
+        );
+      } else {
+        toast.success("Claim rejected.");
+      }
       setSelected(null);
       refresh();
     } catch {
-      setError("Network error — refresh the queue before retrying.");
+      toast.error("Network error — refresh the queue before retrying.");
     } finally {
       setBusy(false);
     }
@@ -230,17 +228,6 @@ function ReviewQueueTab() {
             icon={Banknote}
             accent="brand"
           />
-        </div>
-      )}
-
-      {(error || notice) && (
-        <div
-          className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${
-            error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-          }`}
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error ?? notice}</span>
         </div>
       )}
 
@@ -359,7 +346,8 @@ function ReviewQueueTab() {
       </div>
 
       <DataTable
-        title={loading ? "Loading…" : "Claims (oldest first)"}
+        title="Claims (oldest first)"
+        loading={loading}
         columns={cols}
         data={claims}
         empty="Nothing awaiting review."
@@ -375,13 +363,14 @@ function ReviewQueueTab() {
 function QrManageTab() {
   const [qrs, setQrs] = useState<QrRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   const [label, setLabel] = useState("");
   const [vpa, setVpa] = useState("");
   const [image, setImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false);
+  const [toggleTarget, setToggleTarget] = useState<QrRow | null>(null);
+  const [toggleBusy, setToggleBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -390,7 +379,7 @@ function QrManageTab() {
       const res = await fetch("/api/admin/qr");
       if (res.ok) setQrs((await res.json()).qrs ?? []);
     } catch {
-      setError("Could not load QR codes.");
+      toast.error("Could not load QR codes.");
     } finally {
       setLoading(false);
     }
@@ -404,7 +393,7 @@ function QrManageTab() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      setError("QR image must be under 5 MB");
+      toast.error("QR image must be under 5 MB");
       return;
     }
     const reader = new FileReader();
@@ -412,17 +401,19 @@ function QrManageTab() {
     reader.readAsDataURL(file);
   }
 
-  async function createQr(e: React.FormEvent) {
+  function createQr(e: React.FormEvent) {
     e.preventDefault();
     if (!image) return;
-    if (
-      qrs.some((q) => q.active) &&
-      !window.confirm("Activating a new QR will disable the current one for ALL retailers immediately. Continue?")
-    )
+    if (qrs.some((q) => q.active)) {
+      setReplaceConfirmOpen(true);
       return;
+    }
+    void submitQr();
+  }
+
+  async function submitQr() {
+    if (!image) return;
     setBusy(true);
-    setError(null);
-    setNotice(null);
     try {
       const res = await fetch("/api/admin/qr", {
         method: "POST",
@@ -435,39 +426,40 @@ function QrManageTab() {
       });
       const d = await res.json();
       if (!res.ok) {
-        setError(typeof d.error === "string" ? d.error : "Upload failed — check the fields");
+        toast.error(typeof d.error === "string" ? d.error : "Upload failed — check the fields");
         return;
       }
-      setNotice(`"${d.label}" is now the live QR for all retailers.`);
+      toast.success(`"${d.label}" is now the live QR for all retailers.`);
       setLabel("");
       setVpa("");
       setImage(null);
       if (fileRef.current) fileRef.current.value = "";
       refresh();
     } catch {
-      setError("Network error while uploading the QR.");
+      toast.error("Network error while uploading the QR.");
     } finally {
       setBusy(false);
     }
   }
 
   async function toggle(qr: QrRow) {
-    const msg = qr.active
-      ? "Disable this QR? Retailers will have NO live QR until you activate another one."
-      : "Activate this QR? The currently live QR (if any) will be disabled.";
-    if (!window.confirm(msg)) return;
-    setError(null);
-    const res = await fetch(`/api/admin/qr/${qr.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !qr.active }),
-    });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setError(typeof d.error === "string" ? d.error : "Could not update the QR");
-      return;
+    setToggleBusy(true);
+    try {
+      const res = await fetch(`/api/admin/qr/${qr.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: !qr.active }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast.error(typeof d.error === "string" ? d.error : "Could not update the QR");
+        return;
+      }
+      toast.success(qr.active ? "QR disabled." : "QR activated for all retailers.");
+      refresh();
+    } finally {
+      setToggleBusy(false);
     }
-    refresh();
   }
 
   const cols: Column<QrRow>[] = [
@@ -508,7 +500,7 @@ function QrManageTab() {
       header: "",
       align: "right",
       render: (r) => (
-        <Button variant="outline" onClick={() => toggle(r)} className="h-8 px-3 text-xs">
+        <Button variant="outline" onClick={() => setToggleTarget(r)} className="h-8 px-3 text-xs">
           {r.active ? "Disable" : "Activate"}
         </Button>
       ),
@@ -517,16 +509,6 @@ function QrManageTab() {
 
   return (
     <div className="space-y-6">
-      {(error || notice) && (
-        <div
-          className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${
-            error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-          }`}
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error ?? notice}</span>
-        </div>
-      )}
 
       <form onSubmit={createQr} className="rounded-2xl border border-ink-100 bg-white p-6">
         <div className="flex items-center gap-2">
@@ -580,17 +562,49 @@ function QrManageTab() {
           </div>
         </div>
 
-        <Button type="submit" className="mt-4" disabled={busy || !image || !label.trim()}>
-          {busy ? "Uploading…" : "Upload & make live"}
+        <Button type="submit" className="mt-4" disabled={busy || !image || !label.trim()} isLoading={busy}>
+          Upload & make live
         </Button>
       </form>
 
       <DataTable
-        title={loading ? "Loading…" : "QR history"}
+        title="QR history"
+        loading={loading}
         description="Old QRs are kept (never deleted) so historical claims stay traceable."
         columns={cols}
         data={qrs}
         empty="No QR uploaded yet — retailers currently have nothing to collect on."
+      />
+
+      <ConfirmDialog
+        open={replaceConfirmOpen}
+        onClose={() => setReplaceConfirmOpen(false)}
+        busy={busy}
+        title="Replace the live QR?"
+        description="Activating a new QR will disable the current one for ALL retailers immediately."
+        confirmLabel="Upload & make live"
+        onConfirm={async () => {
+          await submitQr();
+          setReplaceConfirmOpen(false);
+        }}
+      />
+
+      <ConfirmDialog
+        open={toggleTarget !== null}
+        onClose={() => setToggleTarget(null)}
+        busy={toggleBusy}
+        title={toggleTarget?.active ? "Disable this QR?" : "Activate this QR?"}
+        description={
+          toggleTarget?.active
+            ? "Retailers will have NO live QR until you activate another one."
+            : "The currently live QR (if any) will be disabled."
+        }
+        confirmLabel={toggleTarget?.active ? "Disable" : "Activate"}
+        onConfirm={async () => {
+          if (!toggleTarget) return;
+          await toggle(toggleTarget);
+          setToggleTarget(null);
+        }}
       />
     </div>
   );

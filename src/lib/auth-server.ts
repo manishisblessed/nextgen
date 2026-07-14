@@ -13,6 +13,10 @@ import {
   normalizeIdentifier,
 } from "./security/lockout";
 import { bumpTokenVersion } from "./security/session";
+import {
+  getCachedSessionValidation,
+  setCachedSessionValidation,
+} from "./security/sessionValidationCache";
 import { isLoginAllowed } from "./security/accountGate";
 
 export type SessionUser = {
@@ -48,7 +52,9 @@ export const authOptions: NextAuthOptions = {
   // than 500-ing every /api/auth/* request with a cryptic "server configuration"
   // error. NextAuth requires this in production.
   secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV !== "production",
+  // Opt-in only (set NEXTAUTH_DEBUG=true) — always-on dev debug spams the
+  // console with [next-auth][warn][DEBUG_ENABLED] on every compile.
+  debug: process.env.NEXTAUTH_DEBUG === "true",
   // Short JWT lifetime for a finance portal; combined with the per-request
   // tokenVersion check this bounds how long any leaked/replayed cookie is usable.
   session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
@@ -200,18 +206,27 @@ export const authOptions: NextAuthOptions = {
       //    check will catch up.
       if (token.id) {
         try {
-          const fresh = await prisma.user.findUnique({
-            where: { id: token.id as string },
-            select: {
-              name: true,
-              tokenVersion: true,
-              twoFactorEnabled: true,
-              walletBalance: true,
-              status: true,
-              role: true,
-              enabledServices: true,
-            },
-          });
+          const userId = token.id as string;
+          // Short-TTL cache: dashboard pages fire many API calls in parallel
+          // and each one would otherwise pay a full DB round trip here before
+          // doing any real work. Same-process privilege changes invalidate the
+          // cache immediately; cross-instance changes are bounded by the TTL.
+          let fresh = getCachedSessionValidation(userId);
+          if (fresh === undefined) {
+            fresh = await prisma.user.findUnique({
+              where: { id: userId },
+              select: {
+                name: true,
+                tokenVersion: true,
+                twoFactorEnabled: true,
+                walletBalance: true,
+                status: true,
+                role: true,
+                enabledServices: true,
+              },
+            });
+            setCachedSessionValidation(userId, fresh);
+          }
           if (
             !fresh ||
             !isLoginAllowed(fresh.status) ||

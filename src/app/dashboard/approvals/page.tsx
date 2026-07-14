@@ -611,10 +611,11 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
       <div className="flex items-center gap-3">
         <Button
           onClick={handleApprove}
-          disabled={submitting || !hasSigned || !selfieDataUrl || !gps}
+          isLoading={submitting}
+          disabled={!hasSigned || !selfieDataUrl || !gps}
           className="flex-1"
         >
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+          <CheckCircle2 className="h-4 w-4" />
           Approve Declaration
         </Button>
         {!showReject ? (
@@ -634,10 +635,11 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
               <Button
                 variant="outline"
                 onClick={handleReject}
-                disabled={submitting || rejectReason.length < 5}
+                isLoading={submitting}
+                disabled={rejectReason.length < 5}
                 className="text-rose-600 border-rose-200"
               >
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                <XCircle className="h-4 w-4" />
                 Confirm Reject
               </Button>
               <Button variant="outline" onClick={() => setShowReject(false)}>Cancel</Button>

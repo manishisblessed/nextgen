@@ -119,7 +119,8 @@ export default function AdminCommissionsPage() {
         }
       />
       <DataTable
-        title={loading ? "Loading..." : `${slabs.length} active slabs`}
+        title={`${slabs.length} active slabs`}
+        loading={loading}
         description="Commission payouts per service per user level."
         columns={cols}
         data={slabs}

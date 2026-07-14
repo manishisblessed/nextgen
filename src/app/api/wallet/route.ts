@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   let user;
   try {
     user = await requireAuth();
@@ -19,6 +19,12 @@ export async function GET() {
     where: { id: user.id },
     select: { walletBalance: true },
   });
+
+  // Light mode for the topbar poller — skips the txn/aggregate queries.
+  const { searchParams } = new URL(req.url);
+  if (searchParams.get("balanceOnly") === "1") {
+    return NextResponse.json({ balance: Number(dbUser.walletBalance) });
+  }
 
   const startOfMonth = new Date();
   startOfMonth.setDate(1);

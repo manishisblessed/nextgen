@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+import { Pagination } from "@/components/ui/Pagination";
 import { Search, Filter, RefreshCw } from "lucide-react";
 
 type AuditRow = {
@@ -25,6 +26,8 @@ export default function AdminAuditPage() {
   const [sev, setSev] = useState("all");
   const [events, setEvents] = useState<AuditRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   const [loading, setLoading] = useState(true);
 
   const fetchAudit = useCallback(async () => {
@@ -33,6 +36,8 @@ export default function AdminAuditPage() {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (sev !== "all") params.set("severity", sev);
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
       const res = await fetch(`/api/admin/audit?${params}`);
       const data = await res.json();
       if (data.events) {
@@ -44,6 +49,10 @@ export default function AdminAuditPage() {
     } finally {
       setLoading(false);
     }
+  }, [q, sev, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [q, sev]);
 
   useEffect(() => {
@@ -131,7 +140,8 @@ export default function AdminAuditPage() {
         </div>
       </div>
 
-      <DataTable title={loading ? "Loading..." : `${events.length} events`} columns={cols} data={events} />
+      <DataTable title={`${total} events`} columns={cols} data={events} loading={loading} />
+      <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
     </div>
   );
 }

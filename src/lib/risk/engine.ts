@@ -94,9 +94,16 @@ export type RiskInput = {
   amount24h: number;
   /** Count of money movements in the trailing hour. */
   txnCount1h: number;
+  /** Count of money movements in the trailing 24h (only needed when a per-user count cap is set). */
+  txnCount24h?: number;
   /** Payouts only: beneficiary first seen inside the cooling window. */
   isNewBeneficiary?: boolean;
   limits: RiskLimits;
+  /** Admin-assigned per-user overrides (UserLimit row). */
+  userOverrides?: {
+    dailyTxnAmountCap?: number | null;
+    dailyTxnCountCap?: number | null;
+  };
 };
 
 export type RiskViolation = { rule: string; message: string };
@@ -114,9 +121,21 @@ export function isNightWindowIST(now: Date): boolean {
 export function evaluateRisk(input: RiskInput): RiskViolation[] {
   const violations: RiskViolation[] = [];
   const night = isNightWindowIST(input.now);
-  const effectiveDailyCap = night
-    ? input.limits.dailyAmountCap * input.limits.nightFactor
-    : input.limits.dailyAmountCap;
+  // Per-user cap (admin-assigned) overrides the platform default; the night
+  // factor still applies on top of whichever cap is active.
+  const baseDailyCap =
+    input.userOverrides?.dailyTxnAmountCap != null && input.userOverrides.dailyTxnAmountCap > 0
+      ? input.userOverrides.dailyTxnAmountCap
+      : input.limits.dailyAmountCap;
+  const effectiveDailyCap = night ? baseDailyCap * input.limits.nightFactor : baseDailyCap;
+
+  const countCap = input.userOverrides?.dailyTxnCountCap;
+  if (countCap != null && countCap > 0 && (input.txnCount24h ?? 0) + 1 > countCap) {
+    violations.push({
+      rule: "USER_DAILY_COUNT_CAP",
+      message: `Daily transaction count limit reached (${countCap} per 24 hours for this account). Please retry tomorrow or contact support.`,
+    });
+  }
 
   if (input.amount24h + input.amount > effectiveDailyCap) {
     violations.push({
@@ -176,30 +195,41 @@ export async function assertTransactionRisk(opts: AssertRiskOptions): Promise<vo
   const since24h = new Date(now.getTime() - 24 * 3_600_000);
   const since1h = new Date(now.getTime() - 3_600_000);
 
-  const [txnAgg, txnCount1h, payoutAgg, payoutCount1h] = await Promise.all([
-    prisma.transaction.aggregate({
-      where: {
-        userId: opts.userId,
-        createdAt: { gte: since24h },
-        status: { in: ["INITIATED", "PROCESSING", "SUCCESS"] },
-      },
-      _sum: { amount: true, fee: true },
-    }),
-    prisma.transaction.count({
-      where: { userId: opts.userId, createdAt: { gte: since1h } },
-    }),
-    prisma.payoutRequest.aggregate({
-      where: {
-        userId: opts.userId,
-        createdAt: { gte: since24h },
-        status: { in: [...EXPOSED_PAYOUT_STATUSES] },
-      },
-      _sum: { totalDebit: true },
-    }),
-    prisma.payoutRequest.count({
-      where: { userId: opts.userId, createdAt: { gte: since1h } },
-    }),
-  ]);
+  const [txnAgg, txnCount1h, payoutAgg, payoutCount1h, userLimit, txnCount24h, payoutCount24h] =
+    await Promise.all([
+      prisma.transaction.aggregate({
+        where: {
+          userId: opts.userId,
+          createdAt: { gte: since24h },
+          status: { in: ["INITIATED", "PROCESSING", "SUCCESS"] },
+        },
+        _sum: { amount: true, fee: true },
+      }),
+      prisma.transaction.count({
+        where: { userId: opts.userId, createdAt: { gte: since1h } },
+      }),
+      prisma.payoutRequest.aggregate({
+        where: {
+          userId: opts.userId,
+          createdAt: { gte: since24h },
+          status: { in: [...EXPOSED_PAYOUT_STATUSES] },
+        },
+        _sum: { totalDebit: true },
+      }),
+      prisma.payoutRequest.count({
+        where: { userId: opts.userId, createdAt: { gte: since1h } },
+      }),
+      prisma.userLimit.findUnique({
+        where: { userId: opts.userId },
+        select: { dailyTxnAmountCap: true, dailyTxnCountCap: true },
+      }),
+      prisma.transaction.count({
+        where: { userId: opts.userId, createdAt: { gte: since24h } },
+      }),
+      prisma.payoutRequest.count({
+        where: { userId: opts.userId, createdAt: { gte: since24h } },
+      }),
+    ]);
 
   const amount24h =
     toNumber(dec(txnAgg._sum.amount ?? 0)) +
@@ -229,8 +259,17 @@ export async function assertTransactionRisk(opts: AssertRiskOptions): Promise<vo
     now,
     amount24h,
     txnCount1h: txnCount1h + payoutCount1h,
+    txnCount24h: txnCount24h + payoutCount24h,
     isNewBeneficiary,
     limits,
+    userOverrides: userLimit
+      ? {
+          dailyTxnAmountCap: userLimit.dailyTxnAmountCap
+            ? toNumber(dec(userLimit.dailyTxnAmountCap))
+            : null,
+          dailyTxnCountCap: userLimit.dailyTxnCountCap,
+        }
+      : undefined,
   });
 
   if (violations.length === 0) return;

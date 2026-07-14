@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   Crown,
   Plus,
@@ -20,7 +21,9 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
+import { Modal } from "@/components/ui/Modal";
 import { ASSIGNABLE_ADMIN_TABS } from "@/lib/roles";
 import { generateRandomPassword } from "@/lib/utils";
 
@@ -52,6 +55,8 @@ export default function ManageAdminsPage() {
   const [showNewMaster, setShowNewMaster] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<AdminRecord | null>(null);
   const [created, setCreated] = useState<{ admin: AdminRecord | MasterAdminRecord; password: string; isMaster: boolean } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -96,9 +101,14 @@ export default function ManageAdminsPage() {
   }
 
   async function handleDelete(admin: AdminRecord) {
-    if (!confirm(`Delete admin ${admin.name}? This cannot be undone.`)) return;
-    await fetch(`/api/admin/admins/${admin.id}`, { method: "DELETE" });
-    refresh();
+    setDeleting(true);
+    try {
+      await fetch(`/api/admin/admins/${admin.id}`, { method: "DELETE" });
+      toast.success(`Admin ${admin.name} deleted.`);
+      refresh();
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const cols: Column<AdminRecord>[] = [
@@ -173,7 +183,7 @@ export default function ManageAdminsPage() {
             </button>
           )}
           <button
-            onClick={() => handleDelete(r)}
+            onClick={() => setDeleteTarget(r)}
             className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
             title="Delete"
           >
@@ -295,7 +305,8 @@ export default function ManageAdminsPage() {
             description="Admins log in at /admin and see only the tabs you have assigned."
             columns={cols}
             data={rows}
-            empty={loading ? "Loading..." : "No admins created yet. Click 'Create admin' to get started."}
+            loading={loading}
+            empty="No admins created yet. Click 'Create admin' to get started."
           />
         </>
       ) : (
@@ -321,7 +332,8 @@ export default function ManageAdminsPage() {
             description="Master admins have full unrestricted access to the entire platform."
             columns={masterCols}
             data={masterRows}
-            empty={loading ? "Loading..." : "No other master admins yet."}
+            empty="No other master admins yet."
+            loading={loading}
           />
         </>
       )}
@@ -334,6 +346,20 @@ export default function ManageAdminsPage() {
           onClose={() => setCreated(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        busy={deleting}
+        title={deleteTarget ? `Delete admin ${deleteTarget.name}?` : "Delete admin?"}
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await handleDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }
@@ -350,6 +376,7 @@ function NewAdminForm({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("+91 ");
+  const [role, setRole] = useState<"ADMIN" | "FINANCE">("ADMIN");
   const [selectedTabs, setSelectedTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -383,6 +410,7 @@ function NewAdminForm({
           phone,
           password,
           allowedTabs: selectedTabs,
+          role,
         }),
       });
       const data = await res.json();
@@ -447,6 +475,31 @@ function NewAdminForm({
             onChange={(e) => setPhone(e.target.value)}
             placeholder="+91 9XXXXXXXXX"
           />
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <Label>Staff role</Label>
+        <div className="mt-1 flex gap-2">
+          {(
+            [
+              ["ADMIN", "Admin — full operational access"],
+              ["FINANCE", "Finance — read-only money oversight"],
+            ] as Array<["ADMIN" | "FINANCE", string]>
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setRole(value)}
+              className={`rounded-xl border px-3 py-2.5 text-sm transition ${
+                role === value
+                  ? "border-brand-300 bg-brand-50 font-semibold text-brand-800"
+                  : "border-ink-100 bg-white text-ink-700 hover:border-ink-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -653,77 +706,63 @@ function EditTabsDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4">
-      <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 bg-gradient-to-br from-violet-50 to-white px-6 py-5">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-violet-700">
-              Edit permissions
-            </p>
-            <h3 className="mt-1 font-display text-lg font-bold text-ink-900">
-              {admin.name}
-            </h3>
-            <p className="mt-1 text-xs text-ink-600">
-              Select tabs this admin can access. Empty = full access.
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-ink-100"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="space-y-2 px-6 py-5">
-          <div className="flex gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setSelectedTabs(ASSIGNABLE_ADMIN_TABS.map((t) => t.href))}
-              className="text-xs font-medium text-brand-700 hover:underline"
-            >
-              Select all
-            </button>
-            <span className="text-ink-300">|</span>
-            <button
-              type="button"
-              onClick={() => setSelectedTabs([])}
-              className="text-xs font-medium text-brand-700 hover:underline"
-            >
-              Clear all (full access)
-            </button>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {ASSIGNABLE_ADMIN_TABS.map((tab) => (
-              <label
-                key={tab.href}
-                className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition ${
-                  selectedTabs.includes(tab.href)
-                    ? "border-brand-300 bg-brand-50 text-brand-800"
-                    : "border-ink-100 bg-white text-ink-700 hover:border-ink-200"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedTabs.includes(tab.href)}
-                  onChange={() => toggleTab(tab.href)}
-                  className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-                />
-                {tab.label}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 border-t border-ink-100 bg-ink-50/40 px-6 py-3">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save permissions"}
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Edit permissions"
+      title={admin.name}
+      subtitle="Select tabs this admin can access. Empty = full access."
+      headerClassName="bg-gradient-to-br from-violet-50 to-white"
+      size="md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
           </Button>
-        </div>
+          <Button onClick={handleSave} isLoading={saving}>
+            Save permissions
+          </Button>
+        </>
+      }
+    >
+      <div className="mb-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setSelectedTabs(ASSIGNABLE_ADMIN_TABS.map((t) => t.href))}
+          className="text-xs font-medium text-brand-700 hover:underline"
+        >
+          Select all
+        </button>
+        <span className="text-ink-300">|</span>
+        <button
+          type="button"
+          onClick={() => setSelectedTabs([])}
+          className="text-xs font-medium text-brand-700 hover:underline"
+        >
+          Clear all (full access)
+        </button>
       </div>
-    </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {ASSIGNABLE_ADMIN_TABS.map((tab) => (
+          <label
+            key={tab.href}
+            className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition ${
+              selectedTabs.includes(tab.href)
+                ? "border-brand-300 bg-brand-50 text-brand-800"
+                : "border-ink-100 bg-white text-ink-700 hover:border-ink-200"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selectedTabs.includes(tab.href)}
+              onChange={() => toggleTab(tab.href)}
+              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            {tab.label}
+          </label>
+        ))}
+      </div>
+    </Modal>
   );
 }
 

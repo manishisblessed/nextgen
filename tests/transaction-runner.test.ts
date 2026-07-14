@@ -50,22 +50,30 @@ beforeEach(() => {
 });
 
 describe("runTransaction — success path", () => {
-  it("debits amount+fee, credits commission, marks SUCCESS", async () => {
+  it("debits amount+fee, credits scheme commission net of TDS, marks SUCCESS", async () => {
+    // Cascade model: commission comes ONLY from the user's assigned scheme.
+    holder.db.users.delete("u1");
+    holder.db.addUser("u1", 1000, 0, "ACTIVE", 0, { role: "RETAILER", schemeId: "s1" });
+    holder.db.addScheme("s1", { service: "RECHARGE_MOBILE", commissionValue: 3 });
+
     const result = await runTransaction(baseInput());
     expect(result.status).toBe("SUCCESS");
-    // 1000 − (100 + 2) + 3 = 901
-    expect(holder.db.balanceOf("u1")).toBe("901.00");
+    // 1000 − (100 + 2) + (3 gross − 2% TDS = 2.94) = 900.94
+    expect(holder.db.balanceOf("u1")).toBe("900.94");
     const txn = holder.db.transactions[0];
     expect(txn.status).toBe("SUCCESS");
     expect(txn.partnerTxnId).toBe("OP123");
     // Passbook: one reserve DEBIT + one commission CREDIT
     expect(holder.db.walletTxns).toHaveLength(2);
+    // CommissionCredit row records the gross/TDS/net breakdown.
+    expect(holder.db.commissionCredits).toHaveLength(1);
   });
 
-  it("skips the commission credit when commission is zero", async () => {
-    await runTransaction(baseInput({ commission: 0, idempotencyKey: "key-zero" }));
+  it("credits no commission when the user has no scheme (no hardcoded fallback)", async () => {
+    await runTransaction(baseInput({ idempotencyKey: "key-zero" }));
     expect(holder.db.balanceOf("u1")).toBe("898.00");
     expect(holder.db.walletTxns).toHaveLength(1);
+    expect(holder.db.commissionCredits).toHaveLength(0);
   });
 });
 
@@ -110,12 +118,17 @@ describe("runTransaction — failure path", () => {
 
 describe("runTransaction — idempotency", () => {
   it("replays the original result instead of charging twice", async () => {
+    holder.db.users.delete("u1");
+    holder.db.addUser("u1", 1000, 0, "ACTIVE", 0, { role: "RETAILER", schemeId: "s1" });
+    holder.db.addScheme("s1", { service: "RECHARGE_MOBILE", commissionValue: 3 });
+
     const call = vi.fn(async () => ({ ok: true as const, data: { ref: "OP1" } }));
     await runTransaction(baseInput({ idempotencyKey: "key-dup", call }));
     const replay = await runTransaction(baseInput({ idempotencyKey: "key-dup", call }));
     expect(replay.status).toBe("SUCCESS");
     expect(call).toHaveBeenCalledTimes(1);
-    expect(holder.db.balanceOf("u1")).toBe("901.00"); // charged exactly once
+    // Charged exactly once: 1000 − 102 + 2.94 (3 gross net of 2% TDS).
+    expect(holder.db.balanceOf("u1")).toBe("900.94");
   });
 });
 

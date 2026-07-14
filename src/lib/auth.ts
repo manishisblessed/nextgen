@@ -10,6 +10,7 @@ export type Role =
   | "master-admin"
   | "admin"
   | "sub-admin"
+  | "finance"
   | "super-distributor"
   | "master-distributor"
   | "distributor"
@@ -23,6 +24,7 @@ export type DbRole =
   | "MASTER_ADMIN"
   | "ADMIN"
   | "SUPPORT"
+  | "FINANCE"
   | "SUPER_DISTRIBUTOR"
   | "MASTER_DISTRIBUTOR"
   | "DISTRIBUTOR"
@@ -46,6 +48,7 @@ export function toDisplayRole(role: DbRole | string): Role {
     case "MASTER_ADMIN": return "master-admin";
     case "ADMIN": return "admin";
     case "SUPPORT": return "sub-admin";
+    case "FINANCE": return "finance";
     case "SUPER_DISTRIBUTOR": return "super-distributor";
     case "MASTER_DISTRIBUTOR": return "master-distributor";
     case "DISTRIBUTOR": return "distributor";
@@ -60,6 +63,7 @@ export function toDbRole(displayRole: Role): DbRole {
     case "master-admin": return "MASTER_ADMIN";
     case "admin": return "ADMIN";
     case "sub-admin": return "SUPPORT";
+    case "finance": return "FINANCE";
     case "super-distributor": return "SUPER_DISTRIBUTOR";
     case "master-distributor": return "MASTER_DISTRIBUTOR";
     case "distributor": return "DISTRIBUTOR";
@@ -135,5 +139,11 @@ export const roleMeta: Record<
     tagline: "Operations & approvals delegated by Admin",
     accent: "from-slate-700 to-brand-500",
     pillar: "operations"
+  },
+  finance: {
+    label: "Finance",
+    tagline: "Read-only money oversight — balances, ledger & reports",
+    accent: "from-emerald-700 to-brand-600",
+    pillar: "finance"
   }
 };

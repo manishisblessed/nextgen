@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   User,
   Save,
@@ -162,7 +163,7 @@ export default function ProfilePage() {
 
       await fetchKyc();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Upload failed");
+      toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(null);
     }
@@ -333,7 +334,7 @@ export default function ProfilePage() {
               />
             </div>
             <div className="sm:col-span-2">
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" isLoading={saving} disabled={saving}>
                 <Save className="h-4 w-4" />
                 {saving ? "Saving…" : saved ? "Saved!" : "Save changes"}
               </Button>
@@ -476,7 +477,7 @@ export default function ProfilePage() {
                   </div>
                 )}
 
-                <Button type="submit" disabled={kycSubmitting}>
+                <Button type="submit" isLoading={kycSubmitting} disabled={kycSubmitting}>
                   <ShieldCheck className="h-4 w-4" />
                   {kycSubmitting ? "Submitting…" : "Submit KYC for review"}
                 </Button>

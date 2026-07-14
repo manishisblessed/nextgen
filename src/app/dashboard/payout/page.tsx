@@ -256,10 +256,11 @@ export default function PayoutPage() {
       )}
 
       <DataTable
-        title={fetching ? "Loading…" : `${rows.length} payout${rows.length === 1 ? "" : "s"}`}
+        title={`${rows.length} payout${rows.length === 1 ? "" : "s"}`}
         columns={cols}
         data={rows}
-        empty={fetching ? "Loading payouts…" : "No payouts yet. Click 'New payout' to send one."}
+        loading={fetching}
+        empty="No payouts yet. Click 'New payout' to send one."
       />
     </div>
   );
@@ -512,9 +513,9 @@ function NewPayoutForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={submitting || insufficient || !quote}>
+        <Button type="submit" disabled={submitting || insufficient || !quote} isLoading={submitting}>
           <Send className="h-4 w-4" />
-          {submitting ? "Submitting…" : "Submit for approval"}
+          Submit for approval
         </Button>
       </div>
 

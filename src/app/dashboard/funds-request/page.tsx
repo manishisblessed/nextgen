@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   CheckCircle2,
   XCircle,
@@ -14,6 +15,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { type Role } from "@/lib/auth";
@@ -72,10 +74,9 @@ export default function FundsRequestPage() {
   }, [fetchRequests]);
 
   const [deciding, setDeciding] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<FundReq | null>(null);
 
-  async function decide(id: string, action: "approve" | "reject") {
-    const remarks =
-      action === "reject" ? prompt("Reason for rejection (optional):") : null;
+  async function decide(id: string, action: "approve" | "reject", remarks?: string) {
     setDeciding(id);
     try {
       const res = await fetch(`/api/fund-request/${id}`, {
@@ -85,9 +86,12 @@ export default function FundsRequestPage() {
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        alert(json.error ?? "Action failed");
+        toast.error(json.error ?? "Action failed");
         return;
       }
+      toast.success(
+        action === "approve" ? "Fund request approved — wallet credited" : "Fund request rejected"
+      );
       await fetchRequests();
     } finally {
       setDeciding(null);
@@ -184,7 +188,7 @@ export default function FundsRequestPage() {
                     )}
                   </button>
                   <button
-                    onClick={() => decide(r.id, "reject")}
+                    onClick={() => setRejectTarget(r)}
                     disabled={busy}
                     className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50 disabled:opacity-30"
                     title="Reject"
@@ -266,18 +270,34 @@ export default function FundsRequestPage() {
       )}
 
       <DataTable
-        title={
-          fetching
-            ? "Loading…"
-            : `${rows.length} request${rows.length === 1 ? "" : "s"}`
-        }
+        title={`${rows.length} request${rows.length === 1 ? "" : "s"}`}
         columns={cols}
         data={rows}
-        empty={
-          fetching
-            ? "Loading fund requests…"
-            : "No fund requests yet. Click 'New request' to create one."
+        loading={fetching}
+        empty="No fund requests yet. Click 'New request' to create one."
+      />
+
+      <ConfirmDialog
+        open={rejectTarget !== null}
+        onClose={() => setRejectTarget(null)}
+        busy={rejectTarget ? deciding === rejectTarget.id : false}
+        title="Reject this fund request?"
+        description={
+          rejectTarget && (
+            <>
+              {formatINR(rejectTarget.amount)} requested by{" "}
+              <span className="font-semibold text-ink-900">{rejectTarget.requester.name}</span>{" "}
+              will be declined. No wallet credit will happen.
+            </>
+          )
         }
+        confirmLabel="Reject"
+        input={{ label: "Reason for rejection (optional)", placeholder: "UTR not found, wrong amount…" }}
+        onConfirm={async (remarks) => {
+          if (!rejectTarget) return;
+          await decide(rejectTarget.id, "reject", remarks || undefined);
+          setRejectTarget(null);
+        }}
       />
     </div>
   );
@@ -386,9 +406,9 @@ function NewRequestForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting} isLoading={submitting}>
           <Send className="h-4 w-4" />
-          {submitting ? "Submitting…" : "Submit request"}
+          Submit request
         </Button>
       </div>
     </form>

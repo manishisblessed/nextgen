@@ -32,7 +32,8 @@ export function Sidebar({
     [session]
   );
 
-  const isStaff = role === "master-admin" || role === "admin" || role === "sub-admin";
+  const isStaff =
+    role === "master-admin" || role === "admin" || role === "sub-admin" || role === "finance";
 
   // Effective services (globally enabled AND enabled per-user). Null while
   // loading — service links stay hidden until the allowlist is known.
@@ -127,10 +128,10 @@ export function Sidebar({
                         href={item.href}
                         onClick={onClose}
                         className={cn(
-                          "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
+                          "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                           active
                             ? "bg-brand-600 text-white shadow-soft"
-                            : "text-ink-700 hover:bg-ink-100 hover:text-ink-900"
+                            : "text-ink-700 hover:translate-x-0.5 hover:bg-ink-100 hover:text-ink-900"
                         )}
                       >
                         <Icon

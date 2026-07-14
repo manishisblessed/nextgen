@@ -59,15 +59,26 @@ export async function POST(req: Request) {
 
     const keySet = new Set(serviceKeys);
 
+    const allGlobalKeys = await prisma.serviceRoute.findMany({
+      where: { type: "SERVICE" },
+      select: { key: true },
+    }).then((rows) => rows.map((r) => r.key));
+    const allKeySet = new Set(allGlobalKeys);
+
     await prisma.$transaction([
       ...targets.map((u) => {
+        let current = u.enabledServices;
+        if (current.length === 0) {
+          current = allGlobalKeys;
+        }
         const next =
           action === "enable"
-            ? Array.from(new Set([...u.enabledServices, ...serviceKeys]))
-            : u.enabledServices.filter((k) => !keySet.has(k));
+            ? Array.from(new Set([...current, ...serviceKeys]))
+            : current.filter((k) => !keySet.has(k));
+        const isAllEnabled = next.length >= allKeySet.size && next.every((k) => allKeySet.has(k));
         return prisma.user.update({
           where: { id: u.id },
-          data: { enabledServices: next },
+          data: { enabledServices: isAllEnabled ? [] : next },
         });
       }),
       prisma.auditLog.create({

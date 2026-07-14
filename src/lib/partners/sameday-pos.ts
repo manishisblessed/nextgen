@@ -62,41 +62,72 @@ async function request<T>(
   body?: unknown,
   query?: Record<string, string>
 ): Promise<ApiResult<T>> {
-  const { baseUrl, apiKey, apiSecret } = getCredentials();
+  try {
+    const { baseUrl, apiKey, apiSecret } = getCredentials();
 
-  const bodyStr = body ? JSON.stringify(body) : undefined;
-  const headers: Record<string, string> = {
-    ...authHeaders(apiKey, apiSecret, bodyStr),
-  };
-  if (bodyStr) {
-    headers["Content-Type"] = "application/json";
-  }
+    const bodyStr = body ? JSON.stringify(body) : undefined;
+    const headers: Record<string, string> = {
+      ...authHeaders(apiKey, apiSecret, bodyStr),
+    };
+    if (bodyStr) {
+      headers["Content-Type"] = "application/json";
+    }
 
-  let url = `${baseUrl}${path}`;
-  if (query) {
-    const params = new URLSearchParams(
-      Object.entries(query).filter(([, v]) => v !== "" && v != null)
-    );
-    if (params.toString()) url += `?${params}`;
-  }
+    let url = `${baseUrl}${path}`;
+    if (query) {
+      const params = new URLSearchParams(
+        Object.entries(query).filter(([, v]) => v !== "" && v != null)
+      );
+      if (params.toString()) url += `?${params}`;
+    }
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: bodyStr,
-    cache: "no-store",
-  });
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: bodyStr,
+      cache: "no-store",
+    });
 
-  const json = await res.json();
+    const text = await res.text();
+    let json: unknown = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      return {
+        ok: false,
+        error: {
+          success: false,
+          error: {
+            code: "INVALID_RESPONSE",
+            message: `POS partner returned a non-JSON response (${res.status})`,
+          },
+        },
+        status: res.status || 502,
+      };
+    }
 
-  if (!res.ok || json.success === false) {
+    if (!res.ok || (json as { success?: boolean } | null)?.success === false) {
+      return {
+        ok: false,
+        error: (json as PosApiError) ?? {
+          success: false,
+          error: { code: "UPSTREAM_ERROR", message: "Failed to fetch from POS partner" },
+        },
+        status: res.status || 502,
+      };
+    }
+    return { ok: true, data: json as T, status: res.status };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "POS partner request failed";
     return {
       ok: false,
-      error: json as PosApiError,
-      status: res.status,
+      error: {
+        success: false,
+        error: { code: "PARTNER_REQUEST_FAILED", message },
+      },
+      status: 502,
     };
   }
-  return { ok: true, data: json as T, status: res.status };
 }
 
 // ── Public API ──

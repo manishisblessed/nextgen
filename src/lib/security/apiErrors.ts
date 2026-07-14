@@ -11,6 +11,7 @@ import { LivenessRequiredError } from "./livenessGate";
 import { AccountSuspendedError, AccountPendingApprovalError } from "./accountGate";
 import { IdempotencyInProgressError } from "../idempotency";
 import { ServiceDisabledError } from "../services/guard";
+import { NoSchemeError } from "../scheme/gate";
 import { RiskError } from "../risk/engine";
 import { TopupError } from "../wallet/topup";
 import { QrClaimError } from "../qr/claims";
@@ -87,6 +88,9 @@ export function toErrorResponse(e: unknown): NextResponse {
   }
   if (e instanceof ServiceDisabledError) {
     return NextResponse.json({ error: e.message }, { status: e.statusCode });
+  }
+  if (e instanceof NoSchemeError) {
+    return NextResponse.json({ error: e.message, code: e.code }, { status: e.statusCode });
   }
   if (e instanceof RiskError) {
     return NextResponse.json(

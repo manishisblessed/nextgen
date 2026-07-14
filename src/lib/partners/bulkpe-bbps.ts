@@ -30,7 +30,7 @@ import type {
   BbpsProvider,
   PartnerResult,
 } from "./types";
-import { bulkpePost } from "./bulkpe";
+import { bulkpePost, bulkpeGet } from "./bulkpe";
 
 const P = "/bbps";
 
@@ -250,6 +250,7 @@ export const bulkpeBbps: BbpsProvider = {
     }
     return {
       ok: true,
+      pending: status === "PENDING",
       data: {
         txnReference: r.data.transactionId || r.data.reference || "",
         receipt: r.data.npciRef || r.data.transactionId || "",
@@ -299,4 +300,42 @@ export async function bulkpeBbpsTransactions(opts: {
     category: opts.category ?? "",
     status: opts.status ?? "",
   });
+}
+
+// ---------- pending bills ----------
+
+export type BulkpePendingBill = {
+  billerId: string;
+  category: string;
+  billerName: string;
+  accountId?: string;
+  aliasName?: string;
+  customerParams?: Array<{ name: string; value: string }>;
+  dueDate?: string;
+  billAmount?: number;
+  isAutofetchEnabled?: boolean;
+  costCenter?: string;
+  udf1?: string;
+  udf2?: string;
+  status?: string;
+  createdAt?: string;
+};
+
+/** Fetch pending bills from BulkPe (auto-fetched bill accounts). */
+export async function bulkpeBbpsPendingBills(opts?: {
+  page?: number;
+  limit?: number;
+  billerCategory?: string;
+  isAutofetchEnabled?: 1 | 2;
+  sort?: "dueDate" | "createdAt";
+  order?: "asc" | "desc";
+}): Promise<PartnerResult<BulkpePendingBill[]>> {
+  const params: Record<string, string> = {};
+  if (opts?.page != null) params.page = String(opts.page);
+  if (opts?.limit != null) params.limit = String(opts.limit);
+  if (opts?.billerCategory) params.billerCategory = opts.billerCategory;
+  if (opts?.isAutofetchEnabled != null) params.isAutofetchEnabled = String(opts.isAutofetchEnabled);
+  if (opts?.sort) params.sort = opts.sort;
+  if (opts?.order) params.order = opts.order;
+  return bulkpeGet(`${P}/listPendingBills`, params);
 }

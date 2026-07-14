@@ -609,6 +609,10 @@ function OnboardContent() {
         }));
       } else {
         setError(data.message ?? "Aadhaar verification failed");
+        setDigilockerPending(false);
+        try {
+          localStorage.removeItem(DIGILOCKER_STORAGE_KEY);
+        } catch {}
       }
     } catch {
       setError("Network error. Please try again.");

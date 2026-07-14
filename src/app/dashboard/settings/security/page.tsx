@@ -149,7 +149,7 @@ export default function SecuritySettingsPage() {
           <p className="text-sm text-red-600">{error}</p>
         )}
 
-        <Button onClick={startSetup} size="lg" className="w-full" disabled={loading}>
+        <Button onClick={startSetup} size="lg" className="w-full" isLoading={loading} disabled={loading}>
           {loading ? "Setting up..." : <>Begin setup <ArrowRight className="h-4 w-4" /></>}
         </Button>
       </div>
@@ -229,6 +229,7 @@ export default function SecuritySettingsPage() {
           onClick={confirmSetup}
           size="lg"
           className="w-full"
+          isLoading={loading}
           disabled={loading || code.length !== 6}
         >
           {loading ? "Verifying..." : <>Verify & activate <ArrowRight className="h-4 w-4" /></>}

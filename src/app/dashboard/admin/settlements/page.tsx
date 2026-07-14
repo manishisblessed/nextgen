@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select } from "@/components/ui/Input";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { formatINR, generateRefId } from "@/lib/utils";
-import { AlertCircle, Landmark, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Landmark, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 type SettlementRow = {
   id: string;
@@ -117,7 +119,7 @@ function CyclesTab() {
         </Button>
       </div>
       <DataTable
-        title={loading ? "Loading..." : "Recent cycles"}
+        title="Recent cycles" loading={loading}
         columns={cols}
         data={settlements}
         empty="No settlement data yet."
@@ -136,8 +138,6 @@ function BankTransfersTab() {
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [transfers, setTransfers] = useState<TransferRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   // Add-account form
   const [showAdd, setShowAdd] = useState(false);
@@ -147,6 +147,11 @@ function BankTransfersTab() {
   // Transfer form
   const [transferForm, setTransferForm] = useState({ accountId: "", amount: "", mode: "IMPS", narration: "" });
   const [transferBusy, setTransferBusy] = useState(false);
+  const [transferConfirmOpen, setTransferConfirmOpen] = useState(false);
+
+  // Account deactivation
+  const [removeTarget, setRemoveTarget] = useState<BankAccount | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   // Charge preview
   const [chargePreview, setChargePreview] = useState<ChargePreview | null>(null);
@@ -154,7 +159,6 @@ function BankTransfersTab() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const [balRes, accRes, listRes] = await Promise.all([
         fetch("/api/admin/settlement/status?balance=true"),
@@ -177,7 +181,7 @@ function BankTransfersTab() {
         setTransfers(d.transactions ?? []);
       }
     } catch {
-      setError("Could not reach the settlement API.");
+      toast.error("Could not reach the settlement API.");
     } finally {
       setLoading(false);
     }
@@ -214,8 +218,6 @@ function BankTransfersTab() {
   async function addAccount(e: React.FormEvent) {
     e.preventDefault();
     setAddBusy(true);
-    setError(null);
-    setNotice(null);
     try {
       const res = await fetch("/api/admin/settlement/accounts", {
         method: "POST",
@@ -224,53 +226,52 @@ function BankTransfersTab() {
       });
       const d = await res.json();
       if (!res.ok) {
-        setError(typeof d.error === "string" ? d.error : "Account verification failed");
+        toast.error(typeof d.error === "string" ? d.error : "Account verification failed");
         return;
       }
-      setNotice(
-        d.verificationStatus === "SUCCESS"
-          ? `Account verified — bank returned "${d.verifiedName ?? d.account.accountHolderName}" (₹4 verification charge applied).`
-          : "Account added — penny-drop verification is pending. Refresh in a minute."
-      );
+      if (d.verificationStatus === "SUCCESS") {
+        toast.success(
+          `Account verified — bank returned "${d.verifiedName ?? d.account.accountHolderName}" (₹4 verification charge applied).`
+        );
+      } else {
+        toast.warning("Account added — penny-drop verification is pending. Refresh in a minute.");
+      }
       setShowAdd(false);
       setAccForm({ accountNumber: "", ifscCode: "", accountHolderName: "" });
       refresh();
     } catch {
-      setError("Network error while adding the account.");
+      toast.error("Network error while adding the account.");
     } finally {
       setAddBusy(false);
     }
   }
 
   async function removeAccount(id: string) {
-    if (!window.confirm("Deactivate this settlement account?")) return;
-    setError(null);
-    const res = await fetch(`/api/admin/settlement/accounts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setError(typeof d.error === "string" ? d.error : "Could not deactivate the account");
-      return;
+    setRemoveBusy(true);
+    try {
+      const res = await fetch(`/api/admin/settlement/accounts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast.error(typeof d.error === "string" ? d.error : "Could not deactivate the account");
+        return;
+      }
+      toast.success("Settlement account deactivated.");
+      refresh();
+    } finally {
+      setRemoveBusy(false);
     }
-    refresh();
   }
 
-  async function submitTransfer(e: React.FormEvent) {
+  function submitTransfer(e: React.FormEvent) {
     e.preventDefault();
     const amt = Number(transferForm.amount);
     if (!transferForm.accountId || !amt || amt <= 0) return;
-    const acc = accounts.find((a) => a.id === transferForm.accountId);
-    const debitInfo = chargePreview
-      ? ` — charges ${formatINR(chargePreview.totalCharge)}, total wallet debit ${formatINR(chargePreview.totalDebit)}`
-      : "";
-    if (
-      !window.confirm(
-        `Transfer ${formatINR(amt)} via ${transferForm.mode} to ${acc?.accountHolderName ?? "the selected account"} (${acc?.accountNumber ?? ""})${debitInfo}?`
-      )
-    )
-      return;
+    setTransferConfirmOpen(true);
+  }
+
+  async function executeTransfer() {
+    const amt = Number(transferForm.amount);
     setTransferBusy(true);
-    setError(null);
-    setNotice(null);
     try {
       const res = await fetch("/api/admin/settlement/transfer", {
         method: "POST",
@@ -285,20 +286,22 @@ function BankTransfersTab() {
       });
       const d = await res.json();
       if (!res.ok) {
-        setError(typeof d.error === "string" ? d.error : "Transfer failed");
+        toast.error(typeof d.error === "string" ? d.error : "Transfer failed");
         return;
       }
       const t = d.transaction as TransferRow;
-      setNotice(
-        t.status === "SUCCESS"
-          ? `Transfer successful${t.utr ? ` — UTR ${t.utr}` : ""}.`
-          : `Transfer initiated (${t.status}) — reference ${t.referenceId}. Failed transfers auto-refund the partner wallet.`
-      );
+      if (t.status === "SUCCESS") {
+        toast.success(`Transfer successful${t.utr ? ` — UTR ${t.utr}` : ""}.`);
+      } else {
+        toast.warning(
+          `Transfer initiated (${t.status}) — reference ${t.referenceId}. Failed transfers auto-refund the partner wallet.`
+        );
+      }
       setTransferForm((f) => ({ ...f, amount: "", narration: "" }));
       setChargePreview(null);
       refresh();
     } catch {
-      setError("Network error — check the transfer list before retrying.");
+      toast.error("Network error — check the transfer list before retrying.");
     } finally {
       setTransferBusy(false);
     }
@@ -355,17 +358,6 @@ function BankTransfersTab() {
 
   return (
     <div className="space-y-6">
-      {(error || notice) && (
-        <div
-          className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${
-            error ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-          }`}
-        >
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error ?? notice}</span>
-        </div>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Balance + accounts */}
         <div className="space-y-4">
@@ -451,7 +443,7 @@ function BankTransfersTab() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeAccount(a.id)}
+                    onClick={() => setRemoveTarget(a)}
                     className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-rose-50 hover:text-rose-600"
                     title="Deactivate account"
                   >
@@ -570,10 +562,70 @@ function BankTransfersTab() {
       </div>
 
       <DataTable
-        title={loading ? "Loading..." : "Recent bank transfers"}
+        title="Recent bank transfers" loading={loading}
         columns={transferCols}
         data={transfers}
         empty="No settlement transfers yet."
+      />
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onClose={() => setRemoveTarget(null)}
+        busy={removeBusy}
+        title="Deactivate this settlement account?"
+        description={
+          removeTarget && (
+            <>
+              <span className="font-semibold text-ink-900">
+                {removeTarget.verifiedName || removeTarget.accountHolderName}
+              </span>{" "}
+              ({removeTarget.accountNumber} · {removeTarget.ifscCode}) will no longer be available for transfers.
+            </>
+          )
+        }
+        confirmLabel="Deactivate"
+        onConfirm={async () => {
+          if (!removeTarget) return;
+          await removeAccount(removeTarget.id);
+          setRemoveTarget(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={transferConfirmOpen}
+        onClose={() => setTransferConfirmOpen(false)}
+        busy={transferBusy}
+        tone="default"
+        title="Confirm bank transfer"
+        description={(() => {
+          const acc = accounts.find((a) => a.id === transferForm.accountId);
+          return (
+            <>
+              Transfer{" "}
+              <span className="font-semibold text-ink-900">{formatINR(Number(transferForm.amount) || 0)}</span> via{" "}
+              <span className="font-semibold text-ink-900">{transferForm.mode}</span> to{" "}
+              <span className="font-semibold text-ink-900">
+                {acc?.accountHolderName ?? "the selected account"}
+              </span>{" "}
+              ({acc?.accountNumber ?? ""})
+              {chargePreview && (
+                <>
+                  {" "}
+                  — charges{" "}
+                  <span className="font-semibold text-ink-900">{formatINR(chargePreview.totalCharge)}</span>, total
+                  wallet debit{" "}
+                  <span className="font-semibold text-ink-900">{formatINR(chargePreview.totalDebit)}</span>
+                </>
+              )}
+              ?
+            </>
+          );
+        })()}
+        confirmLabel="Transfer"
+        onConfirm={async () => {
+          await executeTransfer();
+          setTransferConfirmOpen(false);
+        }}
       />
     </div>
   );

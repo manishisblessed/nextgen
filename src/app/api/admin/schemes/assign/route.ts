@@ -11,11 +11,13 @@ export const dynamic = "force-dynamic";
 
 const AssignBody = z
   .object({
-    // null/absent schemeId clears the assignment (user falls back to default).
+    // null/absent schemeId clears the assignment (user is then blocked from
+    // transacting until a scheme is assigned again — cascade model).
     schemeId: z.string().min(1).nullable().default(null),
     userIds: z.array(z.string().min(1)).max(5000).optional(),
-    // Assign to every user of a given level.
-    role: z.enum(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]).optional(),
+    // Cascade model: admin assigns platform schemes to SUPER_DISTRIBUTORs
+    // only; each tier below is priced by its parent's derived schemes.
+    role: z.enum(["SUPER_DISTRIBUTOR"]).optional(),
   })
   .strict()
   .superRefine((v, ctx) => {
@@ -43,14 +45,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const { schemeId, userIds, role } = parsed.data;
 
-  // Validate target scheme (must exist + be active when assigning).
+  // Validate target scheme (must exist + be active + be a PLATFORM scheme —
+  // admin never hands out a network parent's derived scheme).
   if (schemeId) {
-    const scheme = await prisma.scheme.findUnique({ where: { id: schemeId }, select: { active: true } });
+    const scheme = await prisma.scheme.findUnique({
+      where: { id: schemeId },
+      select: { active: true, ownerId: true },
+    });
     if (!scheme) return NextResponse.json({ error: "Scheme not found" }, { status: 404 });
     if (!scheme.active) return NextResponse.json({ error: "Cannot assign an inactive scheme" }, { status: 400 });
+    if (scheme.ownerId)
+      return NextResponse.json(
+        { error: "This is a network parent's derived scheme — admin can only assign platform schemes" },
+        { status: 400 }
+      );
   }
 
-  const where = userIds && userIds.length > 0 ? { id: { in: userIds } } : { role: role! };
+  // Cascade model: admin assignment targets SUPER_DISTRIBUTORs only.
+  const where =
+    userIds && userIds.length > 0
+      ? { id: { in: userIds }, role: "SUPER_DISTRIBUTOR" as const }
+      : { role: role! };
 
   const result = await prisma.user.updateMany({
     where,

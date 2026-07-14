@@ -18,6 +18,7 @@ import { creditWallet } from "../ledger";
 import { getPartner } from "../partners";
 import { round } from "../money";
 import { emitWebhookEvent } from "../platform/webhooks";
+import { assertPushWithinCap, WalletOpError } from "./operations";
 
 export type TopupState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED";
 
@@ -39,6 +40,15 @@ export async function initiateTopup(input: {
   customerEmail?: string;
   ip?: string;
 }): Promise<{ refId: string; orderId: string; paymentUrl?: string; upiIntent?: string; provider: string }> {
+  // Wallet cap gate — refuse the collect up front rather than bouncing money
+  // back after the customer has already paid.
+  try {
+    await assertPushWithinCap(input.userId, "PRIMARY", input.amount);
+  } catch (e) {
+    if (e instanceof WalletOpError) throw new TopupError(e.message, 400, e.code);
+    throw e;
+  }
+
   const upi = getPartner("upi");
   const refId = `TOPUP${nanoid(10).toUpperCase()}`;
 

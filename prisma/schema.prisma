@@ -21,6 +21,7 @@ enum Role {
   SUPER_DISTRIBUTOR
   ADMIN
   SUPPORT
+  FINANCE
   MASTER_ADMIN
 }
 
@@ -111,6 +112,11 @@ model User {
   // in-flight operations (e.g. a pending payout). spendable = walletBalance - heldBalance.
   walletBalance Decimal @default(0) @db.Decimal(14, 2)
   heldBalance   Decimal @default(0) @db.Decimal(14, 2)
+  // Secondary AEPS wallet — AEPS/Aadhaar-Pay proceeds settle here first and move
+  // to the primary wallet (or a bank account) via an explicit settlement. Kept as
+  // its own column so the ledger can maintain independent balanceAfter chains
+  // per wallet (WalletTxn.walletType discriminates the two books).
+  aepsBalance   Decimal @default(0) @db.Decimal(14, 2)
 
   // login location tracking
   lastLoginLat Float?
@@ -151,6 +157,31 @@ model User {
   staticQrsCreated      StaticQr[]            @relation("StaticQrCreator")
   qrClaims              QrClaim[]             @relation("QrClaimOwner")
   qrClaimsReviewed      QrClaim[]             @relation("QrClaimReviewer")
+  walletOpsPerformed    WalletOperation[]     @relation("WalletOpActor")
+  walletOpsReceived     WalletOperation[]     @relation("WalletOpTarget")
+  walletOpsApproved     WalletOperation[]     @relation("WalletOpApprover")
+  mdrScheme             MdrScheme?            @relation("UserMdrScheme", fields: [mdrSchemeId], references: [id])
+  userLimit             UserLimit?
+  reversalsCreated      Reversal[]            @relation("ReversalActor")
+  reversalsReceived     Reversal[]            @relation("ReversalTarget")
+  settlementConfig      UserSettlementConfig?
+  posSubscriptions      PosSubscription[]     @relation("PosSubscriber")
+  posRentalPlansOwned   PosRentalPlan[]       @relation("PosRentalPlanOwner")
+  aepsMerchant          AepsMerchant?
+  aepsSettlementAccounts AepsSettlementAccount[] @relation("AepsAccountOwner")
+  aepsSettlements       AepsSettlement[]      @relation("AepsSettlementOwner")
+  commissionCredits     CommissionCredit[]    @relation("CommissionCredits")
+  posSettlements        PosSettlementEntry[]  @relation("PosSettlements")
+  networkTransfersOut   NetworkWalletTransfer[] @relation("NetworkTransfersOut")
+  networkTransfersIn    NetworkWalletTransfer[] @relation("NetworkTransfersIn")
+
+  // MDR scheme assignment (Phase 3) — resolved by the MDR engine alongside
+  // the charge/commission Scheme. Null = platform default MDR scheme.
+  mdrSchemeId String?
+
+  // POS acquirer settlement mode (admin-toggleable only).
+  // true = proceeds credit instantly on webhook; false = T+1 cron.
+  instantSettlement Boolean @default(false)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -160,6 +191,7 @@ model User {
   @@index([parentId])
   @@index([status])
   @@index([schemeId])
+  @@index([mdrSchemeId])
   @@index([reKycRequired])
 }
 
@@ -435,12 +467,27 @@ enum WalletReason {
   FEE
   PENALTY
   PAYOUT
+  SETTLEMENT
+  AEPS_SETTLEMENT
+  RENTAL
+  POS_SETTLEMENT    // POS acquirer proceeds (instant or T+1)
+  PARENT_PUSH       // Network parent crediting child
+  PARENT_PULL       // Network parent debiting child
+}
+
+/// Which wallet book a ledger entry belongs to. PRIMARY = the main spendable
+/// wallet (User.walletBalance); AEPS = the secondary AEPS proceeds wallet
+/// (User.aepsBalance). Each book keeps its own balanceAfter chain.
+enum WalletType {
+  PRIMARY
+  AEPS
 }
 
 model WalletTxn {
   id             String          @id @default(cuid())
   userId         String
   user           User            @relation(fields: [userId], references: [id])
+  walletType     WalletType      @default(PRIMARY)
   direction      WalletDirection
   reason         WalletReason
   amount         Decimal         @db.Decimal(14, 2)
@@ -455,6 +502,8 @@ model WalletTxn {
 
   @@index([userId, createdAt])
   @@index([refType, refId])
+  @@index([walletType, createdAt])
+  @@index([reason, createdAt])
 }
 
 // ---------- Transactions ----------
@@ -527,6 +576,8 @@ model Transaction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  commissionCredits CommissionCredit[]
+
   @@index([userId, createdAt])
   @@index([service, status])
   @@index([status, createdAt])
@@ -553,9 +604,13 @@ model CommissionSlab {
 
 // ---------- Scheme Manager (named groupings of charge/commission slabs) ----------
 // A Scheme bundles per-service charge + commission slabs and is assigned to
-// users (User.schemeId). Exactly one Scheme may be the platform default
-// (isDefault) — it is the fallback when a user has no scheme assigned. The
-// resolver (src/lib/scheme/resolver.ts → getEffectiveRate) reads these.
+// users (User.schemeId). Assignment cascades down the network: admin assigns a
+// platform scheme to super-distributors; each parent derives their own scheme
+// (ownerId/parentSchemeId) with per-slab markup and assigns it to children.
+// Users with NO active scheme are blocked from financial transactions (see
+// src/lib/scheme/gate.ts). The resolver (src/lib/scheme/resolver.ts) reads
+// these; isDefault is retained for admin bookkeeping but is no longer a
+// runtime pricing fallback.
 
 /// Whether a slab value is a flat rupee amount or a percentage fraction
 /// (e.g. 0.0050 = 0.5%). Mirrors the CommissionSlab flat/percent convention.
@@ -572,6 +627,17 @@ model Scheme {
   isDefault   Boolean      @default(false)
   createdById String?
   createdBy   User?        @relation("SchemeCreator", fields: [createdById], references: [id])
+
+  // Hierarchical derivation: a network parent (SD/MD/DT) derives their own
+  // scheme from the one assigned to them, adding margin per slab. ownerId is
+  // the deriving user (null = platform/admin scheme); parentSchemeId points at
+  // the scheme it was derived from. Derived slabs keep the parent's bands and
+  // rate types; only values change (charge >= parent, commission <= parent).
+  ownerId        String?
+  parentSchemeId String?
+  parentScheme   Scheme?  @relation("SchemeDerivation", fields: [parentSchemeId], references: [id])
+  derivedSchemes Scheme[] @relation("SchemeDerivation")
+
   slabs       SchemeSlab[]
   users       User[]       @relation("UserScheme")
   createdAt   DateTime     @default(now())
@@ -579,6 +645,8 @@ model Scheme {
 
   @@index([active])
   @@index([isDefault])
+  @@index([ownerId])
+  @@index([parentSchemeId])
 }
 
 model SchemeSlab {
@@ -602,11 +670,20 @@ model SchemeSlab {
   commissionMaster           Decimal  @default(0) @db.Decimal(14, 4)
   commissionSuperDistributor Decimal  @default(0) @db.Decimal(14, 4)
 
+  // Cascade model: commission earned by the user THIS scheme is assigned to
+  // (single value; per-tier margins are derived from scheme-chain differences,
+  // not from the legacy per-tier columns above). Same RateType semantics as
+  // commissionType. parentSlabId links a derived slab back to the slab it was
+  // copied from, so markup validation never depends on band matching.
+  commissionValue Decimal @default(0) @db.Decimal(14, 4)
+  parentSlabId    String?
+
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([schemeId, service, active])
+  @@index([parentSlabId])
 }
 
 // ---------- Fund requests ----------
@@ -1167,15 +1244,24 @@ model PosMachine {
   // Full external payload for audit / future fields.
   meta Json?
 
+  // Manual-inventory extensions (Console A5): machines may also be created
+  // by hand / bulk CSV upload rather than the external sync.
+  source    String  @default("SYNC") // SYNC | MANUAL
+  brand     String? // device brand (Pax, Verifone, ...)
+  company   String? // acquiring company / bank label
+  condition String? // NEW | REFURBISHED | DAMAGED
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   syncedAt  DateTime @default(now())
 
   assignmentLogs PosAssignmentLog[]
+  subscriptions  PosSubscription[]
 
   @@index([assignedUserId])
   @@index([status])
   @@index([tid])
+  @@index([source])
 }
 
 model PosAssignmentLog {
@@ -1190,7 +1276,20 @@ model PosAssignmentLog {
   note       String?
   createdAt  DateTime @default(now())
 
+  // Tracking-report lifecycle (Console A5). An "assign" entry stays ACTIVE
+  // until the machine moves again, at which point it is stamped RETURNED.
+  status       String    @default("ACTIVE") // ACTIVE | RETURNED | EVENT (unassign rows)
+  assignedDate DateTime? // effective assignment date (defaults to createdAt)
+  // Dispatch milestones, editable by ops as the courier progresses.
+  transitDate   DateTime?
+  deliveredDate DateTime?
+  returnedDate  DateTime?
+  returnReason  String? // defective / merchant closed / upgrade / ...
+
   @@index([machineId, createdAt])
+  @@index([status, createdAt])
+  @@index([toUserId, action])
+  @@index([returnedDate])
 }
 
 // =====================================================================
@@ -1277,6 +1376,518 @@ model StaticQr {
   @@index([active])
 }
 
+// =====================================================================
+// Admin Console expansion — Phases A1–A6 (functional parity with the
+// reference platform's admin, built natively on the NextGen ledger).
+// =====================================================================
+
+// ---------- A1: Platform settings (typed key-value store) ----------
+// Single-row-per-key JSON store for operational knobs an admin can change at
+// runtime without a deploy: global wallet cap, wallet-ops approval threshold,
+// T+1 settlement cron config, reversal rules, dashboard defaults, etc.
+// Read through src/lib/settings.ts which owns defaults + zod validation.
+
+model PlatformSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "wallet.global_cap", "settlement.t1"
+  value       Json
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------- A1: Admin wallet operations (push / pull) ----------
+// Every admin-initiated credit (PUSH) or debit (PULL) of a user wallet. The
+// money itself moves through the ledger (creditWallet/debitWallet) inside the
+// same DB transaction that records this row; walletTxnId links the two.
+// Amounts >= the configured approval threshold require a SECOND, different
+// admin (maker-checker) before any money moves.
+
+enum WalletOperationType {
+  PUSH // admin credits the user wallet
+  PULL // admin debits the user wallet
+}
+
+enum WalletOperationStatus {
+  PENDING_APPROVAL // above threshold — awaiting a different admin
+  COMPLETED // money moved, walletTxnId set
+  REJECTED // checker refused; no money moved
+  CANCELLED // maker withdrew before approval
+}
+
+model WalletOperation {
+  id String @id @default(cuid())
+
+  targetUserId String
+  targetUser   User   @relation("WalletOpTarget", fields: [targetUserId], references: [id])
+
+  actorId String // admin who initiated
+  actor   User   @relation("WalletOpActor", fields: [actorId], references: [id])
+
+  type       WalletOperationType
+  walletType WalletType          @default(PRIMARY)
+  amount     Decimal             @db.Decimal(14, 2)
+  reasonCode String // FUND_LOAD | REFUND | CHARGEBACK | CORRECTION | PENALTY | PROMO | OTHER
+  remarks    String // mandatory human explanation
+
+  status WalletOperationStatus @default(COMPLETED)
+
+  // Maker-checker for large amounts.
+  approvedById String?
+  approvedBy   User?     @relation("WalletOpApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  rejectedNote String?
+
+  // Ledger linkage — set when the movement lands.
+  walletTxnId String? @unique
+
+  ip        String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([targetUserId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ---------- A3: MDR scheme engine ----------
+// MDR (merchant discount rate) pricing for acquiring-style rails (POS / PG /
+// QR), separate from the service charge Scheme. A slab matches on service
+// kind + payment mode + card network band and yields the platform MDR and the
+// per-tier commission share. Exactly one scheme may be the default.
+
+enum MdrServiceKind {
+  POS
+  PG
+  QR
+  UPI
+}
+
+model MdrScheme {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  active      Boolean   @default(true)
+  isDefault   Boolean   @default(false)
+  createdById String?
+
+  // Hierarchical derivation (mirrors Scheme): ownerId = deriving network
+  // parent (null = platform scheme); parentSchemeId = source scheme. Derived
+  // MDR must be >= the parent's for each slab — the difference is the chain's
+  // margin, split at transaction time.
+  ownerId        String?
+  parentSchemeId String?
+  parentScheme   MdrScheme?  @relation("MdrSchemeDerivation", fields: [parentSchemeId], references: [id])
+  derivedSchemes MdrScheme[] @relation("MdrSchemeDerivation")
+
+  slabs       MdrSlab[]
+  users       User[]    @relation("UserMdrScheme")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([active])
+  @@index([isDefault])
+  @@index([ownerId])
+  @@index([parentSchemeId])
+}
+
+model MdrSlab {
+  id       String    @id @default(cuid())
+  schemeId String
+  scheme   MdrScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+
+  serviceKind MdrServiceKind
+  // Payment instrument dimension, e.g. "CARD_CREDIT", "CARD_DEBIT", "UPI",
+  // "NETBANKING", "*" (any).
+  paymentMode String         @default("*")
+  minAmount   Decimal        @db.Decimal(14, 2)
+  maxAmount   Decimal        @db.Decimal(14, 2)
+
+  // MDR charged to the merchant/user for this band.
+  mdrType  RateType @default(PERCENT)
+  mdrValue Decimal  @default(0) @db.Decimal(14, 4)
+
+  // Commission share distributed up the chain (same RateType semantics).
+  commissionType             RateType @default(PERCENT)
+  commissionRetailer         Decimal  @default(0) @db.Decimal(14, 4)
+  commissionDistributor      Decimal  @default(0) @db.Decimal(14, 4)
+  commissionMaster           Decimal  @default(0) @db.Decimal(14, 4)
+  commissionSuperDistributor Decimal  @default(0) @db.Decimal(14, 4)
+
+  // Cascade model: link back to the parent-scheme slab this one was derived
+  // from (bands + types locked to the parent; only mdrValue changes).
+  parentSlabId String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([schemeId, serviceKind, active])
+  @@index([parentSlabId])
+}
+
+// ---------- A3: Per-user limits & tiers ----------
+// One row per user (absence = platform defaults from PlatformSetting).
+// Enforced in the transaction orchestrator and settlement engine.
+
+model UserLimit {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Wallet cap — max walletBalance this user may hold (null = platform cap).
+  walletCap Decimal? @db.Decimal(14, 2)
+
+  // Per-day transaction ceilings (null = risk-engine defaults apply).
+  dailyTxnAmountCap Decimal? @db.Decimal(14, 2)
+  dailyTxnCountCap  Int?
+
+  // Settlement tier — daily settlement ceiling + per-transfer ceiling.
+  settlementDailyCap   Decimal? @db.Decimal(14, 2)
+  settlementPerTxnCap  Decimal? @db.Decimal(14, 2)
+  settlementTier       String? // display label, e.g. "TIER_1", "GOLD"
+
+  note        String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------- A4: Reversal desk ----------
+// A compensating money movement raised by an admin against a settled entity
+// (transaction / settlement / AEPS txn / wallet entry). NEVER edits history —
+// posts an opposite-direction ledger entry and links it here. Maker-checker
+// above the configured threshold.
+
+enum ReversalKind {
+  TRANSACTION // service transaction (BBPS/recharge/DMT/...)
+  SETTLEMENT
+  AEPS
+  WALLET_ENTRY // raw ledger correction
+}
+
+enum ReversalStatus {
+  PENDING_APPROVAL
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model Reversal {
+  id String @id @default(cuid())
+
+  kind ReversalKind
+  // What is being reversed — polymorphic reference + human ref for display.
+  refType String // "Transaction" | "SettlementTransfer" | "WalletTxn" | ...
+  refId   String
+  refLabel String? // e.g. the TXN refId shown in the UI
+
+  targetUserId String
+  targetUser   User   @relation("ReversalTarget", fields: [targetUserId], references: [id])
+
+  actorId String
+  actor   User   @relation("ReversalActor", fields: [actorId], references: [id])
+
+  // Direction of the compensation from the TARGET USER's perspective.
+  direction  WalletDirection // CREDIT = money returned to user
+  walletType WalletType      @default(PRIMARY)
+  amount     Decimal         @db.Decimal(14, 2)
+  reason     String // mandatory explanation
+
+  status ReversalStatus @default(COMPLETED)
+
+  approvedById String?
+  approvedAt   DateTime?
+  rejectedNote String?
+
+  // Ledger linkage (idempotent — one compensating entry per reversal).
+  walletTxnId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([targetUserId, createdAt])
+  @@index([status, createdAt])
+  @@index([refType, refId])
+}
+
+// ---------- A4: T+1 settlement engine ----------
+// Per-user auto-settlement configuration + per-run records. The daily worker
+// job walks eligible users, computes the sweepable AEPS-wallet balance, and
+// moves it to the primary wallet (internal mode) — every run is idempotent
+// per (user, IST day) via SettlementRun.dayKey.
+
+model UserSettlementConfig {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  autoSettleEnabled Boolean   @default(true)
+  pausedUntil       DateTime? // admin pause — null/past = active
+  pausedReason      String?
+  // Float kept in the AEPS wallet after a sweep (null = settle everything).
+  keepBalance       Decimal?  @db.Decimal(14, 2)
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum SettlementRunStatus {
+  SUCCESS
+  SKIPPED
+  FAILED
+}
+
+model SettlementRun {
+  id     String @id @default(cuid())
+  userId String
+
+  // IST day key (YYYY-MM-DD) — with userId forms the idempotency guard.
+  dayKey  String
+  trigger String @default("CRON") // CRON | MANUAL (admin run-now)
+
+  amount Decimal             @default(0) @db.Decimal(14, 2)
+  status SettlementRunStatus
+  detail String? // skip/failure reason
+
+  walletTxnDebitId  String? // AEPS wallet debit entry
+  walletTxnCreditId String? // primary wallet credit entry
+
+  ranById   String? // admin id when trigger = MANUAL
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dayKey, trigger])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ---------- A4: Settlement alerts ----------
+model SettlementAlert {
+  id        String    @id @default(cuid())
+  severity  String // INFO | WARNING | CRITICAL
+  title     String
+  detail    Json?
+  userId    String? // affected user, when applicable
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([readAt, createdAt])
+}
+
+// ---------- A5: POS rental plans & subscriptions ----------
+// A rental plan defines the recurring machine fee; a subscription binds a
+// machine + user to a plan. The monthly billing job debits the user wallet
+// (reason RENTAL) idempotently per (subscription, billing period).
+
+model PosRentalPlan {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  monthlyRent Decimal @db.Decimal(14, 2)
+  // One-time charges captured at subscription start (0 = none).
+  setupFee    Decimal @default(0) @db.Decimal(14, 2)
+  deposit     Decimal @default(0) @db.Decimal(14, 2)
+  // Default GST treatment for this plan. When true, subscriptions created from
+  // this plan add 18% GST on top of the rent (and on the commission spread) by
+  // default; the assigner can still override per subscription.
+  includeGst  Boolean @default(false)
+  active      Boolean @default(true)
+
+  // Owner of this plan. null = platform plan (created by admin, visible to
+  // everyone). A non-null ownerId means a network user (SD/MD/Distributor)
+  // created this plan privately; only that user (and admins) can see/use it.
+  ownerId String?
+  owner   User?   @relation("PosRentalPlanOwner", fields: [ownerId], references: [id])
+
+  subscriptions PosSubscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Plan names are unique per owner (platform plans share the null-owner scope).
+  @@unique([ownerId, name])
+}
+
+// ---------- A5b: POS rental subscription (enhanced for multi-tier) ----------
+// Each tier in the hierarchy can set its own monthly rent + commission when
+// assigning a machine downstream. The billing engine debits the subscriber,
+// credits commissions to every ancestor in the chain, and optionally adds
+// 18% GST on the rental amount.
+
+enum PosSubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+model PosSubscription {
+  id String @id @default(cuid())
+
+  machineId String
+  machine   PosMachine @relation(fields: [machineId], references: [id])
+
+  userId String
+  user   User   @relation("PosSubscriber", fields: [userId], references: [id])
+
+  planId String
+  plan   PosRentalPlan @relation(fields: [planId], references: [id])
+
+  status     PosSubscriptionStatus @default(ACTIVE)
+  billingDay Int                   @default(1) // day-of-month the rent is due
+
+  // Per-subscription rental override. When set, this amount is billed instead
+  // of the plan's monthlyRent — lets each tier set its own downstream rent.
+  monthlyRent Decimal? @db.Decimal(14, 2)
+
+  // GST toggle: when true, 18% GST is added on top of the monthly rent.
+  includeGst Boolean @default(false)
+
+  // Commission the ASSIGNER (creator of this subscription) earns each month.
+  // This is the difference between what the subscriber pays and what the
+  // assigner's own upstream rent is. Stored explicitly for transparency.
+  commission Decimal @default(0) @db.Decimal(14, 2)
+
+  // Who created this subscription (the assigner — parent in the hierarchy).
+  createdById String?
+
+  startedAt   DateTime  @default(now())
+  cancelledAt DateTime?
+
+  invoices PosRentalInvoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([machineId])
+  @@index([status, billingDay])
+}
+
+enum PosInvoiceStatus {
+  PAID
+  FAILED // insufficient wallet balance — retried next run
+  WAIVED
+}
+
+model PosRentalInvoice {
+  id             String          @id @default(cuid())
+  subscriptionId String
+  subscription   PosSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // Billing period key (YYYY-MM) — idempotency guard per subscription+month.
+  periodKey String
+  amount    Decimal          @db.Decimal(14, 2) // base rent charged
+  gstAmount Decimal          @default(0) @db.Decimal(14, 2) // 18% GST (when includeGst)
+  totalAmount Decimal        @default(0) @db.Decimal(14, 2) // amount + gstAmount (total debited)
+  commissionAmount Decimal   @default(0) @db.Decimal(14, 2) // commission credited to assigner
+  status    PosInvoiceStatus
+  detail    String?
+
+  walletTxnId String? @unique
+  // Wallet txn for the commission credit to the assigner.
+  commissionTxnId String? @unique
+
+  createdAt DateTime @default(now())
+
+  @@unique([subscriptionId, periodKey])
+  @@index([status, createdAt])
+}
+
+// ---------- A6: AEPS control centre ----------
+// Local AEPS merchant registry + settlement accounts + settlement records.
+// Provider-agnostic: rows carry the provider name + provider merchant id so
+// they survive a rail switch (Paysprint → anything).
+
+enum AepsMerchantStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+model AepsMerchant {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  provider           String // PAYSPRINT | MOCK | ...
+  providerMerchantId String?
+  status             AepsMerchantStatus @default(PENDING)
+
+  // Onboarding metadata (BC agent id, device serial, etc.)
+  meta Json?
+
+  activatedAt DateTime?
+  suspendedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+}
+
+enum AepsAccountStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model AepsSettlementAccount {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("AepsAccountOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  accountHolderName String
+  accountNumber     String // ENCRYPTED at rest (fieldEncryption)
+  accountLast4      String // plain, display only
+  ifsc              String
+  bankName          String?
+
+  status       AepsAccountStatus @default(PENDING_APPROVAL)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  pennyDropVerified Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
+
+enum AepsSettlementStatus {
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+/// A settlement of AEPS-wallet funds out to a bank account (or into the
+/// primary wallet when accountId is null). Wallet legs go through the ledger.
+model AepsSettlement {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("AepsSettlementOwner", fields: [userId], references: [id])
+
+  accountId String? // AepsSettlementAccount.id — null = internal move to primary
+  amount    Decimal @db.Decimal(14, 2)
+  charge    Decimal @default(0) @db.Decimal(14, 2)
+  mode      String  @default("INTERNAL") // INTERNAL | IMPS | NEFT
+
+  status AepsSettlementStatus @default(PROCESSING)
+  utr    String?
+  detail String?
+
+  walletTxnDebitId  String? // AEPS wallet debit
+  walletTxnCreditId String? // primary wallet credit (internal mode)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
 model QrClaim {
   id     String @id @default(cuid())
   userId String
@@ -1319,4 +1930,73 @@ model QrClaim {
   @@index([userId, status])
   @@index([status, createdAt])
   @@index([reconciledAt])
+}
+
+// ---------- Multi-tier commission credits ----------
+// One row per tier per successful transaction — powers the earnings ledger,
+// commission certificates, and the "My Earnings" dashboards.
+
+model CommissionCredit {
+  id            String   @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  userId        String   // who received the commission
+  user          User     @relation("CommissionCredits", fields: [userId], references: [id])
+  tier          String   // RETAILER | DISTRIBUTOR | MASTER | SUPER
+  amount        Decimal  @db.Decimal(14, 2) // NET credited to the wallet (gross - TDS)
+  // TDS breakdown (Section 194H style): amount = grossAmount - tdsAmount.
+  // grossAmount is nullable for legacy rows written before TDS was applied.
+  grossAmount   Decimal? @db.Decimal(14, 2)
+  tdsAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  walletTxnId   String?  // ref to the WalletTxn credit
+  schemeId      String?  // which scheme resolved the split
+  service       ServiceCode
+  txnAmount     Decimal  @db.Decimal(14, 2) // original transaction amount
+  createdAt     DateTime @default(now())
+
+  @@index([transactionId])
+  @@index([userId, createdAt])
+  @@index([userId, service, createdAt])
+}
+
+// ---------- POS acquirer settlement ----------
+// Tracks POS transaction proceeds — credited instantly (on webhook) or via
+// T+1 cron depending on the user's instantSettlement flag.
+
+model PosSettlementEntry {
+  id             String   @id @default(cuid())
+  transactionRef String   @unique // partner txn ID (idempotency key)
+  machineId      String?  // local PosMachine id
+  userId         String   // retailer who owns the machine
+  user           User     @relation("PosSettlements", fields: [userId], references: [id])
+  grossAmount    Decimal  @db.Decimal(14, 2) // full transaction amount
+  mdrAmount      Decimal  @db.Decimal(14, 2) // MDR deducted
+  netAmount      Decimal  @db.Decimal(14, 2) // credited to retailer
+  mode           String   // INSTANT | T1
+  status         String   @default("PENDING") // PENDING | SETTLED | FAILED
+  settledAt      DateTime?
+  walletTxnId    String?  // ref to the credit WalletTxn
+  paymentMode    String?  // CARD | UPI | NFC | BHARATQR
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+// ---------- Network wallet transfer ----------
+// Direct parent→child wallet push/pull (not fund-request based).
+
+model NetworkWalletTransfer {
+  id        String   @id @default(cuid())
+  fromId    String   // parent user
+  from      User     @relation("NetworkTransfersOut", fields: [fromId], references: [id])
+  toId      String   // child user
+  to        User     @relation("NetworkTransfersIn", fields: [toId], references: [id])
+  direction String   // PUSH | PULL
+  amount    Decimal  @db.Decimal(14, 2)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([fromId, createdAt])
+  @@index([toId, createdAt])
 }

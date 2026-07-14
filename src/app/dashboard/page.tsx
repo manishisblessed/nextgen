@@ -27,6 +27,7 @@ export default function DashboardHomePage() {
     case "master-admin":
     case "admin":
     case "sub-admin":
+    case "finance":
       return <AdminOverview session={legacySession as any} />;
     case "super-distributor":
     case "master-distributor":

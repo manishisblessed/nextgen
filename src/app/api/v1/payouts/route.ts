@@ -15,6 +15,7 @@ import { assertLivenessReadyById } from "@/lib/security/livenessGate";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { quotePayoutForUser } from "@/lib/payout/charges";
+import { requireActiveScheme } from "@/lib/scheme/gate";
 import type { SessionUser } from "@/lib/auth-server";
 
 /**
@@ -122,6 +123,7 @@ export async function POST(req: Request) {
     await assertLivenessReadyById(ctx.user.id);
     await assertKycCurrent({ id: ctx.user.id, role: ctx.user.role } as SessionUser);
     await assertServiceEnabled(SERVICE_KEYS.PAYOUT, { name: "Payout", userId: ctx.user.id, role: ctx.user.role });
+    await requireActiveScheme(ctx.user.id);
   } catch (e) {
     return toErrorResponse(e);
   }

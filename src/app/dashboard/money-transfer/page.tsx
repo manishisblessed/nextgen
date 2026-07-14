@@ -150,10 +150,8 @@ export default function MoneyTransferPage() {
             </div>
           </div>
           <div className="sm:col-span-2">
-            <Button type="submit" size="lg" className="w-full" disabled={loading}>
-              {loading
-                ? "Transferring..."
-                : `Send ${form.amount ? formatINR(Number(form.amount)) : "money"}`}
+            <Button type="submit" size="lg" className="w-full" disabled={loading} isLoading={loading}>
+              Send {form.amount ? formatINR(Number(form.amount)) : "money"}
             </Button>
           </div>
         </form>

@@ -113,7 +113,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // ── Fraud gate: reject if PAN or GST is already used by another user ──
+  // ── Fraud gate: reject if PAN, Aadhaar, or GST is already used by another user ──
   const panUp = parsed.data.panNumber.toUpperCase();
   const gstUp = parsed.data.gstin?.toUpperCase() || null;
 
@@ -124,6 +124,20 @@ export async function POST(req: Request) {
   if (dupPan) {
     return NextResponse.json(
       { error: "Another account is already registered with this PAN number" },
+      { status: 409 }
+    );
+  }
+
+  const dupAadhaar = await prisma.kyc.findFirst({
+    where: {
+      aadhaarLast4: parsed.data.aadhaarLast4,
+      userId: { not: user.id },
+    },
+    select: { userId: true },
+  });
+  if (dupAadhaar) {
+    return NextResponse.json(
+      { error: "Another account is already registered with this Aadhaar number" },
       { status: 409 }
     );
   }
