@@ -29,14 +29,13 @@ type Slab = {
   id: string;
   schemeId: string;
   service: string;
+  /** Provider dimension (null = any provider). */
+  provider: string | null;
   minAmount: number;
   maxAmount: number;
   chargeType: RateType;
   chargeValue: number;
   commissionType: RateType;
-  commissionRetailer: number;
-  commissionDistributor: number;
-  commissionMaster: number;
   /** Cascade model: commission the ASSIGNED user earns on this slab. */
   commissionValue: number;
   active: boolean;
@@ -215,11 +214,9 @@ export default function SchemeEditorPage() {
                   <thead className="bg-ink-50/40 text-left text-[11px] uppercase tracking-wider text-ink-500">
                     <tr>
                       <th className="px-5 py-2.5 font-semibold">Range</th>
+                      <th className="px-5 py-2.5 font-semibold">Provider</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Charge</th>
                       <th className="px-5 py-2.5 text-right font-semibold">User Commission</th>
-                      <th className="px-5 py-2.5 text-right font-semibold">Retailer</th>
-                      <th className="px-5 py-2.5 text-right font-semibold">Distributor</th>
-                      <th className="px-5 py-2.5 text-right font-semibold">Master Dist.</th>
                       <th className="px-5 py-2.5 text-center font-semibold">Status</th>
                       <th className="px-5 py-2.5" />
                     </tr>
@@ -230,11 +227,9 @@ export default function SchemeEditorPage() {
                         <td className="px-5 py-3 font-medium">
                           ₹{s.minAmount.toLocaleString("en-IN")} – ₹{s.maxAmount.toLocaleString("en-IN")}
                         </td>
+                        <td className="px-5 py-3 text-xs">{s.provider ?? "All"}</td>
                         <td className="px-5 py-3 text-right">{fmtRate(s.chargeType, s.chargeValue)}</td>
                         <td className="px-5 py-3 text-right font-semibold text-emerald-700">{fmtRate(s.commissionType, s.commissionValue)}</td>
-                        <td className="px-5 py-3 text-right">{fmtRate(s.commissionType, s.commissionRetailer)}</td>
-                        <td className="px-5 py-3 text-right">{fmtRate(s.commissionType, s.commissionDistributor)}</td>
-                        <td className="px-5 py-3 text-right">{fmtRate(s.commissionType, s.commissionMaster)}</td>
                         <td className="px-5 py-3 text-center">
                           <Badge variant={s.active ? "success" : "danger"}>{s.active ? "On" : "Off"}</Badge>
                         </td>
@@ -310,6 +305,7 @@ function SlabModal({
 }) {
   const isEdit = !!editing;
   const [service, setService] = useState<string>(editing?.service ?? SERVICE_CODES[0]);
+  const [provider, setProvider] = useState(editing?.provider ?? "");
   const [minAmount, setMinAmount] = useState(String(editing?.minAmount ?? 0));
   const [maxAmount, setMaxAmount] = useState(String(editing?.maxAmount ?? 1000));
   const [chargeType, setChargeType] = useState<RateType>(editing?.chargeType ?? "FLAT");
@@ -318,15 +314,6 @@ function SlabModal({
     String(editing ? (editing.chargeType === "PERCENT" ? editing.chargeValue * 100 : editing.chargeValue) : 0)
   );
   const [commissionType, setCommissionType] = useState<RateType>(editing?.commissionType ?? "PERCENT");
-  const [comR, setComR] = useState(
-    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionRetailer * 100 : editing.commissionRetailer) : 0)
-  );
-  const [comD, setComD] = useState(
-    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionDistributor * 100 : editing.commissionDistributor) : 0)
-  );
-  const [comM, setComM] = useState(
-    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionMaster * 100 : editing.commissionMaster) : 0)
-  );
   // Cascade model: commission the assigned user earns on this slab.
   const [comOwn, setComOwn] = useState(
     String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionValue * 100 : editing.commissionValue) : 0)
@@ -356,14 +343,12 @@ function SlabModal({
 
     const payload = {
       service,
+      provider: provider.trim() || null,
       minAmount: min,
       maxAmount: max,
       chargeType,
       chargeValue: toStored(chargeType, chargeValue),
       commissionType,
-      commissionRetailer: toStored(commissionType, comR),
-      commissionDistributor: toStored(commissionType, comD),
-      commissionMaster: toStored(commissionType, comM),
       commissionValue: toStored(commissionType, comOwn),
     };
 
@@ -417,6 +402,18 @@ function SlabModal({
             {isEdit && <p className="mt-1 text-xs text-ink-400">Service is fixed for an existing slab.</p>}
           </div>
 
+          <div>
+            <Label>Provider (optional)</Label>
+            <Input
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              placeholder="Leave blank for all providers"
+            />
+            <p className="mt-1 text-xs text-ink-400">
+              A slab pinned to a provider (e.g. a specific BBPS partner) wins over the all-provider slab.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Min amount (₹)</Label>
@@ -446,38 +443,25 @@ function SlabModal({
             <p className="mt-1 text-xs text-ink-400">{chargeType === "PERCENT" ? pctHint : flatHint}</p>
           </div>
 
-          <div className="rounded-xl border border-ink-100 bg-ink-50/40 p-3">
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">Commission split across levels</p>
-            <div className="mb-3">
-              <Label>Type</Label>
-              <Select value={commissionType} onChange={(e) => setCommissionType(e.target.value as RateType)}>
-                <option value="PERCENT">Percent (%)</option>
-                <option value="FLAT">Flat (₹)</option>
-              </Select>
-            </div>
-            <div className="mb-3">
-              <Label>Assigned user&apos;s commission (cascade)</Label>
-              <Input type="number" min={0} step="0.0001" value={comOwn} onChange={(e) => setComOwn(e.target.value)} />
-              <p className="mt-1 text-xs text-ink-400">
-                What the user this scheme is assigned to earns per transaction. Parents up the
-                chain earn scheme-difference margins automatically.
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-emerald-700">User commission</p>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Retailer</Label>
-                <Input type="number" min={0} step="0.0001" value={comR} onChange={(e) => setComR(e.target.value)} />
+                <Label>Type</Label>
+                <Select value={commissionType} onChange={(e) => setCommissionType(e.target.value as RateType)}>
+                  <option value="PERCENT">Percent (%)</option>
+                  <option value="FLAT">Flat (₹)</option>
+                </Select>
               </div>
               <div>
-                <Label>Distributor</Label>
-                <Input type="number" min={0} step="0.0001" value={comD} onChange={(e) => setComD(e.target.value)} />
-              </div>
-              <div>
-                <Label>Master Dist.</Label>
-                <Input type="number" min={0} step="0.0001" value={comM} onChange={(e) => setComM(e.target.value)} />
+                <Label>{commissionType === "PERCENT" ? "Commission (%)" : "Commission (₹)"}</Label>
+                <Input type="number" min={0} step="0.0001" value={comOwn} onChange={(e) => setComOwn(e.target.value)} />
               </div>
             </div>
-            <p className="mt-1 text-xs text-ink-400">{commissionType === "PERCENT" ? pctHint : flatHint}</p>
+            <p className="mt-1 text-xs text-ink-400">
+              {commissionType === "PERCENT" ? pctHint : flatHint}. This is what the user this scheme is
+              assigned to earns — parents up the chain earn scheme-difference margins automatically.
+            </p>
           </div>
         </div>
         <div className="sticky bottom-0 flex justify-end gap-2 border-t border-ink-100 bg-white px-5 py-4">

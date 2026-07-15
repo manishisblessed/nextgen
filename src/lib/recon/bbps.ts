@@ -80,6 +80,7 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
       fee: true,
       commission: true,
       service: true,
+      partner: true,
       createdAt: true,
     },
   });
@@ -112,7 +113,8 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
             txn.userId,
             txn.service,
             txn.amount.toNumber(),
-            tx
+            tx,
+            txn.partner
           );
           const own = credits.find((c) => c.userId === txn.userId);
           if (own) {

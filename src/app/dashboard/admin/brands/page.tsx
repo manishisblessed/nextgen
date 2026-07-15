@@ -1,0 +1,555 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { formatINR } from "@/lib/utils";
+import { Tag, Plus, RefreshCw, Trash2, X, Zap, Clock } from "lucide-react";
+
+type Brand = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  settlementMode: string;
+  rates: number;
+  machines: number;
+  createdAt: string;
+};
+
+type Rate = {
+  id: string;
+  provider: string;
+  paymentMode: string;
+  minAmount: number;
+  maxAmount: number;
+  mdrType: string;
+  mdrValue: number;
+  mdrValueT0: number;
+  active: boolean;
+};
+
+type BrandDetail = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  settlementMode: string;
+  machines: number;
+  rates: Rate[];
+};
+
+const inputCls =
+  "rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
+
+function fmtRate(type: string, value: number) {
+  return type === "PERCENT" ? `${(value * 100).toFixed(2)}%` : formatINR(value);
+}
+
+export default function BrandsPage() {
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [loading, setLoading] = useState(true);
+  const notify = useCallback((text: string, ok: boolean) => {
+    if (ok) toast.success(text);
+    else toast.error(text);
+  }, []);
+
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<BrandDetail | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/brands");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Failed to load brands");
+      setBrands(data.brands);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Load failed", false);
+    } finally {
+      setLoading(false);
+    }
+  }, [notify]);
+
+  const loadDetail = useCallback(
+    async (id: string) => {
+      setSelected(id);
+      setDetail(null);
+      try {
+        const res = await fetch(`/api/admin/brands/${id}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error ?? "Failed to load brand");
+        setDetail(data.brand);
+      } catch (e) {
+        notify(e instanceof Error ? e.message : "Load failed", false);
+        setSelected(null);
+      }
+    },
+    [notify]
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const patchBrand = async (id: string, body: Record<string, unknown>) => {
+    const res = await fetch(`/api/admin/brands/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notify(typeof data?.error === "string" ? data.error : "Update failed", false);
+      return;
+    }
+    notify("Brand updated.", true);
+    load();
+    if (selected === id) loadDetail(id);
+  };
+
+  const columns: Column<Brand>[] = [
+    {
+      key: "name",
+      header: "Brand",
+      render: (b) => (
+        <button className="text-left" onClick={() => loadDetail(b.id)}>
+          <span className="font-semibold text-brand-700 hover:underline">{b.name}</span>
+          <p className="text-xs text-ink-400">
+            {b.key}
+            {b.description ? ` · ${b.description}` : ""}
+          </p>
+        </button>
+      ),
+    },
+    {
+      key: "mode",
+      header: "Settlement",
+      render: (b) => (
+        <Badge variant={b.settlementMode === "INSTANT" ? "brand" : "default"}>
+          {b.settlementMode === "INSTANT" ? (
+            <span className="inline-flex items-center gap-1">
+              <Zap className="h-3 w-3" /> Instant
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3 w-3" /> T+1
+            </span>
+          )}
+        </Badge>
+      ),
+    },
+    {
+      key: "flags",
+      header: "Status",
+      render: (b) => (
+        <Badge variant={b.active ? "success" : "danger"}>{b.active ? "active" : "inactive"}</Badge>
+      ),
+    },
+    { key: "rates", header: "Rates", render: (b) => <span>{b.rates}</span> },
+    { key: "machines", header: "Machines", render: (b) => <span>{b.machines}</span> },
+    {
+      key: "actions",
+      header: "",
+      render: (b) => (
+        <div className="flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              patchBrand(b.id, { settlementMode: b.settlementMode === "INSTANT" ? "T1" : "INSTANT" })
+            }
+          >
+            {b.settlementMode === "INSTANT" ? "Set T+1" : "Set instant"}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => patchBrand(b.id, { active: !b.active })}>
+            {b.active ? "Deactivate" : "Activate"}
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Brands & MDR"
+        description="Per-brand acquiring identities (teachway, lagoon, avika, …). Each brand carries its own MDR rate card (by provider &amp; payment mode) and a default settlement mode. Every POS settlement deducts MDR against the brand's current rate."
+        actions={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={load}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+            </Button>
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus className="mr-2 h-4 w-4" /> New brand
+            </Button>
+          </div>
+        }
+      />
+
+      <DataTable columns={columns} data={brands} loading={loading} />
+
+      {selected && (
+        <RateEditor
+          brandId={selected}
+          detail={detail}
+          onClose={() => {
+            setSelected(null);
+            setDetail(null);
+          }}
+          onChanged={() => {
+            loadDetail(selected);
+            load();
+          }}
+          onNotice={notify}
+        />
+      )}
+
+      {showCreate && (
+        <CreateBrandModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            notify("Brand created.", true);
+            load();
+          }}
+          onError={(text) => notify(text, false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- rate editor */
+
+function RateEditor({
+  brandId,
+  detail,
+  onClose,
+  onChanged,
+  onNotice,
+}: {
+  brandId: string;
+  detail: BrandDetail | null;
+  onClose: () => void;
+  onChanged: () => void;
+  onNotice: (text: string, ok: boolean) => void;
+}) {
+  const [form, setForm] = useState({
+    provider: "*",
+    paymentMode: "*",
+    minAmount: "1",
+    maxAmount: "100000",
+    mdrType: "PERCENT",
+    mdrValue: "1",
+    mdrValueT0: "0",
+  });
+  const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Rate | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const set =
+    (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Percent fields are entered as human percentages (1 = 1%) and stored as
+  // fractions (0.01).
+  const toFraction = (v: string, type: string) => (type === "PERCENT" ? Number(v) / 100 : Number(v));
+
+  const addRate = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/brands/${brandId}/rates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: form.provider.trim() || "*",
+          paymentMode: form.paymentMode.trim() || "*",
+          minAmount: Number(form.minAmount),
+          maxAmount: Number(form.maxAmount),
+          mdrType: form.mdrType,
+          mdrValue: toFraction(form.mdrValue, form.mdrType),
+          mdrValueT0: toFraction(form.mdrValueT0, form.mdrType),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Failed to add rate");
+      onNotice("Rate added.", true);
+      onChanged();
+    } catch (e) {
+      onNotice(e instanceof Error ? e.message : "Failed to add rate", false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeRate = async (rateId: string) => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/brands/${brandId}/rates`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rateId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        onNotice(typeof data?.error === "string" ? data.error : "Delete failed", false);
+        return;
+      }
+      onNotice("Rate deleted.", true);
+      onChanged();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-brand-200 bg-white p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-ink-900">
+          <Tag className="h-4 w-4 text-brand-600" />
+          {detail ? `MDR rates — ${detail.name}` : "Loading brand…"}
+        </h3>
+        <button onClick={onClose} className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {detail && (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-ink-100 text-[11px] uppercase tracking-wider text-ink-400">
+                  <th className="py-2 pr-3">Provider</th>
+                  <th className="py-2 pr-3">Mode</th>
+                  <th className="py-2 pr-3">Band</th>
+                  <th className="py-2 pr-3">MDR (T+1)</th>
+                  <th className="py-2 pr-3">MDR (instant)</th>
+                  <th className="py-2 pr-3">Status</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {detail.rates.map((r) => (
+                  <tr key={r.id} className="border-b border-ink-50">
+                    <td className="py-2.5 pr-3 font-semibold">{r.provider}</td>
+                    <td className="py-2.5 pr-3">{r.paymentMode}</td>
+                    <td className="py-2.5 pr-3">
+                      {formatINR(r.minAmount)} – {formatINR(r.maxAmount)}
+                    </td>
+                    <td className="py-2.5 pr-3 font-semibold text-brand-700">
+                      {fmtRate(r.mdrType, r.mdrValue)}
+                    </td>
+                    <td className="py-2.5 pr-3 text-ink-600">
+                      {r.mdrValueT0 > 0 ? fmtRate(r.mdrType, r.mdrValueT0) : "—"}
+                    </td>
+                    <td className="py-2.5 pr-3">
+                      <Badge variant={r.active ? "success" : "danger"}>
+                        {r.active ? "active" : "inactive"}
+                      </Badge>
+                    </td>
+                    <td className="py-2.5 text-right">
+                      <button
+                        onClick={() => setDeleteTarget(r)}
+                        className="rounded-lg p-1.5 text-rose-500 hover:bg-rose-50"
+                        title="Delete rate"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {detail.rates.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-sm text-ink-400">
+                      No rates — add the first one below. Captures can&apos;t settle without a matching rate.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-5 rounded-xl bg-ink-50/60 p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-500">
+              Add rate {form.mdrType === "PERCENT" && "(rates in %, e.g. 1 = 1%)"}
+            </p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+              <label className="text-xs text-ink-500">
+                Provider (* = any)
+                <input className={`${inputCls} mt-1 w-full`} value={form.provider} onChange={set("provider")} placeholder="RAZORPAY" />
+              </label>
+              <label className="text-xs text-ink-500">
+                Mode (* = any)
+                <input className={`${inputCls} mt-1 w-full`} value={form.paymentMode} onChange={set("paymentMode")} placeholder="CARD" />
+              </label>
+              <label className="text-xs text-ink-500">
+                Min ₹
+                <input type="number" className={`${inputCls} mt-1 w-full`} value={form.minAmount} onChange={set("minAmount")} />
+              </label>
+              <label className="text-xs text-ink-500">
+                Max ₹
+                <input type="number" className={`${inputCls} mt-1 w-full`} value={form.maxAmount} onChange={set("maxAmount")} />
+              </label>
+              <label className="text-xs text-ink-500">
+                MDR type
+                <select className={`${inputCls} mt-1 w-full`} value={form.mdrType} onChange={set("mdrType")}>
+                  <option>PERCENT</option>
+                  <option>FLAT</option>
+                </select>
+              </label>
+              <label className="text-xs text-ink-500">
+                MDR (T+1)
+                <input type="number" step="0.01" className={`${inputCls} mt-1 w-full`} value={form.mdrValue} onChange={set("mdrValue")} />
+              </label>
+              <label className="text-xs text-ink-500">
+                MDR (instant)
+                <input type="number" step="0.01" className={`${inputCls} mt-1 w-full`} value={form.mdrValueT0} onChange={set("mdrValueT0")} />
+              </label>
+              <div className="flex items-end lg:col-span-7">
+                <Button size="sm" onClick={addRate} disabled={busy} isLoading={busy}>
+                  Add rate
+                </Button>
+              </div>
+            </div>
+            <p className="mt-3 text-[11px] text-ink-400">
+              Instant MDR is optional — leave 0 to reuse the T+1 rate for instant settlements.
+            </p>
+          </div>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        busy={deleting}
+        title="Delete this rate?"
+        description={
+          deleteTarget && (
+            <>
+              The <span className="font-semibold text-ink-900">{deleteTarget.provider}</span> /{" "}
+              <span className="font-semibold text-ink-900">{deleteTarget.paymentMode}</span> rate covering{" "}
+              <span className="font-semibold text-ink-900">
+                {formatINR(deleteTarget.minAmount)} – {formatINR(deleteTarget.maxAmount)}
+              </span>{" "}
+              will be removed from this brand.
+            </>
+          )
+        }
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await removeRate(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- create modal */
+
+function CreateBrandModal({
+  onClose,
+  onCreated,
+  onError,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+  onError: (text: string) => void;
+}) {
+  const [key, setKey] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [settlementMode, setSettlementMode] = useState("T1");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: key.trim().toLowerCase(),
+          name: name.trim(),
+          description: description.trim() || undefined,
+          settlementMode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const msg =
+          typeof data?.error === "string"
+            ? data.error
+            : data?.error?.fieldErrors
+            ? Object.values(data.error.fieldErrors).flat().join(", ")
+            : "Create failed";
+        throw new Error(msg);
+      }
+      onCreated();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-4 text-base font-bold text-ink-900">New brand</h3>
+        <div className="space-y-3">
+          <label className="block text-xs text-ink-500">
+            Key (slug)
+            <input
+              className={`${inputCls} mt-1 w-full`}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder="teachway"
+            />
+          </label>
+          <label className="block text-xs text-ink-500">
+            Name
+            <input
+              className={`${inputCls} mt-1 w-full`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="TeachWay"
+            />
+          </label>
+          <label className="block text-xs text-ink-500">
+            Description (optional)
+            <input className={`${inputCls} mt-1 w-full`} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </label>
+          <label className="block text-xs text-ink-500">
+            Default settlement mode
+            <select className={`${inputCls} mt-1 w-full`} value={settlementMode} onChange={(e) => setSettlementMode(e.target.value)}>
+              <option value="T1">T+1 (next-day cron)</option>
+              <option value="INSTANT">Instant (per-transaction)</option>
+            </select>
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={busy || key.trim().length < 2 || name.trim().length < 2} isLoading={busy}>
+            Create brand
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

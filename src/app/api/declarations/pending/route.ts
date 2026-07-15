@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import { resolveApprovalStatus } from "@/lib/declaration/expiry";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -23,16 +24,22 @@ export async function GET() {
       email: true,
       role: true,
       status: true,
+      expiresAt: true,
     },
   });
   const inviteMap = new Map(invites.map((i) => [i.id, i]));
 
-  return NextResponse.json({
-    approvals: approvals.map((a) => {
+  const result = await Promise.all(
+    approvals.map(async (a) => {
       const invite = inviteMap.get(a.inviteId);
+      const status = await resolveApprovalStatus({
+        approvalId: a.id,
+        currentStatus: a.status,
+        inviteExpiresAt: invite?.expiresAt,
+      });
       return {
         id: a.id,
-        status: a.status,
+        status,
         onboardeeRole: a.onboardeeRole,
         onboardeeName: invite?.name ?? invite?.phone ?? "Unknown",
         onboardeePhone: invite?.phone ?? "",
@@ -43,6 +50,8 @@ export async function GET() {
         rejectedAt: a.rejectedAt?.toISOString() ?? null,
         rejectedReason: a.rejectedReason ?? null,
       };
-    }),
-  });
+    })
+  );
+
+  return NextResponse.json({ approvals: result });
 }

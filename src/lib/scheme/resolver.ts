@@ -16,6 +16,11 @@ import { add, dec, gte, gt, lte, mul, round, type Money } from "../money";
  * commission = the margin between their child's scheme rate and their own
  * scheme rate for the same service + band.
  *
+ * Provider dimension: a slab may target a specific partner route (e.g.
+ * "BBPS_1" vs "BBPS_2"). When the caller passes the provider handling the
+ * transaction, an exact provider slab beats the null (any-provider) slab for
+ * the same band.
+ *
  * All money math goes through money.ts Decimal helpers — never JS floats.
  *
  * A slab value is either a flat ₹ amount (RateType.FLAT) or a fraction of the
@@ -146,7 +151,8 @@ function rateFromSlab(
 export async function getEffectiveRate(
   userId: string,
   service: ServiceCode,
-  amount: Money | string | number
+  amount: Money | string | number,
+  provider?: string | null
 ): Promise<EffectiveRate> {
   const amt = round(amount);
 
@@ -162,7 +168,7 @@ export async function getEffectiveRate(
       select: { id: true, name: true },
     });
     if (scheme) {
-      const slab = await findSlab(scheme.id, service, amt);
+      const slab = await findSlab(scheme.id, service, amt, provider);
       if (slab) return rateFromSlab(amt, slab, scheme.id, scheme.name, "USER_SCHEME", user.role);
     }
   }
@@ -228,7 +234,8 @@ const NETWORK_ROLES = new Set([
 export async function resolvePricingChain(
   userId: string,
   service: ServiceCode,
-  amount: Money | string | number
+  amount: Money | string | number,
+  provider?: string | null
 ): Promise<PricingChain> {
   const amt = round(amount);
 
@@ -266,7 +273,7 @@ export async function resolvePricingChain(
         select: { id: true, name: true },
       });
       if (scheme) {
-        r = { schemeId: scheme.id, schemeName: scheme.name, slab: await findSlab(scheme.id, service, amt) };
+        r = { schemeId: scheme.id, schemeName: scheme.name, slab: await findSlab(scheme.id, service, amt, provider) };
       }
     }
     resolved.push(r);
@@ -340,35 +347,45 @@ export async function resolvePricingChain(
   };
 }
 
-/** Find the active slab in a scheme whose band contains `amount`. */
+/**
+ * Find the active slab in a scheme whose band contains `amount`. When a
+ * provider is given, an exact provider slab wins over the null (any-provider)
+ * slab; a slab pinned to a DIFFERENT provider never matches.
+ */
 async function findSlab(
   schemeId: string,
   service: ServiceCode,
-  amount: Money
+  amount: Money,
+  provider?: string | null
 ): Promise<SchemeSlab | null> {
   const slabs = await prisma.schemeSlab.findMany({
     where: { schemeId, service, active: true },
     orderBy: { minAmount: "asc" },
   });
-  for (const slab of slabs) {
-    if (gte(amount, slab.minAmount) && lte(amount, slab.maxAmount)) return slab;
+  const inBand = slabs.filter((s) => gte(amount, s.minAmount) && lte(amount, s.maxAmount));
+  if (provider) {
+    const exact = inBand.find((s) => s.provider === provider);
+    if (exact) return exact;
   }
-  return null;
+  return inBand.find((s) => s.provider == null) ?? null;
 }
 
 export type SlabRange = { minAmount: Money | string | number; maxAmount: Money | string | number };
 
 /**
  * Validate a candidate [min, max] band against the existing active slabs for a
- * scheme+service. Returns an error string if the band is invalid (min > max) or
- * overlaps another active slab, otherwise null. `excludeSlabId` lets an edit
- * ignore its own row.
+ * scheme+service+provider. Slabs pinned to different providers may share bands
+ * (that is the point of the provider dimension), so only slabs with the SAME
+ * provider value (or both null) are compared. Returns an error string if the
+ * band is invalid (min > max) or overlaps, otherwise null. `excludeSlabId`
+ * lets an edit ignore its own row.
  */
 export async function validateNonOverlapping(
   schemeId: string,
   service: ServiceCode,
   range: SlabRange,
-  excludeSlabId?: string
+  excludeSlabId?: string,
+  provider?: string | null
 ): Promise<string | null> {
   const min = dec(range.minAmount);
   const max = dec(range.maxAmount);
@@ -378,6 +395,7 @@ export async function validateNonOverlapping(
     where: {
       schemeId,
       service,
+      provider: provider ?? null,
       active: true,
       ...(excludeSlabId ? { id: { not: excludeSlabId } } : {}),
     },

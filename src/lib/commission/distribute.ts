@@ -2,7 +2,7 @@ import type { Prisma, ServiceCode } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { creditWallet } from "@/lib/ledger";
 import { resolvePricingChain } from "@/lib/scheme/resolver";
-import { resolveMdrChain } from "@/lib/mdr/resolver";
+import { resolveMdrChain, type MdrDimensions } from "@/lib/mdr/resolver";
 import type { MdrServiceKind } from "@prisma/client";
 import { gt, toNumber, dec, round, mul, sub, type Money } from "@/lib/money";
 
@@ -133,15 +133,17 @@ async function creditChain(
  * @param service      - ServiceCode for scheme lookup
  * @param txnAmount    - original transaction amount
  * @param tx           - optional Prisma transaction client
+ * @param provider     - partner route handling the txn (provider-scoped slabs)
  */
 export async function distributeCommission(
   txnId: string,
   userId: string,
   service: ServiceCode,
   txnAmount: number | Money,
-  tx?: Prisma.TransactionClient
+  tx?: Prisma.TransactionClient,
+  provider?: string | null
 ): Promise<CreditResult[]> {
-  const chain = await resolvePricingChain(userId, service, txnAmount);
+  const chain = await resolvePricingChain(userId, service, txnAmount, provider);
   if (!chain.ok) return [];
 
   return creditChain(
@@ -167,7 +169,7 @@ export async function distributeCommission(
  * @param userId      - the machine owner (transacting user)
  * @param serviceKind - POS | PG | QR | UPI
  * @param grossAmount - full capture amount
- * @param paymentMode - CARD_* / UPI / "*"
+ * @param dims        - payment mode + company/card dimensions + T0/T1
  */
 export async function distributeMdrCommission(
   txnId: string,
@@ -175,9 +177,9 @@ export async function distributeMdrCommission(
   serviceKind: MdrServiceKind,
   grossAmount: number | Money,
   service: ServiceCode,
-  paymentMode = "*"
+  dims: MdrDimensions | string = {}
 ): Promise<CreditResult[]> {
-  const chain = await resolveMdrChain(userId, serviceKind, grossAmount, paymentMode);
+  const chain = await resolveMdrChain(userId, serviceKind, grossAmount, dims);
   if (!chain.ok) return [];
 
   return creditChain(

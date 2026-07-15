@@ -19,7 +19,10 @@ export async function GET(
   if (!approval) {
     return NextResponse.json({ error: "Approval not found" }, { status: 404 });
   }
-  if (approval.approverId !== user.id) {
+  // The approver (upline) can always view their own declaration; platform admins
+  // may view any for audit/compliance.
+  const isAdmin = ["MASTER_ADMIN", "ADMIN", "SUPPORT"].includes(user.role);
+  if (approval.approverId !== user.id && !isAdmin) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 

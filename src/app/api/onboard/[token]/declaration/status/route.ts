@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { needsSuccessorApproval } from "@/lib/declaration/types";
+import { resolveApprovalStatus } from "@/lib/declaration/expiry";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,14 @@ export async function GET(
     },
   });
 
+  const effectiveStatus = approval
+    ? await resolveApprovalStatus({
+        approvalId: approval.id,
+        currentStatus: approval.status,
+        inviteExpiresAt: invite.expiresAt,
+      })
+    : null;
+
   return NextResponse.json({
     requiresApproval: true,
     selfDeclarationOnly: false,
@@ -64,7 +73,7 @@ export async function GET(
     approval: approval
       ? {
           id: approval.id,
-          status: approval.status,
+          status: effectiveStatus,
           approvedAt: approval.approvedAt?.toISOString() ?? null,
           rejectedAt: approval.rejectedAt?.toISOString() ?? null,
           rejectedReason: approval.rejectedReason ?? null,

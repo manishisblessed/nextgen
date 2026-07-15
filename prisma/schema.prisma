@@ -654,6 +654,11 @@ model SchemeSlab {
   schemeId  String
   scheme    Scheme      @relation(fields: [schemeId], references: [id], onDelete: Cascade)
   service   ServiceCode
+  // Provider dimension: when a service is routed through multiple partners
+  // (e.g. BBPS 1 vs BBPS 2), a slab may target one provider specifically.
+  // null = applies to any provider. Resolution prefers an exact provider
+  // match over the null wildcard for the same band.
+  provider  String?
   minAmount Decimal     @db.Decimal(14, 2)
   maxAmount Decimal     @db.Decimal(14, 2)
 
@@ -1247,9 +1252,13 @@ model PosMachine {
   // Manual-inventory extensions (Console A5): machines may also be created
   // by hand / bulk CSV upload rather than the external sync.
   source    String  @default("SYNC") // SYNC | MANUAL
-  brand     String? // device brand (Pax, Verifone, ...)
+  brand     String? // device brand label (Pax, Verifone, ...) — free text
   company   String? // acquiring company / bank label
   condition String? // NEW | REFURBISHED | DAMAGED
+
+  // Brand tenancy (teachway/lagoon/avika) that owns this machine's MDR pricing.
+  brandId   String?
+  brandRef  Brand?  @relation(fields: [brandId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1262,6 +1271,7 @@ model PosMachine {
   @@index([status])
   @@index([tid])
   @@index([source])
+  @@index([brandId])
 }
 
 model PosAssignmentLog {
@@ -1500,12 +1510,22 @@ model MdrSlab {
   // Payment instrument dimension, e.g. "CARD_CREDIT", "CARD_DEBIT", "UPI",
   // "NETBANKING", "*" (any).
   paymentMode String         @default("*")
+  // Card/acquirer dimensions (Same Day style). null = any. Resolution picks
+  // the most specific matching slab (each exact dimension match scores over
+  // a wildcard).
+  company        String? // POS acquiring company label (PosMachine.company)
+  cardType       String? // CREDIT | DEBIT | PREPAID
+  brandType      String? // VISA | MASTERCARD | RUPAY | AMEX | ...
+  classification String? // PLATINUM | GOLD | CLASSIC | BUSINESS | ...
   minAmount   Decimal        @db.Decimal(14, 2)
   maxAmount   Decimal        @db.Decimal(14, 2)
 
-  // MDR charged to the merchant/user for this band.
-  mdrType  RateType @default(PERCENT)
-  mdrValue Decimal  @default(0) @db.Decimal(14, 4)
+  // MDR charged to the merchant/user for this band. mdrValue is the T+1
+  // (standard) rate; mdrValueT0 applies to instant (T+0) settlement and
+  // falls back to mdrValue when zero/unset.
+  mdrType    RateType @default(PERCENT)
+  mdrValue   Decimal  @default(0) @db.Decimal(14, 4)
+  mdrValueT0 Decimal  @default(0) @db.Decimal(14, 4)
 
   // Commission share distributed up the chain (same RateType semantics).
   commissionType             RateType @default(PERCENT)
@@ -1977,10 +1997,73 @@ model PosSettlementEntry {
   settledAt      DateTime?
   walletTxnId    String?  // ref to the credit WalletTxn
   paymentMode    String?  // CARD | UPI | NFC | BHARATQR
-  createdAt      DateTime @default(now())
+
+  // Brand / provider pricing context (for per-brand MDR). The T+1 sweep
+  // re-verifies MDR against the brand rate before crediting, so these record
+  // the dimensions the capture was priced against.
+  brandId   String? // Brand this capture belongs to (null = legacy/user-scheme priced)
+  brand     Brand?  @relation(fields: [brandId], references: [id])
+  provider  String? // acquiring/service provider (RAZORPAY | PAYTM | PINELAB | ...)
+  mdrRateId String? // BrandMdrRate the MDR was resolved from (audit)
+
+  createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@index([brandId])
+}
+
+// ---------- Brand-scoped MDR & settlement ----------
+// A Brand (e.g. teachway, lagoon, avika) groups POS machines under a common
+// acquiring identity. Each brand carries its own MDR rate card (BrandMdrRate,
+// keyed by provider + payment mode + amount band) and a default settlement
+// mode. Every POS settlement resolves and deducts MDR against the brand's
+// current rate before crediting the retailer wallet.
+
+model Brand {
+  id             String  @id @default(cuid())
+  key            String  @unique // stable slug: teachway | lagoon | avika
+  name           String
+  description    String?
+  active         Boolean @default(true)
+  // Default settlement mode for this brand's captures. A per-user
+  // instantSettlement override still forces INSTANT for that user.
+  settlementMode String  @default("T1") // INSTANT | T1
+  createdById    String?
+
+  rates       BrandMdrRate[]
+  machines    PosMachine[]
+  settlements PosSettlementEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+model BrandMdrRate {
+  id      String @id @default(cuid())
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  // Dimensions. "*" (or null) = wildcard; an exact match beats a wildcard.
+  provider    String @default("*") // RAZORPAY | PAYTM | PINELAB | *
+  paymentMode String @default("*") // CARD | UPI | NFC | BHARATQR | *
+
+  minAmount Decimal @db.Decimal(14, 2)
+  maxAmount Decimal @db.Decimal(14, 2)
+
+  // MDR charged for this band. mdrValue is the T+1 (standard) rate; mdrValueT0
+  // applies to instant (T+0) settlement and falls back to mdrValue when unset.
+  mdrType    RateType @default(PERCENT)
+  mdrValue   Decimal  @default(0) @db.Decimal(14, 4)
+  mdrValueT0 Decimal  @default(0) @db.Decimal(14, 4)
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId, provider, active])
 }
 
 // ---------- Network wallet transfer ----------

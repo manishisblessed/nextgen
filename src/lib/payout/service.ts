@@ -118,7 +118,7 @@ export async function finalizePayoutSuccess(
           },
         });
       }
-      await distributeCommission(txn.id, row.userId, service, row.amount.toNumber());
+      await distributeCommission(txn.id, row.userId, service, row.amount.toNumber(), undefined, "BULKPE");
     }
   } catch (err) {
     logger.warn({ action: "payout.commission_failed", payoutId: row.id, err: String(err) });

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db";
 import { getPartner } from "@/lib/partners";
 import { assertPasswordNotBreached, BreachedPasswordError } from "@/lib/security/breachedPassword";
 import { env } from "@/lib/env";
+import { needsSuccessorApproval } from "@/lib/declaration/types";
+import { getRequiredDocTypes, docTypeLabel } from "@/lib/onboarding/requiredDocuments";
 
 const RegisterBody = z.object({
   name: z.string().min(2).max(100),
@@ -212,6 +214,66 @@ export async function POST(
 
   const uploadedDocsList = Array.from(uploadedDocTypes);
   const hasSelfie = uploadedDocTypes.has("SELFIE");
+
+  // ── Server-side onboarding gate ─────────────────────────────────────────
+  // The wizard blocks progression client-side, but registration is a public,
+  // token-based endpoint — so we must re-enforce every mandatory step here to
+  // prevent a crafted request from bypassing KYC, documents, the signed
+  // self-declaration, or the successor's responsibility approval.
+  const gateErrors: string[] = [];
+
+  if (!hasPan) gateErrors.push("PAN verification is incomplete");
+  if (!hasAadhaar) gateErrors.push("Aadhaar verification is incomplete");
+  if (!hasBank) gateErrors.push("Bank verification is incomplete");
+  if (!hasSelfie) gateErrors.push("Live selfie is missing");
+
+  for (const docType of getRequiredDocTypes(invite.role)) {
+    if (!uploadedDocTypes.has(docType)) {
+      gateErrors.push(`${docTypeLabel(docType)} is missing`);
+    }
+  }
+
+  if (!uploadedDocTypes.has("SELF_DECLARATION")) {
+    gateErrors.push("Signed self-declaration is missing");
+  }
+
+  // Successor (upline) responsibility approval, when required by hierarchy.
+  const inviter = await prisma.user.findUnique({
+    where: { id: invite.invitedById },
+    select: { role: true },
+  });
+
+  const requiresSuccessorApproval = inviter
+    ? needsSuccessorApproval(invite.role, inviter.role)
+    : false;
+
+  if (requiresSuccessorApproval) {
+    const approval = await prisma.declarationApproval.findFirst({
+      where: { inviteId: invite.id },
+      orderBy: { createdAt: "desc" },
+      select: { status: true },
+    });
+    if (!approval) {
+      gateErrors.push(
+        "Your upline's declaration approval has not been requested yet"
+      );
+    } else if (approval.status !== "APPROVED") {
+      gateErrors.push(
+        `Your upline's declaration approval is ${approval.status.toLowerCase()} — it must be approved before you can register`
+      );
+    }
+  }
+
+  if (gateErrors.length > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Onboarding is not complete. Please finish all required steps before registering.",
+        details: gateErrors,
+      },
+      { status: 400 }
+    );
+  }
 
   const allVerified = hasPan && hasAadhaar && hasBank && !data.nameMismatch && hasSelfie;
   const newStatus = allVerified ? "VERIFIED" : "REGISTERED";

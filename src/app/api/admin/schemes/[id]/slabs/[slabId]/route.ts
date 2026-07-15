@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 const UpdateBody = z
   .object({
+    provider: z.string().trim().min(1).max(60).nullish(),
     minAmount: z.number().min(0).max(100000000).optional(),
     maxAmount: z.number().min(0).max(100000000).optional(),
     chargeType: z.enum(["FLAT", "PERCENT"]).optional(),
@@ -52,14 +53,21 @@ export async function PATCH(
 
   const nextMin = body.minAmount ?? Number(existing.minAmount);
   const nextMax = body.maxAmount ?? Number(existing.maxAmount);
+  const nextProvider = body.provider !== undefined ? body.provider : existing.provider;
 
-  // Re-validate non-overlap if range changed or slab is being re-activated.
-  if (body.minAmount !== undefined || body.maxAmount !== undefined || body.active === true) {
+  // Re-validate non-overlap if range/provider changed or slab is re-activated.
+  if (
+    body.minAmount !== undefined ||
+    body.maxAmount !== undefined ||
+    body.provider !== undefined ||
+    body.active === true
+  ) {
     const overlap = await validateNonOverlapping(
       existing.schemeId,
       existing.service,
       { minAmount: nextMin, maxAmount: nextMax },
-      existing.id
+      existing.id,
+      nextProvider ?? null
     );
     if (overlap) return NextResponse.json({ error: overlap }, { status: 409 });
   }

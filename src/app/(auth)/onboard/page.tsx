@@ -92,6 +92,7 @@ const REQUIRED_DOCUMENTS: DocumentDef[] = [
   { type: "CANCEL_CHEQUE", label: "Cancelled Cheque / Bank Passbook (with account holder name)", required: true, accept: "image/*,.pdf", description: "Already verified via penny drop, but physical copy needed" },
   { type: "ADDITIONAL_ID", label: "Additional ID Proof (Driving License / Voter ID / Passport)", required: true, accept: "image/*,.pdf" },
   { type: "FAMILY_REFERENCE", label: "Family Member Reference Document — KYC Document", required: true, accept: "image/*,.pdf" },
+  { type: "PG_FORM", label: "PG Form (Payment Gateway onboarding form — signed)", required: true, accept: "image/*,.pdf" },
   { type: "GPS_PHOTO_OUTSIDE", label: "GPS-tagged Photo — House/Office (Outside)", required: true, accept: "image/*", requiresGps: true },
   { type: "GPS_PHOTO_INSIDE", label: "GPS-tagged Photo — House/Office (Inside)", required: true, accept: "image/*", requiresGps: true },
   { type: "GPS_SELFIE_DISTRIBUTOR", label: "GPS-tagged Selfie with Salesperson/Distributor", required: true, accept: "image/*", requiresGps: true, description: "Mandatory — take a selfie with your distributor/salesperson at your location" },

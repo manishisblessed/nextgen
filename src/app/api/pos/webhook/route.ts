@@ -46,12 +46,24 @@ export async function POST(req: Request) {
 
   const terminalId = String(txnData.terminal_id ?? txnData.tid ?? "");
   const paymentMode = String(txnData.payment_mode ?? txnData.mode ?? "CARD").toUpperCase();
+  // Card dimensions (optional in the payload) drive company/card-wise MDR.
+  const cardType = String(txnData.card_type ?? txnData.cardType ?? "").toUpperCase() || undefined;
+  const brandType = String(txnData.brand_type ?? txnData.card_brand ?? txnData.brand ?? "").toUpperCase() || undefined;
+  const classification = String(txnData.card_classification ?? txnData.classification ?? "").toUpperCase() || undefined;
+  // Acquiring / service provider (RAZORPAY | PAYTM | PINELAB | ...) that handled
+  // the swipe. Falls back to the machine's configured provider in the engine.
+  const providerRaw = String(txnData.provider ?? txnData.acquirer ?? txnData.gateway ?? "").trim();
+  const provider = providerRaw ? providerRaw.toUpperCase() : undefined;
 
   const result = await handlePosCapture({
     transactionRef,
     terminalId: terminalId || undefined,
     grossAmount,
     paymentMode,
+    provider,
+    cardType,
+    brandType,
+    classification,
   });
 
   // Log the webhook for audit.
@@ -68,6 +80,7 @@ export async function POST(req: Request) {
         mode: result.mode ?? null,
         terminalId: terminalId || null,
         paymentMode,
+        provider: provider ?? null,
       },
     },
   });

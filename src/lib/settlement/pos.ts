@@ -1,27 +1,29 @@
 import { prisma } from "@/lib/db";
 import { creditWallet } from "@/lib/ledger";
-import { getEffectiveMdr } from "@/lib/mdr/resolver";
+import { getEffectiveMdr, type MdrDimensions } from "@/lib/mdr/resolver";
+import { resolveBrandMdr } from "@/lib/brand/mdr";
 import { distributeMdrCommission } from "@/lib/commission/distribute";
-import { dec, sub, gte, toNumber, round, gt } from "@/lib/money";
+import { dec, sub, gte, toNumber, round, gt, eq } from "@/lib/money";
 import { getSetting } from "@/lib/settings";
 import type { MdrServiceKind, ServiceCode } from "@prisma/client";
 
 /**
  * POS acquirer settlement engine.
  *
- * Two modes (admin-toggled per user or globally):
+ * Two modes (resolved per capture — see resolveSettlementMode):
  *   - INSTANT: credit happens synchronously when the webhook arrives.
  *   - T+1:     an entry is queued PENDING and swept by the daily worker cron
  *              (QUEUES.POS_SETTLEMENT_T1) at the configured IST hour; only
  *              entries captured BEFORE the current IST day settle (true T+1).
  *
- * Flow:
- *   1. `handlePosCapture` — called from the webhook handler when Same Day
- *      confirms a card/UPI/NFC capture.
- *   2. MDR is resolved via the machine owner's own MdrScheme (cascade model —
- *      no scheme means the capture is parked as NO_SCHEME for admin replay).
- *   3. MDR-margin commission (net of 2% TDS) is distributed to the chain.
- *   4. Net proceeds are either credited immediately or queued for T+1.
+ * MDR is priced PER BRAND. Each POS machine belongs to a Brand (teachway /
+ * lagoon / avika, …) whose rate card (BrandMdrRate) sets the MDR for every
+ * (provider, paymentMode, amount band). Before ANY settlement — instant at
+ * capture, or in the T+1 sweep — the transaction is re-verified against the
+ * brand's current rate, MDR deducted, and the net credited to the retailer.
+ *
+ * Machines with no brand fall back to the machine owner's own MdrScheme
+ * (legacy cascade model) so existing fleets keep settling.
  */
 
 export type PosCaptureInput = {
@@ -30,6 +32,14 @@ export type PosCaptureInput = {
   terminalId?: string;      // partner TID (used to look up machine + user)
   grossAmount: number;
   paymentMode?: string;     // CARD | UPI | NFC | BHARATQR
+  provider?: string;        // RAZORPAY | PAYTM | PINELAB | ... (overrides machine.provider)
+  brandId?: string;         // explicit brand (overrides machine.brandId)
+  // Card/acquirer dimensions — used by the legacy per-user MdrScheme path to
+  // pick the most specific slab. Brand rate cards key on provider+paymentMode.
+  company?: string;
+  cardType?: string;
+  brandType?: string;
+  classification?: string;
 };
 
 export type PosCaptureResult = {
@@ -39,6 +49,77 @@ export type PosCaptureResult = {
   mode?: string;
 };
 
+type PricedMdr = {
+  mdrAmount: ReturnType<typeof dec>;
+  brandId: string | null;
+  provider: string | null;
+  mdrRateId: string | null;
+};
+
+/**
+ * Price a capture's MDR. Brand rate card wins when the machine has a brand;
+ * otherwise the owner's own MdrScheme (cascade) is used. Returns null when the
+ * money cannot be priced (no matching brand rate / no user scheme) — the caller
+ * must park it rather than settle unpriced money.
+ */
+async function priceMdr(args: {
+  userId: string;
+  brandId: string | null;
+  provider: string | null;
+  paymentMode: string;
+  grossAmount: number;
+  settlementType: "T0" | "T1";
+  dims?: Omit<MdrDimensions, "paymentMode" | "settlementType">;
+}): Promise<PricedMdr | null> {
+  if (args.brandId) {
+    const brandMdr = await resolveBrandMdr({
+      brandId: args.brandId,
+      amount: args.grossAmount,
+      provider: args.provider,
+      paymentMode: args.paymentMode,
+      settlementType: args.settlementType,
+    });
+    if (!brandMdr) return null;
+    return {
+      mdrAmount: round(brandMdr.mdr),
+      brandId: args.brandId,
+      provider: args.provider,
+      mdrRateId: brandMdr.rateId,
+    };
+  }
+
+  // Legacy fallback: owner's own MDR scheme (card-dimension aware).
+  const mdr = await getEffectiveMdr(args.userId, "POS" as MdrServiceKind, args.grossAmount, {
+    paymentMode: args.paymentMode,
+    settlementType: args.settlementType,
+    company: args.dims?.company ?? null,
+    cardType: args.dims?.cardType ?? null,
+    brandType: args.dims?.brandType ?? null,
+    classification: args.dims?.classification ?? null,
+  });
+  if (mdr.source === "NONE") return null;
+  return {
+    mdrAmount: round(mdr.mdr),
+    brandId: null,
+    provider: args.provider,
+    mdrRateId: mdr.slabId,
+  };
+}
+
+/**
+ * Decide whether a capture settles instantly or T+1:
+ *   1. user.instantSettlement = true      → INSTANT (explicit per-user override)
+ *   2. brand.settlementMode = "INSTANT"   → INSTANT
+ *   3. global settlement.pos_instant.defaultEnabled → INSTANT
+ *   4. otherwise                          → T+1
+ */
+async function resolveSettlementMode(userInstant: boolean, brandMode: string | null): Promise<"INSTANT" | "T1"> {
+  if (userInstant) return "INSTANT";
+  if (brandMode === "INSTANT") return "INSTANT";
+  const globalInstant = await getSetting("settlement.pos_instant");
+  return globalInstant.defaultEnabled ? "INSTANT" : "T1";
+}
+
 export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptureResult> {
   // Idempotency — if we already processed this capture, skip.
   const existing = await prisma.posSettlementEntry.findUnique({
@@ -46,60 +127,101 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
   });
   if (existing) return { status: "DUPLICATE" };
 
-  // Resolve the machine and its assigned user.
+  // Resolve the machine, its assigned user, brand, and provider.
   let userId: string | null = null;
   let machineDbId: string | null = input.machineId ?? null;
+  let brandId: string | null = input.brandId ?? null;
+  let provider: string | null = input.provider ?? null;
 
   if (!machineDbId && input.terminalId) {
     const machine = await prisma.posMachine.findFirst({
       where: { tid: input.terminalId, assignedUserId: { not: null } },
-      select: { id: true, assignedUserId: true },
+      select: { id: true, assignedUserId: true, brandId: true, provider: true },
     });
     if (machine) {
       machineDbId = machine.id;
       userId = machine.assignedUserId;
+      brandId = brandId ?? machine.brandId;
+      provider = provider ?? machine.provider;
     }
   } else if (machineDbId) {
     const machine = await prisma.posMachine.findUnique({
       where: { id: machineDbId },
-      select: { assignedUserId: true },
+      select: { assignedUserId: true, brandId: true, provider: true },
     });
     userId = machine?.assignedUserId ?? null;
+    brandId = brandId ?? machine?.brandId ?? null;
+    provider = provider ?? machine?.provider ?? null;
   }
 
   if (!userId) return { status: "SKIPPED" };
 
-  // Resolve MDR from the owner's OWN MdrScheme (cascade model). A capture on
-  // a machine whose owner has no active MDR scheme cannot be priced — park it
-  // so admin can assign a scheme and replay the webhook. (The card was already
-  // swiped, so we can't reject; we just refuse to settle unpriced money.)
-  const mdr = await getEffectiveMdr(userId, "POS" as MdrServiceKind, input.grossAmount, input.paymentMode ?? "*");
-  if (mdr.source === "NONE") return { status: "NO_SCHEME" };
-  const mdrAmount = mdr.mdr;
-  const netAmount = round(sub(input.grossAmount, mdrAmount));
-  if (!gt(netAmount, 0)) return { status: "SKIPPED" };
+  const paymentMode = input.paymentMode ?? "CARD";
 
-  // Check if this user has instant settlement enabled.
+  // Only ACTIVE users settle.
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { instantSettlement: true, status: true },
   });
   if (!user || user.status !== "ACTIVE") return { status: "SKIPPED" };
 
-  const globalInstant = await getSetting("settlement.pos_instant");
-  const isInstant = user.instantSettlement || globalInstant.defaultEnabled;
+  // Resolve the brand's default settlement mode (if branded).
+  const brand = brandId
+    ? await prisma.brand.findFirst({
+        where: { id: brandId, active: true },
+        select: { id: true, settlementMode: true },
+      })
+    : null;
+  // A branded capture whose brand row is missing/inactive can't be trusted —
+  // fall back to legacy user-scheme pricing by dropping the brand.
+  if (brandId && !brand) brandId = null;
 
-  if (isInstant) {
-    // Instant settlement — credit the wallet now.
-    const wtxn = await creditWallet({
-      userId,
-      amount: netAmount,
-      reason: "POS_SETTLEMENT",
-      refType: "PosSettlementEntry",
-      refId: input.transactionRef,
-      note: `POS instant settlement (${input.paymentMode ?? "card"})`,
-      idempotencyKey: `pos-settle:${input.transactionRef}`,
-    });
+  const mode = await resolveSettlementMode(user.instantSettlement, brand?.settlementMode ?? null);
+  const settlementType = mode === "INSTANT" ? "T0" : "T1";
+
+  const dims: Omit<MdrDimensions, "paymentMode" | "settlementType"> = {
+    company: input.company ?? null,
+    cardType: input.cardType ?? null,
+    brandType: input.brandType ?? null,
+    classification: input.classification ?? null,
+  };
+
+  // Price MDR against the brand rate card (or legacy scheme). Refuse to settle
+  // unpriced money — park it so admin can add a rate and replay the webhook.
+  const priced = await priceMdr({
+    userId,
+    brandId,
+    provider,
+    paymentMode,
+    grossAmount: input.grossAmount,
+    settlementType,
+    dims,
+  });
+  if (!priced) return { status: "NO_SCHEME" };
+
+  const netAmount = round(sub(input.grossAmount, priced.mdrAmount));
+  if (!gt(netAmount, 0)) return { status: "SKIPPED" };
+
+  if (mode === "INSTANT") {
+    // Instant settlement — credit the wallet now. If the credit fails mid-flight
+    // (e.g. a transient ledger error), park a PENDING/INSTANT entry so the
+    // instant safety-net cron retries it; the pos-settle:<ref> idempotency key
+    // guarantees the retailer is never credited twice.
+    let wtxnId: string | null = null;
+    try {
+      const wtxn = await creditWallet({
+        userId,
+        amount: netAmount,
+        reason: "POS_SETTLEMENT",
+        refType: "PosSettlementEntry",
+        refId: input.transactionRef,
+        note: `POS instant settlement (${paymentMode})`,
+        idempotencyKey: `pos-settle:${input.transactionRef}`,
+      });
+      wtxnId = wtxn.id;
+    } catch {
+      wtxnId = null;
+    }
 
     await prisma.posSettlementEntry.create({
       data: {
@@ -107,49 +229,55 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
         machineId: machineDbId,
         userId,
         grossAmount: dec(input.grossAmount),
-        mdrAmount: dec(mdrAmount),
-        netAmount: dec(netAmount),
+        mdrAmount: priced.mdrAmount,
+        netAmount,
         mode: "INSTANT",
-        status: "SETTLED",
-        settledAt: new Date(),
-        walletTxnId: wtxn.id,
-        paymentMode: input.paymentMode,
+        status: wtxnId ? "SETTLED" : "PENDING",
+        settledAt: wtxnId ? new Date() : null,
+        walletTxnId: wtxnId,
+        paymentMode,
+        brandId: priced.brandId,
+        provider: priced.provider,
+        mdrRateId: priced.mdrRateId,
       },
     });
 
-    // Distribute MDR-margin commission (net of TDS) to the chain.
-    await distributeCommissionForPos(input.transactionRef, userId, input.grossAmount, input.paymentMode);
+    await distributeCommissionForPos(input.transactionRef, userId, input.grossAmount, paymentMode, dims);
 
     return {
-      status: "SETTLED",
+      status: wtxnId ? "SETTLED" : "QUEUED",
       netAmount: toNumber(netAmount),
-      mdrAmount: toNumber(mdrAmount),
+      mdrAmount: toNumber(priced.mdrAmount),
       mode: "INSTANT",
     };
   }
 
-  // T+1 — queue for the daily cron.
+  // T+1 — queue for the daily cron. MDR is re-verified against the brand rate
+  // at sweep time before crediting.
   await prisma.posSettlementEntry.create({
     data: {
       transactionRef: input.transactionRef,
       machineId: machineDbId,
       userId,
       grossAmount: dec(input.grossAmount),
-      mdrAmount: dec(mdrAmount),
-      netAmount: dec(netAmount),
+      mdrAmount: priced.mdrAmount,
+      netAmount,
       mode: "T1",
       status: "PENDING",
-      paymentMode: input.paymentMode,
+      paymentMode,
+      brandId: priced.brandId,
+      provider: priced.provider,
+      mdrRateId: priced.mdrRateId,
     },
   });
 
   // Commission still distributes instantly even in T+1 mode.
-  await distributeCommissionForPos(input.transactionRef, userId, input.grossAmount, input.paymentMode);
+  await distributeCommissionForPos(input.transactionRef, userId, input.grossAmount, paymentMode, dims);
 
   return {
     status: "QUEUED",
     netAmount: toNumber(netAmount),
-    mdrAmount: toNumber(mdrAmount),
+    mdrAmount: toNumber(priced.mdrAmount),
     mode: "T1",
   };
 }
@@ -164,7 +292,8 @@ async function distributeCommissionForPos(
   transactionRef: string,
   userId: string,
   grossAmount: number,
-  paymentMode?: string
+  paymentMode?: string,
+  dims?: Omit<MdrDimensions, "paymentMode" | "settlementType">
 ) {
   // We need a Transaction row for the CommissionCredit FK. Create a synthetic
   // settlement-type entry. Idempotent per capture via the unique refId.
@@ -190,7 +319,13 @@ async function distributeCommissionForPos(
     "POS" as MdrServiceKind,
     grossAmount,
     txn.service,
-    paymentMode ?? "*"
+    {
+      paymentMode: paymentMode ?? "*",
+      company: dims?.company ?? null,
+      cardType: dims?.cardType ?? null,
+      brandType: dims?.brandType ?? null,
+      classification: dims?.classification ?? null,
+    }
   );
 }
 
@@ -201,10 +336,83 @@ function startOfTodayIst(now = new Date()): Date {
   return new Date(startIstMs - 5.5 * 60 * 60 * 1000);
 }
 
+type PendingEntry = {
+  id: string;
+  transactionRef: string;
+  userId: string;
+  grossAmount: unknown;
+  mdrAmount: unknown;
+  netAmount: unknown;
+  paymentMode: string | null;
+  brandId: string | null;
+  provider: string | null;
+  mdrRateId: string | null;
+};
+
+/**
+ * Settle a single PENDING entry and credit the retailer wallet.
+ *
+ * Branded entries are RE-VERIFIED against the brand's CURRENT rate at
+ * settlement time (rates may have changed since capture); the fresh MDR/net is
+ * persisted. Legacy (user-scheme) entries credit their capture-time net — their
+ * card dimensions aren't persisted on the entry, so re-resolving could pick a
+ * different slab; the price is therefore locked at swipe time for those.
+ *
+ * Returns the net credited, or null when it can't be settled (leave PENDING).
+ */
+async function settleEntry(entry: PendingEntry, settlementType: "T0" | "T1"): Promise<number | null> {
+  const gross = dec(entry.grossAmount as never);
+  let netAmount = round(dec(entry.netAmount as never));
+  let freshMdr: PricedMdr | null = null;
+
+  if (entry.brandId) {
+    // Re-verify against the brand's current rate before settling.
+    freshMdr = await priceMdr({
+      userId: entry.userId,
+      brandId: entry.brandId,
+      provider: entry.provider,
+      paymentMode: entry.paymentMode ?? "CARD",
+      grossAmount: toNumber(gross),
+      settlementType,
+    });
+    if (!freshMdr) return null; // rate no longer resolvable — leave PENDING for admin
+    netAmount = round(sub(gross, freshMdr.mdrAmount));
+  }
+
+  if (!gt(netAmount, 0)) return null;
+
+  const wtxn = await creditWallet({
+    userId: entry.userId,
+    amount: netAmount,
+    reason: "POS_SETTLEMENT",
+    refType: "PosSettlementEntry",
+    refId: entry.id,
+    note: `POS ${settlementType === "T0" ? "instant" : "T+1"} settlement (${entry.paymentMode ?? "card"})`,
+    idempotencyKey: `pos-settle:${entry.transactionRef}`,
+  });
+
+  // Persist re-verified figures (branded only) alongside the settlement.
+  const mdrChanged = freshMdr !== null && !eq(freshMdr.mdrAmount, dec(entry.mdrAmount as never));
+  await prisma.posSettlementEntry.update({
+    where: { id: entry.id },
+    data: {
+      status: "SETTLED",
+      settledAt: new Date(),
+      walletTxnId: wtxn.id,
+      ...(mdrChanged
+        ? { mdrAmount: freshMdr!.mdrAmount, netAmount, mdrRateId: freshMdr!.mdrRateId }
+        : {}),
+    },
+  });
+
+  return toNumber(netAmount);
+}
+
 /**
  * T+1 cron: settle PENDING POS entries captured BEFORE the current IST day
  * into retailer wallets. Called by the worker at the configured hour
- * (default 09:00 IST); also invocable manually via the admin API.
+ * (default 09:00 IST); also invocable manually via the admin API. Each entry's
+ * MDR is re-verified against the brand's current rate before crediting.
  */
 export async function runPosT1SettlementSweep(): Promise<{
   processed: number;
@@ -238,27 +446,56 @@ export async function runPosT1SettlementSweep(): Promise<{
     }
 
     try {
-      const wtxn = await creditWallet({
-        userId: entry.userId,
-        amount: entry.netAmount,
-        reason: "POS_SETTLEMENT",
-        refType: "PosSettlementEntry",
-        refId: entry.id,
-        note: `POS T+1 settlement (${entry.paymentMode ?? "card"})`,
-        idempotencyKey: `pos-settle:${entry.transactionRef}`,
-      });
-
+      const net = await settleEntry(entry, "T1");
+      if (net === null) continue; // not priceable / below zero — leave PENDING
+      settled++;
+      totalAmount += net;
+    } catch {
       await prisma.posSettlementEntry.update({
         where: { id: entry.id },
-        data: {
-          status: "SETTLED",
-          settledAt: new Date(),
-          walletTxnId: wtxn.id,
-        },
+        data: { status: "FAILED" },
       });
+      failed++;
+    }
+  }
 
+  return { processed: entries.length, settled, failed, totalAmount };
+}
+
+/**
+ * Instant-settlement safety-net cron: settle any INSTANT-mode entries left
+ * PENDING (e.g. the webhook created the entry but the wallet credit failed, or
+ * an entry was replayed). Runs frequently; each entry settles at most once via
+ * the pos-settle:<ref> ledger idempotency key. MDR is re-verified against the
+ * brand's current instant (T0) rate before crediting.
+ */
+export async function runPosInstantSettlementSweep(): Promise<{
+  processed: number;
+  settled: number;
+  failed: number;
+  totalAmount: number;
+}> {
+  const config = await getSetting("settlement.pos_instant");
+  if (config.paused) {
+    return { processed: 0, settled: 0, failed: 0, totalAmount: 0 };
+  }
+
+  const entries = await prisma.posSettlementEntry.findMany({
+    where: { status: "PENDING", mode: "INSTANT" },
+    orderBy: { createdAt: "asc" },
+    take: 500,
+  });
+
+  let settled = 0;
+  let failed = 0;
+  let totalAmount = 0;
+
+  for (const entry of entries) {
+    try {
+      const net = await settleEntry(entry, "T0");
+      if (net === null) continue;
       settled++;
-      totalAmount += toNumber(entry.netAmount);
+      totalAmount += net;
     } catch {
       await prisma.posSettlementEntry.update({
         where: { id: entry.id },

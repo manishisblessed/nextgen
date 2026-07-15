@@ -25,6 +25,7 @@ const UpdateBody = z
           .object({
             id: z.string().min(1),
             mdrValue: z.number().nonnegative().optional(),
+            mdrValueT0: z.number().nonnegative().optional(),
           })
           .strict()
       )

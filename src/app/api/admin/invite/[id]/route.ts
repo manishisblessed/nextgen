@@ -396,5 +396,47 @@ export async function GET(
     });
   }
 
-  return NextResponse.json({ invite, verifications, documents, registeredUser });
+  // Successor (upline) responsibility declaration approvals for this invite,
+  // so admins can audit who approved the subordinate and see the evidence.
+  const declarationApprovalRows = await prisma.declarationApproval.findMany({
+    where: { inviteId: id },
+    orderBy: { createdAt: "desc" },
+  });
+  const approverIds = [...new Set(declarationApprovalRows.map((a) => a.approverId))];
+  const approvers = approverIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: approverIds } },
+        select: { id: true, name: true, email: true, phone: true, role: true },
+      })
+    : [];
+  const approverMap = new Map(approvers.map((a) => [a.id, a]));
+
+  const declarationApprovals = declarationApprovalRows.map((a) => {
+    const approver = approverMap.get(a.approverId);
+    return {
+      id: a.id,
+      status: a.status,
+      approverName: approver?.name ?? null,
+      approverRole: a.approverRole,
+      onboardeeRole: a.onboardeeRole,
+      approvedAt: a.approvedAt?.toISOString() ?? null,
+      rejectedAt: a.rejectedAt?.toISOString() ?? null,
+      rejectedReason: a.rejectedReason ?? null,
+      approvalLatitude: a.approvalLatitude,
+      approvalLongitude: a.approvalLongitude,
+      approvalIp: a.approvalIp,
+      approverSignatureUrl: a.approverSignatureUrl,
+      approverSelfieUrl: a.approverSelfieUrl,
+      hasDocument: !!a.declarationDocUrl,
+      sentAt: a.createdAt.toISOString(),
+    };
+  });
+
+  return NextResponse.json({
+    invite,
+    verifications,
+    documents,
+    registeredUser,
+    declarationApprovals,
+  });
 }

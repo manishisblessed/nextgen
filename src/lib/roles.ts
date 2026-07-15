@@ -44,6 +44,7 @@ import {
   LineChart,
   ScanSearch,
   SlidersHorizontal,
+  Tag,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -136,6 +137,7 @@ const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/wallet-ops", label: "Wallet Operations", icon: Wallet, badge: "New" },
   { href: "/dashboard/admin/ledger", label: "Ledger Explorer", icon: BookOpenCheck, badge: "New" },
   { href: "/dashboard/admin/mdr", label: "MDR Engine", icon: Percent, badge: "New" },
+  { href: "/dashboard/admin/brands", label: "Brands & MDR", icon: Tag, badge: "New" },
   { href: "/dashboard/admin/settlement-ops", label: "Settlement Ops", icon: Timer, badge: "New" },
   { href: "/dashboard/admin/reversals", label: "Reversal Desk", icon: Undo2, badge: "New" },
   { href: "/dashboard/admin/aeps", label: "AEPS Centre", icon: Fingerprint, badge: "New" },

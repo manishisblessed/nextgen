@@ -4,7 +4,7 @@ import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { getSetting, setSetting } from "@/lib/settings";
-import { runPosT1SettlementSweep } from "@/lib/settlement/pos";
+import { runPosT1SettlementSweep, runPosInstantSettlementSweep } from "@/lib/settlement/pos";
 import { clientIp } from "@/lib/security/audit";
 import type { Prisma } from "@prisma/client";
 
@@ -85,6 +85,9 @@ const ActionBody = z.discriminatedUnion("action", [
     action: z.literal("run_t1_sweep"),
   }),
   z.object({
+    action: z.literal("run_instant_sweep"),
+  }),
+  z.object({
     action: z.literal("configure"),
     key: z.enum(["settlement.pos_instant", "settlement.pos_t1"]),
     value: z.record(z.unknown()),
@@ -113,6 +116,20 @@ export async function POST(req: Request) {
       data: {
         userId: admin.id,
         action: "pos.settlement.manual_sweep",
+        entity: "PosSettlementEntry",
+        meta: result as unknown as Prisma.InputJsonValue,
+        ip: clientIp(req),
+      },
+    });
+    return NextResponse.json({ ok: true, ...result });
+  }
+
+  if (action === "run_instant_sweep") {
+    const result = await runPosInstantSettlementSweep();
+    await prisma.auditLog.create({
+      data: {
+        userId: admin.id,
+        action: "pos.settlement.manual_instant_sweep",
         entity: "PosSettlementEntry",
         meta: result as unknown as Prisma.InputJsonValue,
         ip: clientIp(req),

@@ -601,17 +601,42 @@ function EditInviteForm({
   );
 }
 
+type DeclarationApprovalRow = {
+  id: string;
+  status: string;
+  approverName: string | null;
+  approverRole: string;
+  onboardeeRole: string;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  rejectedReason: string | null;
+  approvalLatitude: number | null;
+  approvalLongitude: number | null;
+  approvalIp: string | null;
+  approverSignatureUrl: string | null;
+  approverSelfieUrl: string | null;
+  hasDocument: boolean;
+  sentAt: string;
+};
+
 function InviteDetail({
   data,
   onClose,
   onAction,
 }: {
-  data: { invite: Invite; verifications: any[]; documents?: OnboardDocument[]; registeredUser: any };
+  data: {
+    invite: Invite;
+    verifications: any[];
+    documents?: OnboardDocument[];
+    registeredUser: any;
+    declarationApprovals?: DeclarationApprovalRow[];
+  };
   onClose: () => void;
   onAction: (action: "approve" | "reject") => void;
 }) {
   const { invite, verifications, registeredUser } = data;
   const documents = data.documents ?? [];
+  const declarationApprovals = data.declarationApprovals ?? [];
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
 
@@ -845,6 +870,119 @@ function InviteDetail({
                       Open <ExternalLink className="h-3 w-3" />
                     </a>
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {declarationApprovals.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-bold text-ink-700">
+            Successor Declaration Approval
+          </p>
+          <div className="space-y-3">
+            {declarationApprovals.map((a) => {
+              const tone =
+                a.status === "APPROVED"
+                  ? "ok"
+                  : a.status === "PENDING"
+                  ? "pending"
+                  : "fail";
+              return (
+                <div
+                  key={a.id}
+                  className={`rounded-xl border px-4 py-3 ${
+                    tone === "ok"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : tone === "pending"
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-rose-200 bg-rose-50"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-ink-900">
+                        {a.approverName ?? "—"}{" "}
+                        <span className="font-normal text-ink-500">
+                          ({a.approverRole.replace(/_/g, " ")})
+                        </span>
+                      </p>
+                      <p className="text-xs text-ink-500">
+                        Responsible for {a.onboardeeRole.replace(/_/g, " ")} · Sent{" "}
+                        {new Date(a.sentAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        tone === "ok"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : tone === "pending"
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-rose-100 text-rose-800"
+                      }`}
+                    >
+                      {a.status}
+                    </span>
+                  </div>
+
+                  {a.status === "APPROVED" && (
+                    <div className="mt-3 flex flex-wrap items-center gap-4">
+                      {a.approverSelfieUrl && (
+                        <a href={a.approverSelfieUrl} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={a.approverSelfieUrl}
+                            alt="Approver selfie"
+                            className="h-16 w-16 rounded-lg border border-ink-200 object-cover"
+                          />
+                        </a>
+                      )}
+                      {a.approverSignatureUrl && (
+                        <a href={a.approverSignatureUrl} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={a.approverSignatureUrl}
+                            alt="Approver signature"
+                            className="h-16 w-28 rounded-lg border border-ink-200 bg-white object-contain p-1"
+                          />
+                        </a>
+                      )}
+                      <div className="text-xs text-ink-600">
+                        {a.approvedAt && (
+                          <p>Approved: {new Date(a.approvedAt).toLocaleString()}</p>
+                        )}
+                        {a.approvalIp && <p>IP: {a.approvalIp}</p>}
+                        {a.approvalLatitude != null && a.approvalLongitude != null && (
+                          <a
+                            href={`https://www.google.com/maps?q=${a.approvalLatitude},${a.approvalLongitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 font-medium text-amber-600 hover:underline"
+                          >
+                            <MapPin className="h-3 w-3" /> {a.approvalLatitude.toFixed(5)},{" "}
+                            {a.approvalLongitude.toFixed(5)}
+                          </a>
+                        )}
+                      </div>
+                      {a.hasDocument && (
+                        <a
+                          href={`/api/declarations/${a.id}/document`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline"
+                        >
+                          <FileText className="h-3 w-3" /> Signed Declaration
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  {a.status === "REJECTED" && a.rejectedReason && (
+                    <p className="mt-2 text-xs text-rose-700">
+                      Reason: {a.rejectedReason}
+                    </p>
+                  )}
                 </div>
               );
             })}

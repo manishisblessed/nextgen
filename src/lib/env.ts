@@ -260,6 +260,12 @@ export function productionSecretIssues(): string[] {
   strong(env.APP_ENCRYPTION_KEY, "APP_ENCRYPTION_KEY");
   if (!env.DATABASE_URL) issues.push("DATABASE_URL is not set");
   if (env.DATABASE_URL?.includes("localhost")) issues.push("DATABASE_URL points at localhost in production");
+  // The Tokyo project (ap-northeast-1) was retired in favour of the Mumbai
+  // project (ap-south-1). Production must never silently fall back to it — that
+  // splits writes across two databases (local vs prod drift).
+  if (env.DATABASE_URL?.includes("ap-northeast-1")) {
+    issues.push("DATABASE_URL points at the retired Tokyo project (ap-northeast-1) — production must use the Mumbai project (ap-south-1)");
+  }
 
   // Placeholder values copied from .env.example must never reach production.
   const placeholderRe = /(changeme|change-me|example|placeholder|xxxx|your[-_])/i;

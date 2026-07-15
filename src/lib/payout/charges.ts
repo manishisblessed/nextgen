@@ -90,7 +90,9 @@ export async function quotePayoutForUser(
   let serviceCharge: Money;
   let source = "STATIC_SLABS";
   if (service) {
-    const rate = await getEffectiveRate(userId, service, amt);
+    // Quote with the payout partner so provider-pinned slabs match the same
+    // way they will at commission-distribution time.
+    const rate = await getEffectiveRate(userId, service, amt, "BULKPE");
     if (rate.source !== "NONE") {
       serviceCharge = round(rate.charge);
       source = rate.source;

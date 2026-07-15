@@ -15,6 +15,8 @@ export const dynamic = "force-dynamic";
 const SlabBody = z
   .object({
     service: z.enum(SERVICE_CODES),
+    // Provider dimension (BBPS 1 vs BBPS 2, ...); null/omitted = any provider.
+    provider: z.string().trim().min(1).max(60).nullish(),
     minAmount: z.number().min(0).max(100000000),
     maxAmount: z.number().min(0).max(100000000),
     chargeType: z.enum(["FLAT", "PERCENT"]).default("FLAT"),
@@ -63,7 +65,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const overlap = await validateNonOverlapping(
     scheme.id,
     body.service as ServiceCode,
-    { minAmount: body.minAmount, maxAmount: body.maxAmount }
+    { minAmount: body.minAmount, maxAmount: body.maxAmount },
+    undefined,
+    body.provider ?? null
   );
   if (overlap) return NextResponse.json({ error: overlap }, { status: 409 });
 
@@ -71,6 +75,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     data: {
       schemeId: scheme.id,
       service: body.service as ServiceCode,
+      provider: body.provider ?? null,
       minAmount: body.minAmount,
       maxAmount: body.maxAmount,
       chargeType: body.chargeType,

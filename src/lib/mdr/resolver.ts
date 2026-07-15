@@ -8,9 +8,24 @@ import { dec, gte, lte, mul, round, type Money } from "@/lib/money";
  * assigned active MdrScheme resolves — no platform-default fallback. Ancestor
  * margins come from resolveMdrChain (child MDR − own MDR per tier).
  *
- * Slab matching: (serviceKind, paymentMode, amount band). paymentMode "*"
- * matches any mode; an exact mode match beats a wildcard.
+ * Slab matching: (serviceKind, amount band) plus the card/acquirer dimensions
+ * paymentMode, company, cardType, brandType, classification. A null/"*"
+ * dimension on a slab is a wildcard; a slab pinned to a different value never
+ * matches. Among eligible slabs the MOST SPECIFIC wins (most exact dimension
+ * matches). mdrValue is the T+1 rate; mdrValueT0 (when set) applies to
+ * instant/T+0 settlement.
  */
+
+/** Transaction-side dimensions used to pick the best MDR slab. */
+export type MdrDimensions = {
+  paymentMode?: string | null;
+  company?: string | null;
+  cardType?: string | null;
+  brandType?: string | null;
+  classification?: string | null;
+  /** T0 = instant settlement (uses mdrValueT0 when set); T1 = standard. */
+  settlementType?: "T0" | "T1";
+};
 
 export type EffectiveMdr = {
   source: "USER_SCHEME" | "NONE";
@@ -50,33 +65,73 @@ function emptyMdr(): EffectiveMdr {
   };
 }
 
-/** Pick the best slab: exact paymentMode beats "*", then lowest band first. */
-function pickSlab(slabs: MdrSlab[], amount: Money, paymentMode: string): MdrSlab | null {
+const norm = (v: string | null | undefined) => (v ?? "").trim().toUpperCase();
+
+/**
+ * Score a slab against the transaction dimensions. Returns -1 when the slab
+ * is ineligible (pinned to a different value), otherwise the number of exact
+ * dimension matches (higher = more specific). A null/"*" slab dimension is a
+ * wildcard: eligible, but scores 0 for that dimension.
+ */
+function slabScore(slab: MdrSlab, dims: MdrDimensions): number {
+  let score = 0;
+  const pairs: Array<[string | null, string | null | undefined]> = [
+    [slab.paymentMode === "*" ? null : slab.paymentMode, dims.paymentMode === "*" ? null : dims.paymentMode],
+    [slab.company, dims.company],
+    [slab.cardType, dims.cardType],
+    [slab.brandType, dims.brandType],
+    [slab.classification, dims.classification],
+  ];
+  for (const [slabVal, txnVal] of pairs) {
+    if (slabVal == null || slabVal === "") continue; // wildcard slab dimension
+    if (!txnVal || norm(slabVal) !== norm(txnVal)) return -1; // pinned mismatch
+    score++;
+  }
+  return score;
+}
+
+/** Pick the most specific eligible slab whose band contains `amount`. */
+function pickSlab(slabs: MdrSlab[], amount: Money, dims: MdrDimensions): MdrSlab | null {
   const inBand = slabs.filter((s) => gte(amount, s.minAmount) && lte(amount, s.maxAmount));
-  const exact = inBand.find((s) => s.paymentMode === paymentMode);
-  if (exact) return exact;
-  return inBand.find((s) => s.paymentMode === "*") ?? null;
+  let best: MdrSlab | null = null;
+  let bestScore = -1;
+  for (const slab of inBand) {
+    const score = slabScore(slab, dims);
+    if (score > bestScore) {
+      best = slab;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 0 ? best : null;
+}
+
+/** Effective MDR value for a slab under a settlement type (T0 falls back to T1). */
+function slabMdrValue(slab: MdrSlab, settlementType?: "T0" | "T1") {
+  if (settlementType === "T0" && Number(slab.mdrValueT0) > 0) return slab.mdrValueT0;
+  return slab.mdrValue;
 }
 
 async function resolveFromScheme(
   schemeId: string,
   serviceKind: MdrServiceKind,
-  paymentMode: string,
+  dims: MdrDimensions,
   amount: Money
 ): Promise<MdrSlab | null> {
   const slabs = await prisma.mdrSlab.findMany({
     where: { schemeId, serviceKind, active: true },
     orderBy: { minAmount: "asc" },
   });
-  return pickSlab(slabs, amount, paymentMode);
+  return pickSlab(slabs, amount, dims);
 }
 
 export async function getEffectiveMdr(
   userId: string,
   serviceKind: MdrServiceKind,
   amount: Money | string | number,
-  paymentMode = "*"
+  dims: MdrDimensions | string = {}
 ): Promise<EffectiveMdr> {
+  // Back-compat: a plain string argument is the payment mode.
+  const d: MdrDimensions = typeof dims === "string" ? { paymentMode: dims } : dims;
   const amt = round(amount);
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -94,7 +149,7 @@ export async function getEffectiveMdr(
     schemeId,
     schemeName,
     slabId: slab.id,
-    mdr: applyRate(amt, slab.mdrType, slab.mdrValue),
+    mdr: applyRate(amt, slab.mdrType, slabMdrValue(slab, d.settlementType)),
     mdrType: slab.mdrType,
     commission: {
       retailer: applyRate(amt, slab.commissionType, slab.commissionRetailer),
@@ -110,7 +165,7 @@ export async function getEffectiveMdr(
       select: { id: true, name: true },
     });
     if (scheme) {
-      const slab = await resolveFromScheme(scheme.id, serviceKind, paymentMode, amt);
+      const slab = await resolveFromScheme(scheme.id, serviceKind, d, amt);
       if (slab) return build(slab, scheme.id, scheme.name, "USER_SCHEME");
     }
   }
@@ -166,8 +221,9 @@ export async function resolveMdrChain(
   userId: string,
   serviceKind: MdrServiceKind,
   amount: Money | string | number,
-  paymentMode = "*"
+  dims: MdrDimensions | string = {}
 ): Promise<MdrChain> {
+  const d: MdrDimensions = typeof dims === "string" ? { paymentMode: dims } : dims;
   const amt = round(amount);
 
   const walk: Array<{ id: string; role: string; mdrSchemeId: string | null }> = [];
@@ -201,7 +257,7 @@ export async function resolveMdrChain(
         r = {
           schemeId: scheme.id,
           schemeName: scheme.name,
-          slab: await resolveFromScheme(scheme.id, serviceKind, paymentMode, amt),
+          slab: await resolveFromScheme(scheme.id, serviceKind, d, amt),
         };
       }
     }
@@ -213,7 +269,7 @@ export async function resolveMdrChain(
   if (!self.slab) return { ok: false, reason: "NO_SLAB" };
 
   const members: MdrChainMember[] = [];
-  let childMdr = applyRate(amt, self.slab.mdrType, self.slab.mdrValue);
+  let childMdr = applyRate(amt, self.slab.mdrType, slabMdrValue(self.slab, d.settlementType));
 
   members.push({
     userId: walk[0].id,
@@ -228,7 +284,7 @@ export async function resolveMdrChain(
   for (let i = 1; i < walk.length; i++) {
     const r = resolved[i];
     if (r.slab) {
-      const ownMdr = applyRate(amt, r.slab.mdrType, r.slab.mdrValue);
+      const ownMdr = applyRate(amt, r.slab.mdrType, slabMdrValue(r.slab, d.settlementType));
       const margin = childMdr.gt(ownMdr) ? round(childMdr.sub(ownMdr)) : dec(0);
       members.push({
         userId: walk[i].id,
@@ -264,15 +320,18 @@ export async function resolveMdrChain(
 }
 
 /**
- * Validate a candidate slab band against existing active slabs for the same
- * (scheme, serviceKind, paymentMode). Returns an error string or null.
+ * Validate a candidate slab band against existing active slabs with the SAME
+ * dimension tuple (scheme, serviceKind, paymentMode, company, cardType,
+ * brandType, classification). Different dimension values may legitimately
+ * share bands. Returns an error string or null.
  */
 export async function validateMdrSlab(
   schemeId: string,
   serviceKind: MdrServiceKind,
   paymentMode: string,
   range: { minAmount: number; maxAmount: number },
-  excludeSlabId?: string
+  excludeSlabId?: string,
+  dims?: Pick<MdrDimensions, "company" | "cardType" | "brandType" | "classification">
 ): Promise<string | null> {
   const min = dec(range.minAmount);
   const max = dec(range.maxAmount);
@@ -283,6 +342,10 @@ export async function validateMdrSlab(
       schemeId,
       serviceKind,
       paymentMode,
+      company: dims?.company ?? null,
+      cardType: dims?.cardType ?? null,
+      brandType: dims?.brandType ?? null,
+      classification: dims?.classification ?? null,
       active: true,
       ...(excludeSlabId ? { id: { not: excludeSlabId } } : {}),
     },

@@ -58,7 +58,9 @@ export async function POST(req: Request) {
     // sets the charge (fee) and their own commission; ancestors earn margins
     // via distributeCommission after success. No hardcoded rates.
     const service = SERVICE[parsed.data.category];
-    const rate = await getEffectiveRate(user.id, service, parsed.data.amount);
+    // Provider-scoped slabs: a slab pinned to this BBPS partner wins over the
+    // any-provider slab for the same band.
+    const rate = await getEffectiveRate(user.id, service, parsed.data.amount, bbps.name);
 
     const result = await runTransaction({
       userId: user.id,

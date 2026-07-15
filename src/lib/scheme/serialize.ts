@@ -6,6 +6,7 @@ export function serializeSlab(s: SchemeSlab) {
     id: s.id,
     schemeId: s.schemeId,
     service: s.service,
+    provider: s.provider,
     minAmount: Number(s.minAmount),
     maxAmount: Number(s.maxAmount),
     chargeType: s.chargeType,

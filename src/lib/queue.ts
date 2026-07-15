@@ -59,6 +59,10 @@ export const QUEUES = {
   // POS acquirer T+1 settlement — sweeps PENDING PosSettlementEntries into
   // retailer wallets daily at the configured IST hour.
   POS_SETTLEMENT_T1: "pos.settlement.t1",
+  // POS acquirer instant-settlement safety net — retries any INSTANT-mode
+  // entries left PENDING (e.g. webhook credit failed). Runs every few minutes;
+  // the primary instant path is the POS webhook itself.
+  POS_SETTLEMENT_INSTANT: "pos.settlement.instant",
   // BBPS bill payment reconciliation — polls PROCESSING BBPS transactions
   // and settles them. BulkPe BBPS has no webhooks, so this sweep is the
   // only way to finalize PENDING payments. Runs every 5 minutes.

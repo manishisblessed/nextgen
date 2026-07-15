@@ -37,6 +37,7 @@ type SlabOverride = {
 type MdrSlabOverride = {
   parentSlabId: string;
   mdrValue?: number;
+  mdrValueT0?: number;
 };
 
 /** Load the caller's own active scheme (the derivation base) or throw. */
@@ -119,6 +120,7 @@ export async function createDerivedScheme(input: {
       );
     return {
       service: s.service,
+      provider: s.provider,
       minAmount: s.minAmount,
       maxAmount: s.maxAmount,
       chargeType: s.chargeType,
@@ -252,17 +254,27 @@ export async function createDerivedMdrScheme(input: {
   const slabData = base.slabs.map((s) => {
     const o = byParent.get(s.id);
     const mdrValue = o?.mdrValue ?? Number(s.mdrValue);
+    const mdrValueT0 = o?.mdrValueT0 ?? Number(s.mdrValueT0);
     if (!gte(mdrValue, s.mdrValue))
       throw new DerivedSchemeError(
         `MDR for ${s.serviceKind}/${s.paymentMode} ₹${s.minAmount}–₹${s.maxAmount} must be >= your rate (${Number(s.mdrValue)})`
       );
+    if (!gte(mdrValueT0, s.mdrValueT0))
+      throw new DerivedSchemeError(
+        `T+0 MDR for ${s.serviceKind}/${s.paymentMode} ₹${s.minAmount}–₹${s.maxAmount} must be >= your rate (${Number(s.mdrValueT0)})`
+      );
     return {
       serviceKind: s.serviceKind,
       paymentMode: s.paymentMode,
+      company: s.company,
+      cardType: s.cardType,
+      brandType: s.brandType,
+      classification: s.classification,
       minAmount: s.minAmount,
       maxAmount: s.maxAmount,
       mdrType: s.mdrType,
       mdrValue: dec(mdrValue),
+      mdrValueT0: dec(mdrValueT0),
       commissionType: s.commissionType,
       parentSlabId: s.id,
       active: true,
@@ -295,7 +307,7 @@ export async function updateDerivedMdrScheme(
     name?: string;
     description?: string | null;
     active?: boolean;
-    slabs?: Array<{ id: string; mdrValue?: number }>;
+    slabs?: Array<{ id: string; mdrValue?: number; mdrValueT0?: number }>;
   }
 ) {
   const scheme = await prisma.mdrScheme.findFirst({
@@ -315,11 +327,19 @@ export async function updateDerivedMdrScheme(
     const parent = slab.parentSlabId ? parentById.get(slab.parentSlabId) : undefined;
 
     const mdrValue = edit.mdrValue ?? Number(slab.mdrValue);
+    const mdrValueT0 = edit.mdrValueT0 ?? Number(slab.mdrValueT0);
     if (parent && !gte(mdrValue, parent.mdrValue))
       throw new DerivedSchemeError(
         `MDR for ${slab.serviceKind}/${slab.paymentMode} ₹${slab.minAmount}–₹${slab.maxAmount} must be >= your rate (${Number(parent.mdrValue)})`
       );
-    await prisma.mdrSlab.update({ where: { id: slab.id }, data: { mdrValue: dec(mdrValue) } });
+    if (parent && !gte(mdrValueT0, parent.mdrValueT0))
+      throw new DerivedSchemeError(
+        `T+0 MDR for ${slab.serviceKind}/${slab.paymentMode} ₹${slab.minAmount}–₹${slab.maxAmount} must be >= your rate (${Number(parent.mdrValueT0)})`
+      );
+    await prisma.mdrSlab.update({
+      where: { id: slab.id },
+      data: { mdrValue: dec(mdrValue), mdrValueT0: dec(mdrValueT0) },
+    });
   }
 
   try {

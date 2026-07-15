@@ -52,10 +52,12 @@ const SETTING_SCHEMAS = {
     perTxnCap: z.number().positive().default(100_000),
   }),
 
-  /** POS acquirer settlement — instant mode (admin-toggled per user or global). */
+  /** POS acquirer settlement — instant mode (admin-toggled per user, per brand, or global). */
   "settlement.pos_instant": z.object({
-    /** Platform-wide default for new users (overridden per-user by User.instantSettlement). */
+    /** Platform-wide default (overridden per-user by User.instantSettlement or per-brand). */
     defaultEnabled: z.boolean().default(false),
+    /** Pause the instant safety-net sweep (webhook path is unaffected). */
+    paused: z.boolean().default(false),
   }),
 
   /** POS T+1 settlement cron (for non-instant users). */

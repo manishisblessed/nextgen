@@ -185,7 +185,8 @@ export async function runTransaction<TIn, TOut>(
           input.userId,
           input.service,
           input.amount,
-          tx
+          tx,
+          input.partner
         );
         const own = credits.find((c) => c.userId === input.userId);
         await tx.transaction.update({

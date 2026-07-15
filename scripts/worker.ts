@@ -35,7 +35,7 @@ import { runBbpsReconciliation } from "@/lib/recon/bbps";
 import { sweepDisputeSlas } from "@/lib/disputes/service";
 import { runSettlementAutosweep } from "@/lib/settlement/autosweep";
 import { runT1SettlementSweep } from "@/lib/settlement/t1";
-import { runPosT1SettlementSweep } from "@/lib/settlement/pos";
+import { runPosT1SettlementSweep, runPosInstantSettlementSweep } from "@/lib/settlement/pos";
 import { runPosRentalBilling } from "@/lib/pos/rental";
 import { getSetting } from "@/lib/settings";
 import { deliverWebhook } from "@/lib/platform/webhooks";
@@ -243,6 +243,21 @@ async function main() {
   });
   await boss.schedule(QUEUES.POS_SETTLEMENT_T1, "10 * * * *", {}, { tz: "Asia/Kolkata" });
 
+  // QUEUES.POS_SETTLEMENT_INSTANT — instant-settlement safety net. The primary
+  // instant path is the POS webhook (credit happens synchronously on capture);
+  // this sweep retries any INSTANT-mode entries left PENDING (e.g. a wallet
+  // credit that failed mid-webhook). Every 3 minutes; each entry settles at
+  // most once via the pos-settle:<ref> ledger idempotency key.
+  await boss.work(QUEUES.POS_SETTLEMENT_INSTANT, async () => {
+    const r = await runPosInstantSettlementSweep();
+    if (r.processed > 0)
+      log(
+        `pos.settlement.instant: processed=${r.processed} settled=${r.settled} ` +
+          `failed=${r.failed} amount=₹${r.totalAmount}`
+      );
+  });
+  await boss.schedule(QUEUES.POS_SETTLEMENT_INSTANT, "*/3 * * * *", {}, { tz: "Asia/Kolkata" });
+
   // QUEUES.POS_RENTAL_BILLING — admin console Phase 5. Runs every hour; only
   // fires billing when the current IST hour matches the admin-configured hour.
   // Idempotent per (subscription, YYYY-MM) via the unique invoice key.
@@ -307,7 +322,7 @@ async function main() {
   }
 
   log(
-    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.settlement.t1 (10 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
+    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.settlement.t1 (10 * * * * IST), pos.settlement.instant (*/3 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
   );
 }
 

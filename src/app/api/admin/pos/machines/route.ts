@@ -197,6 +197,10 @@ const MachineInput = z.object({
   location: z.string().max(120).optional(),
   city: z.string().max(60).optional(),
   state: z.string().max(60).optional(),
+  // Brand tenancy that owns this terminal's MDR pricing (optional at intake).
+  brandId: z.string().min(1).optional(),
+  // Acquiring/service provider used for settlement (RAZORPAY | PAYTM | PINELAB | ...).
+  provider: z.string().max(40).optional(),
 });
 
 const CreateBody = z.object({ machines: z.array(MachineInput).min(1).max(500) });
@@ -224,6 +228,18 @@ export async function POST(req: Request) {
   let created = 0;
   const errors: Array<{ serial: string; error: string }> = [];
 
+  // Validate any referenced brands up-front (one lookup for the whole batch).
+  const brandIds = Array.from(
+    new Set(parsed.data.machines.map((m) => m.brandId).filter((v): v is string => Boolean(v)))
+  );
+  const validBrandIds = brandIds.length
+    ? new Set(
+        (await prisma.brand.findMany({ where: { id: { in: brandIds } }, select: { id: true } })).map(
+          (b) => b.id
+        )
+      )
+    : new Set<string>();
+
   for (const m of parsed.data.machines) {
     const dup = await prisma.posMachine.findFirst({
       where: { serial: { equals: m.serial, mode: "insensitive" } },
@@ -231,6 +247,10 @@ export async function POST(req: Request) {
     });
     if (dup) {
       errors.push({ serial: m.serial, error: "serial already exists" });
+      continue;
+    }
+    if (m.brandId && !validBrandIds.has(m.brandId)) {
+      errors.push({ serial: m.serial, error: "unknown brandId" });
       continue;
     }
     await prisma.posMachine.create({
@@ -248,7 +268,8 @@ export async function POST(req: Request) {
         location: m.location?.trim() || null,
         city: m.city?.trim() || null,
         state: m.state?.trim() || null,
-        provider: "MANUAL",
+        provider: m.provider?.trim().toUpperCase() || "MANUAL",
+        brandId: m.brandId ?? null,
       },
     });
     created++;
