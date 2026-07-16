@@ -148,6 +148,7 @@ const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/reversals", label: "Reversal Desk", icon: Undo2, badge: "New" },
   { href: "/dashboard/admin/aeps", label: "AEPS Centre", icon: Fingerprint, badge: "New" },
   { href: "/dashboard/admin/pos-rental", label: "POS Rental & Billing", icon: ReceiptText, badge: "New" },
+  { href: "/dashboard/admin/pos-settlement", label: "POS Settlement", icon: CreditCard, badge: "New" },
   { href: "/dashboard/admin/analytics", label: "Business Analytics", icon: LineChart, badge: "New" },
   { href: "/dashboard/admin/agreements", label: "Agreements Vault", icon: FileSignature, badge: "New" },
   { href: "/dashboard/admin/verify", label: "Identity Toolkit", icon: ScanSearch, badge: "New" },
