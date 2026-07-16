@@ -16,7 +16,7 @@ export async function GET() {
 
     const schemes = await prisma.scheme.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
-      include: { _count: { select: { slabs: true, users: true } } },
+      include: { _count: { select: { slabs: true, users: true, mdrSlabs: true } } },
     });
 
     return NextResponse.json({ schemes: schemes.map(serializeScheme) });

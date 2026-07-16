@@ -5,7 +5,8 @@ import { dec, gte, lte, mul, round, type Money } from "@/lib/money";
 /**
  * MDR engine — resolves the merchant discount rate + commission share for
  * acquiring-style rails (POS / PG / QR / UPI). Cascade model: ONLY the user's
- * assigned active MdrScheme resolves — no platform-default fallback. Ancestor
+ * assigned active Scheme resolves — no platform-default fallback. MDR rows now
+ * live on the same Scheme as the service slabs (unified model). Ancestor
  * margins come from resolveMdrChain (child MDR − own MDR per tier).
  *
  * Slab matching: (serviceKind, amount band) plus the card/acquirer dimensions
@@ -135,7 +136,7 @@ export async function getEffectiveMdr(
   const amt = round(amount);
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { mdrSchemeId: true },
+    select: { schemeId: true },
   });
   if (!user) return emptyMdr();
 
@@ -159,9 +160,9 @@ export async function getEffectiveMdr(
     },
   });
 
-  if (user.mdrSchemeId) {
-    const scheme = await prisma.mdrScheme.findFirst({
-      where: { id: user.mdrSchemeId, active: true },
+  if (user.schemeId) {
+    const scheme = await prisma.scheme.findFirst({
+      where: { id: user.schemeId, active: true },
       select: { id: true, name: true },
     });
     if (scheme) {
@@ -214,8 +215,8 @@ const NETWORK_ROLES = new Set([
 
 /**
  * Resolve the MDR margin chain for a POS/PG/QR/UPI capture. Mirrors
- * resolvePricingChain: the transacting user needs an active MdrScheme with a
- * matching slab; ancestors without one earn zero (pass-through).
+ * resolvePricingChain: the transacting user needs an active Scheme with a
+ * matching MDR slab; ancestors without one earn zero (pass-through).
  */
 export async function resolveMdrChain(
   userId: string,
@@ -226,19 +227,19 @@ export async function resolveMdrChain(
   const d: MdrDimensions = typeof dims === "string" ? { paymentMode: dims } : dims;
   const amt = round(amount);
 
-  const walk: Array<{ id: string; role: string; mdrSchemeId: string | null }> = [];
+  const walk: Array<{ id: string; role: string; schemeId: string | null }> = [];
   let currentId: string | null = userId;
   const seen = new Set<string>();
   for (let depth = 0; depth < 4 && currentId; depth++) {
     if (seen.has(currentId)) break;
     seen.add(currentId);
-    const u: { id: string; role: string; mdrSchemeId: string | null; parentId: string | null; status: string } | null =
+    const u: { id: string; role: string; schemeId: string | null; parentId: string | null; status: string } | null =
       await prisma.user.findUnique({
         where: { id: currentId },
-        select: { id: true, role: true, mdrSchemeId: true, parentId: true, status: true },
+        select: { id: true, role: true, schemeId: true, parentId: true, status: true },
       });
     if (!u || u.status === "CLOSED" || !NETWORK_ROLES.has(u.role)) break;
-    walk.push({ id: u.id, role: u.role, mdrSchemeId: u.mdrSchemeId });
+    walk.push({ id: u.id, role: u.role, schemeId: u.schemeId });
     currentId = u.parentId;
   }
 
@@ -248,9 +249,9 @@ export async function resolveMdrChain(
   const resolved: Resolved[] = [];
   for (const member of walk) {
     let r: Resolved = { schemeId: null, schemeName: null, slab: null };
-    if (member.mdrSchemeId) {
-      const scheme = await prisma.mdrScheme.findFirst({
-        where: { id: member.mdrSchemeId, active: true },
+    if (member.schemeId) {
+      const scheme = await prisma.scheme.findFirst({
+        where: { id: member.schemeId, active: true },
         select: { id: true, name: true },
       });
       if (scheme) {

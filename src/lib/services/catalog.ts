@@ -112,12 +112,12 @@ export function hrefToServiceKey(href: string): string | null {
 export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
   {
     key: SERVICE_KEYS.PAYOUT,
-    name: "Payout (BulkPe)",
+    name: "Payout (Same Day)",
     type: "SERVICE",
     kind: "PAYOUT",
-    provider: "BULKPE",
+    provider: "SAMEDAY",
     enabled: true,
-    note: "Bank / UPI disbursals via BulkPe. Turning this off blocks new payout submissions immediately.",
+    note: "Bank / UPI disbursals via the Same Day settlement API. Turning this off blocks new payout submissions immediately.",
     sortOrder: 10,
   },
   {
@@ -192,13 +192,23 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
   },
   {
     key: SERVICE_KEYS.BBPS,
-    name: "Bill Payments (BBPS)",
+    name: "Bill Payments (BBPS) - Same Day",
     type: "SERVICE",
     kind: "BBPS",
-    provider: "SAMEDAY+BULKPE",
+    provider: "SAMEDAY",
     enabled: true,
-    note: "BBPS bill payments. Credit cards via Same Day BBPS-2 (Pay2New); all other categories via BulkPe BBPS.",
+    note: "BBPS via Same Day (Pay2New). Credit-card bills route here; this key also gates the BBPS rail on/off.",
     sortOrder: 90,
+  },
+  {
+    key: "bbps_bulkpe",
+    name: "Bill Payments (BBPS) - BulkPe",
+    type: "SERVICE",
+    kind: "BBPS",
+    provider: "BULKPE",
+    enabled: true,
+    note: "BBPS via BulkPe (electricity, water, gas, and all non-credit-card categories). Pricing provider for BBPS slabs.",
+    sortOrder: 91,
   },
   {
     key: SERVICE_KEYS.TRAVEL,

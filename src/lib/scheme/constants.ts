@@ -12,6 +12,7 @@ export const SERVICE_CODES = [
   "DMT_RTGS",
   "UPI_COLLECT",
   "UPI_PAYOUT",
+  "PAYOUT",
   "WALLET_TOPUP",
   "WALLET_WITHDRAW",
   "RECHARGE_MOBILE",
@@ -36,6 +37,7 @@ export type ServiceCodeValue = (typeof SERVICE_CODES)[number];
 /** Human-friendly grouping label for a service code (for the UI). */
 export function serviceGroup(code: string): string {
   if (code.startsWith("AEPS")) return "AePS";
+  if (code === "PAYOUT") return "Payout";
   if (code.startsWith("DMT")) return "Money Transfer";
   if (code.startsWith("UPI")) return "UPI";
   if (code.startsWith("WALLET")) return "Wallet";
@@ -66,55 +68,40 @@ export const SERVICE_FAMILIES = [
     ],
   },
   {
-    key: "RECHARGE",
-    label: "Recharge",
-    routeKind: "RECHARGE",
-    services: ["RECHARGE_MOBILE", "RECHARGE_DTH", "RECHARGE_BROADBAND"],
-  },
-  {
-    key: "DMT",
-    label: "Money Transfer / Settlement",
-    routeKind: "DMT",
-    services: ["DMT_IMPS", "DMT_NEFT", "DMT_RTGS"],
-  },
-  {
-    key: "UPI",
-    label: "UPI / Payout",
+    key: "PAYOUT",
+    label: "Payout",
     routeKind: "PAYOUT",
-    services: ["UPI_PAYOUT", "UPI_COLLECT"],
-  },
-  {
-    key: "AEPS",
-    label: "AePS",
-    routeKind: "AEPS",
-    services: ["AEPS_BALANCE", "AEPS_WITHDRAW", "AEPS_MINI_STMT"],
-  },
-  {
-    key: "WALLET",
-    label: "Wallet",
-    routeKind: "OTHER",
-    services: ["WALLET_TOPUP", "WALLET_WITHDRAW"],
-  },
-  {
-    key: "TRAVEL",
-    label: "Travel",
-    routeKind: "TRAVEL",
-    services: ["TRAVEL_FLIGHT", "TRAVEL_HOTEL", "TRAVEL_BUS", "TRAVEL_TRAIN"],
-  },
-  {
-    key: "OTHER",
-    label: "Other Services",
-    routeKind: "OTHER",
-    services: ["PAN_CARD", "INSURANCE"],
+    services: ["PAYOUT"],
   },
 ] as const;
 
 export type ServiceFamily = (typeof SERVICE_FAMILIES)[number];
 
-/** Family a service code belongs to (falls back to OTHER). */
+/**
+ * "Charge-driven" services (BBPS bills + Payout) earn on a flat, charge-first
+ * model: a parent's margin is their charge markup MINUS the commission they pass
+ * down to the child (the child's commission is funded out of the markup, never a
+ * separate commission pool). This differs from pool-based services (AePS/DMT),
+ * where the platform allocates a commission that shrinks down the chain and each
+ * tier keeps markup PLUS the retained commission.
+ */
+export const CHARGE_DRIVEN_SERVICE_CODES: ReadonlySet<string> = new Set<string>([
+  ...(SERVICE_FAMILIES.find((f) => f.key === "BBPS")!.services as readonly string[]),
+  "PAYOUT",
+]);
+
+/** True when a service uses the charge-markup-minus-commission margin model. */
+export function isChargeDrivenService(code: string): boolean {
+  return CHARGE_DRIVEN_SERVICE_CODES.has(code);
+}
+
+/** Legacy service codes that belong to the PAYOUT family (pre-unification). */
+const PAYOUT_LEGACY = new Set(["DMT_IMPS", "DMT_NEFT", "DMT_RTGS", "UPI_PAYOUT"]);
+
+/** Family a service code belongs to (falls back to PAYOUT for legacy codes). */
 export function familyOf(code: string): ServiceFamily {
   return (
     SERVICE_FAMILIES.find((f) => (f.services as readonly string[]).includes(code)) ??
-    SERVICE_FAMILIES[SERVICE_FAMILIES.length - 1]
+    (PAYOUT_LEGACY.has(code) ? SERVICE_FAMILIES.find((f) => f.key === "PAYOUT")! : SERVICE_FAMILIES[0])
   );
 }

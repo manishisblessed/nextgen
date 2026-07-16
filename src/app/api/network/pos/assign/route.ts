@@ -156,20 +156,39 @@ export async function POST(req: Request) {
       returnReason,
     });
 
-    // When recalling or re-assigning with a new subscription, cancel
-    // downstream subscriptions (those NOT belonging to the parent). The
-    // parent's own upstream subscription stays active as a cost anchor so
-    // billing correctly skips the upstream tier.
-    if (!childId || (machine.assignedUserId && subscription)) {
+    if (!childId) {
+      // Recall: cancel only subscriptions this user created for downstream
+      // users, plus any further-downstream subs. Upstream subscriptions
+      // (where userId is the caller or an ancestor) must stay active.
+      const callerAncestorIds: string[] = [user.id];
+      let ancestorCursor = await tx.user.findUnique({
+        where: { id: user.id },
+        select: { parentId: true },
+      });
+      while (ancestorCursor?.parentId) {
+        callerAncestorIds.push(ancestorCursor.parentId);
+        ancestorCursor = await tx.user.findUnique({
+          where: { id: ancestorCursor.parentId },
+          select: { parentId: true },
+        });
+      }
       await tx.posSubscription.updateMany({
-        where: { machineId, status: "ACTIVE", userId: { not: user.id } },
+        where: { machineId, status: "ACTIVE", userId: { notIn: callerAncestorIds } },
+        data: { status: "CANCELLED", cancelledAt: new Date() },
+      });
+    } else if (machine.assignedUserId && subscription) {
+      // Re-assign with subscription: only cancel subscriptions this user
+      // previously created (their downstream assignments). Upstream
+      // subscriptions must remain active as cost anchors for billing.
+      await tx.posSubscription.updateMany({
+        where: { machineId, status: "ACTIVE", createdById: user.id },
         data: { status: "CANCELLED", cancelledAt: new Date() },
       });
     }
 
     if (childId && subscription) {
       const existing = await tx.posSubscription.findFirst({
-        where: { machineId, status: "ACTIVE" },
+        where: { machineId, userId: childId, status: "ACTIVE" },
         select: { id: true },
       });
       if (!existing) {

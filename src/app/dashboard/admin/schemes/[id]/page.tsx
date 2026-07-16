@@ -35,6 +35,8 @@ type Slab = {
   maxAmount: number;
   chargeType: RateType;
   chargeValue: number;
+  /** true = chargeValue already includes 18% GST; false = GST added on top. */
+  chargeGstInclusive: boolean;
   commissionType: RateType;
   /** Cascade model: commission the ASSIGNED user earns on this slab. */
   commissionValue: number;
@@ -228,7 +230,12 @@ export default function SchemeEditorPage() {
                           ₹{s.minAmount.toLocaleString("en-IN")} – ₹{s.maxAmount.toLocaleString("en-IN")}
                         </td>
                         <td className="px-5 py-3 text-xs">{s.provider ?? "All"}</td>
-                        <td className="px-5 py-3 text-right">{fmtRate(s.chargeType, s.chargeValue)}</td>
+                        <td className="px-5 py-3 text-right">
+                          {fmtRate(s.chargeType, s.chargeValue)}
+                          <span className={`ml-1.5 inline-block rounded px-1 py-0.5 text-[10px] font-semibold leading-none ${s.chargeGstInclusive ? "bg-amber-100 text-amber-700" : "bg-sky-100 text-sky-700"}`}>
+                            {s.chargeGstInclusive ? "incl. GST" : "+ GST"}
+                          </span>
+                        </td>
                         <td className="px-5 py-3 text-right font-semibold text-emerald-700">{fmtRate(s.commissionType, s.commissionValue)}</td>
                         <td className="px-5 py-3 text-center">
                           <Badge variant={s.active ? "success" : "danger"}>{s.active ? "On" : "Off"}</Badge>
@@ -308,16 +315,14 @@ function SlabModal({
   const [provider, setProvider] = useState(editing?.provider ?? "");
   const [minAmount, setMinAmount] = useState(String(editing?.minAmount ?? 0));
   const [maxAmount, setMaxAmount] = useState(String(editing?.maxAmount ?? 1000));
-  const [chargeType, setChargeType] = useState<RateType>(editing?.chargeType ?? "FLAT");
-  // For PERCENT we edit in human percent (0.5) and store as fraction (0.005).
-  const [chargeValue, setChargeValue] = useState(
-    String(editing ? (editing.chargeType === "PERCENT" ? editing.chargeValue * 100 : editing.chargeValue) : 0)
-  );
-  const [commissionType, setCommissionType] = useState<RateType>(editing?.commissionType ?? "PERCENT");
-  // Cascade model: commission the assigned user earns on this slab.
-  const [comOwn, setComOwn] = useState(
-    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionValue * 100 : editing.commissionValue) : 0)
-  );
+  // BBPS/Payout service slabs are always flat ₹ (never a percentage). Types are
+  // locked to FLAT; only MDR (POS/PG/QR) uses percentages, edited elsewhere.
+  const chargeType: RateType = "FLAT";
+  const [chargeValue, setChargeValue] = useState(String(editing?.chargeValue ?? 0));
+  const [chargeGstInclusive, setChargeGstInclusive] = useState(editing?.chargeGstInclusive ?? false);
+  const commissionType: RateType = "FLAT";
+  // Cascade model: commission the assigned user earns on this slab (flat ₹).
+  const [comOwn, setComOwn] = useState(String(editing?.commissionValue ?? 0));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -348,6 +353,7 @@ function SlabModal({
       maxAmount: max,
       chargeType,
       chargeValue: toStored(chargeType, chargeValue),
+      chargeGstInclusive,
       commissionType,
       commissionValue: toStored(commissionType, comOwn),
     };
@@ -372,7 +378,6 @@ function SlabModal({
     }
   }
 
-  const pctHint = "Enter as percent, e.g. 0.5 for 0.5%";
   const flatHint = "Flat ₹ amount per transaction";
 
   return (
@@ -430,17 +435,30 @@ function SlabModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Type</Label>
-                <Select value={chargeType} onChange={(e) => setChargeType(e.target.value as RateType)}>
+                <Select value={chargeType} disabled>
                   <option value="FLAT">Flat (₹)</option>
-                  <option value="PERCENT">Percent (%)</option>
                 </Select>
               </div>
               <div>
-                <Label>{chargeType === "PERCENT" ? "Charge (%)" : "Charge (₹)"}</Label>
+                <Label>Charge (₹)</Label>
                 <Input type="number" min={0} step="0.0001" value={chargeValue} onChange={(e) => setChargeValue(e.target.value)} />
               </div>
             </div>
-            <p className="mt-1 text-xs text-ink-400">{chargeType === "PERCENT" ? pctHint : flatHint}</p>
+            <div className="mt-3">
+              <Label>GST</Label>
+              <Select
+                value={chargeGstInclusive ? "inclusive" : "exclusive"}
+                onChange={(e) => setChargeGstInclusive(e.target.value === "inclusive")}
+              >
+                <option value="exclusive">Excl. GST (18% GST added on top)</option>
+                <option value="inclusive">Incl. GST (charge already includes GST)</option>
+              </Select>
+            </div>
+            <p className="mt-1 text-xs text-ink-400">
+              {chargeGstInclusive
+                ? "The charge value you entered already includes 18% GST. No additional GST will be applied."
+                : flatHint + ". 18% GST will be added on top."}
+            </p>
           </div>
 
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
@@ -448,18 +466,17 @@ function SlabModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Type</Label>
-                <Select value={commissionType} onChange={(e) => setCommissionType(e.target.value as RateType)}>
-                  <option value="PERCENT">Percent (%)</option>
+                <Select value={commissionType} disabled>
                   <option value="FLAT">Flat (₹)</option>
                 </Select>
               </div>
               <div>
-                <Label>{commissionType === "PERCENT" ? "Commission (%)" : "Commission (₹)"}</Label>
+                <Label>Commission (₹)</Label>
                 <Input type="number" min={0} step="0.0001" value={comOwn} onChange={(e) => setComOwn(e.target.value)} />
               </div>
             </div>
             <p className="mt-1 text-xs text-ink-400">
-              {commissionType === "PERCENT" ? pctHint : flatHint}. This is what the user this scheme is
+              {flatHint}. This is what the user this scheme is
               assigned to earns — parents up the chain earn scheme-difference margins automatically.
             </p>
           </div>
@@ -488,43 +505,54 @@ function AssignmentPanel({
   onChange: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
-  const [role, setRole] = useState("SUPER_DISTRIBUTOR");
-  const [assigningRole, setAssigningRole] = useState(false);
-  const [assignRoleConfirmOpen, setAssignRoleConfirmOpen] = useState(false);
+  const [assigningAll, setAssigningAll] = useState(false);
+  const [assignAllConfirmOpen, setAssignAllConfirmOpen] = useState(false);
+  const [sdList, setSdList] = useState<{ id: string; name: string; email: string; shopName: string | null }[]>([]);
+  const [loadingSd, setLoadingSd] = useState(true);
 
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ id: string; name: string; role: string }[]>([]);
-  const [searching, setSearching] = useState(false);
+  const assignedIds = useMemo(() => new Set(assigned.map((u) => u.id)), [assigned]);
 
-  async function assignByRole() {
-    setAssigningRole(true);
+  const loadSuperDistributors = useCallback(async () => {
+    setLoadingSd(true);
+    try {
+      const res = await fetch("/api/admin/users?role=super-distributor&pageSize=200");
+      const data = await res.json();
+      if (res.ok)
+        setSdList(
+          (data.users ?? []).map((u: { id: string; name: string; email: string; shopName: string | null }) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            shopName: u.shopName,
+          }))
+        );
+    } catch {
+      /* silent */
+    } finally {
+      setLoadingSd(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSuperDistributors();
+  }, [loadSuperDistributors]);
+
+  async function assignAll() {
+    setAssigningAll(true);
     try {
       const res = await fetch("/api/admin/schemes/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schemeId, role }),
+        body: JSON.stringify({ schemeId, role: "SUPER_DISTRIBUTOR" }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Assign failed");
-      onChange(`Assigned to ${data.updated} ${role.replace(/_/g, " ").toLowerCase()} user(s).`);
+      onChange(`Assigned to ${data.updated} super distributor(s).`);
+      loadSuperDistributors();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
     } finally {
-      setAssigningRole(false);
-    }
-  }
-
-  async function search() {
-    if (query.trim().length < 2) return;
-    setSearching(true);
-    try {
-      const res = await fetch(`/api/admin/users?q=${encodeURIComponent(query.trim())}&pageSize=10`);
-      const data = await res.json();
-      setResults((data.users ?? []).map((u: { id: string; name: string; role: string }) => ({ id: u.id, name: u.name, role: u.role })));
-    } catch {
-      onError("Search failed");
-    } finally {
-      setSearching(false);
+      setAssigningAll(false);
     }
   }
 
@@ -537,7 +565,7 @@ function AssignmentPanel({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Assign failed");
-      onChange("User assigned to scheme.");
+      onChange("Super distributor assigned to scheme.");
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
     }
@@ -558,57 +586,49 @@ function AssignmentPanel({
     }
   }
 
+  const unassigned = sdList.filter((u) => !assignedIds.has(u.id));
+
   return (
     <section className="overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-sm">
       <div className="flex items-center gap-2 border-b border-ink-100 bg-gradient-to-r from-violet-50 to-brand-50 px-5 py-3">
         <Users className="h-4 w-4 text-violet-600" />
         <h3 className="font-display text-sm font-semibold text-ink-900">Assignment</h3>
+        <span className="ml-auto text-xs text-ink-400">
+          Cascade model — admin assigns to super distributors only. Lower tiers receive derived schemes.
+        </span>
       </div>
 
       <div className="grid gap-6 p-5 lg:grid-cols-2">
-        {/* Assign by level */}
+        {/* Available super distributors */}
         <div className="space-y-3">
-          <p className="text-xs font-bold uppercase tracking-widest text-ink-500">Assign to a whole level</p>
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <Label>Role</Label>
-              <Select value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="SUPER_DISTRIBUTOR">Super Distributor</option>
-              </Select>
-              <p className="mt-1 text-xs text-ink-400">
-                Cascade model: admin assigns platform schemes to super-distributors only. Lower
-                tiers receive schemes derived by their parent.
-              </p>
-            </div>
-            <Button onClick={() => setAssignRoleConfirmOpen(true)} disabled={assigningRole}>
-              {assigningRole ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Assign
-            </Button>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
+              Super distributors ({unassigned.length} available)
+            </p>
+            {unassigned.length > 0 && (
+              <Button size="sm" variant="outline" onClick={() => setAssignAllConfirmOpen(true)} disabled={assigningAll}>
+                {assigningAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />} Assign all
+              </Button>
+            )}
           </div>
-
-          <p className="pt-2 text-xs font-bold uppercase tracking-widest text-ink-500">Assign a specific user</p>
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <Label>Search by name / email / id</Label>
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && search()}
-                placeholder="Type ≥ 2 characters"
-              />
-            </div>
-            <Button variant="outline" onClick={search} disabled={searching}>
-              {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
-            </Button>
-          </div>
-          {results.length > 0 && (
-            <ul className="divide-y divide-ink-100 rounded-xl border border-ink-100">
-              {results.map((u) => (
+          {loadingSd ? (
+            <p className="py-4 text-center text-sm text-ink-400">Loading…</p>
+          ) : unassigned.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-ink-200 px-3 py-6 text-center text-sm text-ink-500">
+              All super distributors are assigned to this scheme.
+            </p>
+          ) : (
+            <ul className="max-h-72 divide-y divide-ink-100 overflow-y-auto rounded-xl border border-ink-100">
+              {unassigned.map((u) => (
                 <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                  <span>
-                    <span className="font-medium text-ink-900">{u.name}</span>
-                    <span className="ml-2 text-xs text-ink-500">{u.role}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-ink-900">{u.name}</span>
+                    <span className="block truncate text-xs text-ink-500">{u.shopName ?? u.email}</span>
                   </span>
-                  <button onClick={() => assignUser(u.id)} className="text-xs font-semibold text-brand-700 hover:text-brand-800">
+                  <button
+                    onClick={() => assignUser(u.id)}
+                    className="ml-2 shrink-0 text-xs font-semibold text-brand-700 hover:text-brand-800"
+                  >
                     Assign
                   </button>
                 </li>
@@ -630,9 +650,7 @@ function AssignmentPanel({
                 <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-ink-900">{u.name}</span>
-                    <span className="block truncate text-xs text-ink-500">
-                      {u.email} · {u.role}
-                    </span>
+                    <span className="block truncate text-xs text-ink-500">{u.email}</span>
                   </span>
                   <button
                     onClick={() => unassignUser(u.id)}
@@ -648,20 +666,20 @@ function AssignmentPanel({
       </div>
 
       <ConfirmDialog
-        open={assignRoleConfirmOpen}
-        onClose={() => setAssignRoleConfirmOpen(false)}
-        busy={assigningRole}
+        open={assignAllConfirmOpen}
+        onClose={() => setAssignAllConfirmOpen(false)}
+        busy={assigningAll}
         tone="default"
-        title={`Assign scheme to all ${role.replace(/_/g, " ").toLowerCase()}s?`}
+        title="Assign scheme to all super distributors?"
         description={
           <>
-            This scheme will be assigned to <span className="font-semibold text-ink-900">ALL {role.replace(/_/g, " ").toLowerCase()}</span> users, overriding their current scheme.
+            This scheme will be assigned to <span className="font-semibold text-ink-900">ALL super distributors</span>, overriding their current scheme.
           </>
         }
         confirmLabel="Assign to all"
         onConfirm={async () => {
-          await assignByRole();
-          setAssignRoleConfirmOpen(false);
+          await assignAll();
+          setAssignAllConfirmOpen(false);
         }}
       />
     </section>

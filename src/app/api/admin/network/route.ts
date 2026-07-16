@@ -53,7 +53,6 @@ export async function GET(req: Request) {
           enabledServices: true,
           createdAt: true,
           scheme: { select: { id: true, name: true } },
-          mdrScheme: { select: { id: true, name: true } },
           parent: { select: { id: true, name: true, role: true } },
           userLimit: {
             select: { settlementTier: true, settlementDailyCap: true, walletCap: true },
@@ -88,7 +87,6 @@ export async function GET(req: Request) {
         held: toNumber(dec(u.heldBalance)),
         servicesEnabled: u.enabledServices.length,
         scheme: u.scheme,
-        mdrScheme: u.mdrScheme,
         parent: u.parent,
         settlementTier: u.userLimit?.settlementTier ?? null,
         walletCap: u.userLimit?.walletCap != null ? toNumber(dec(u.userLimit.walletCap)) : null,

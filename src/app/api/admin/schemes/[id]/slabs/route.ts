@@ -21,7 +21,8 @@ const SlabBody = z
     maxAmount: z.number().min(0).max(100000000),
     chargeType: z.enum(["FLAT", "PERCENT"]).default("FLAT"),
     chargeValue: z.number().min(0),
-    commissionType: z.enum(["FLAT", "PERCENT"]).default("PERCENT"),
+    chargeGstInclusive: z.boolean().default(false),
+    commissionType: z.enum(["FLAT", "PERCENT"]).default("FLAT"),
     commissionRetailer: z.number().min(0).default(0),
     commissionDistributor: z.number().min(0).default(0),
     commissionMaster: z.number().min(0).default(0),
@@ -71,6 +72,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   );
   if (overlap) return NextResponse.json({ error: overlap }, { status: 409 });
 
+  // Cascade model: admin schemes carry charges only — no commission. Commission
+  // is set by each network parent when they derive a scheme for their children.
   const slab = await prisma.schemeSlab.create({
     data: {
       schemeId: scheme.id,
@@ -80,11 +83,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       maxAmount: body.maxAmount,
       chargeType: body.chargeType,
       chargeValue: body.chargeValue,
+      chargeGstInclusive: body.chargeGstInclusive,
       commissionType: body.commissionType,
-      commissionRetailer: body.commissionRetailer,
-      commissionDistributor: body.commissionDistributor,
-      commissionMaster: body.commissionMaster,
-      commissionValue: body.commissionValue,
+      commissionRetailer: 0,
+      commissionDistributor: 0,
+      commissionMaster: 0,
+      commissionValue: 0,
     },
   });
 

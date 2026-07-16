@@ -35,6 +35,7 @@ import type {
   ReportType,
 } from "./types";
 import { EXPORT_ROW_CAP } from "./types";
+import { getDailyUserReport } from "./daily";
 
 /* --------------------------------------------------------------------- */
 /*  Shared helpers                                                        */
@@ -879,10 +880,90 @@ async function reportAccount(user: SessionUser, params: ReportParams): Promise<R
 }
 
 /* --------------------------------------------------------------------- */
+/* 11 · Daily user report (Primary wallet)                                */
+/* --------------------------------------------------------------------- */
+/**
+ * Per-user daily activity: opening / credits / debits (by service) /
+ * commission (by service) / closing. Wraps `getDailyUserReport` and
+ * flattens each row into the columnar shape the reports table renders.
+ *
+ * The report is a *single-day* snapshot; we pick the day from `to`
+ * (fall back to `from`, else today IST). If the caller filtered by
+ * "status" we treat it as a Role filter (registered as such on the UI).
+ */
+async function reportDailyUser(user: SessionUser, params: ReportParams): Promise<ReportResult> {
+  const ids = await allowedUserIds(user);
+  const dateAnchor = params.to ?? params.from ?? new Date();
+
+  const report = await getDailyUserReport({
+    date: dateAnchor,
+    userIds: ids,
+    role: params.status,
+    service: params.service,
+    q: params.q,
+    page: params.page,
+    pageSize: params.pageSize,
+    forExport: params.forExport,
+  });
+
+  const rows = report.rows.map((r) => {
+    const servicesUsed =
+      r.debitsByService.length === 0
+        ? "—"
+        : r.debitsByService
+            .slice(0, 3)
+            .map((d) => `${humanize(d.service)} ₹${d.amount.toLocaleString("en-IN")}`)
+            .join(" · ") + (r.debitsByService.length > 3 ? ` +${r.debitsByService.length - 3}` : "");
+
+    return {
+      code: r.code ?? r.userId.slice(0, 8).toUpperCase(),
+      name: r.name,
+      role: r.role,
+      opening: r.opening,
+      creditsTotal: r.credits.total,
+      topup: r.credits.topup,
+      commissionEarned: r.totalCommission,
+      debitsTotal: r.totalDebits,
+      servicesUsed,
+      closing: r.closing,
+    };
+  });
+
+  return {
+    rows,
+    total: report.total,
+    page: report.page,
+    pageSize: report.pageSize,
+    totals: {
+      code: "Total",
+      opening: report.totals.opening,
+      creditsTotal: report.totals.creditsTotal,
+      topup: 0,
+      commissionEarned: report.totals.commissionNet,
+      debitsTotal: report.totals.debitsTotal,
+      servicesUsed: "",
+      closing: report.totals.closing,
+    },
+    summary: [
+      money("Opening (day)", report.totals.opening, "brand"),
+      money("Credits (day)", report.totals.creditsTotal, "emerald"),
+      money("Debits (day)", report.totals.debitsTotal, "accent"),
+      money("Closing (day)", report.totals.closing, "violet"),
+    ],
+    trend: null,
+    note:
+      report.total === 0
+        ? "No users match this filter."
+        : `Snapshot for ${report.date} (IST). Expand each user for service-wise breakdown on the dashboard panel.`,
+  };
+}
+
+/* --------------------------------------------------------------------- */
 /*  Dispatcher                                                            */
 /* --------------------------------------------------------------------- */
 
 const RUNNERS: Record<ReportType, (u: SessionUser, p: ReportParams) => Promise<ReportResult>> = {
+  "daily-user": reportDailyUser,
   summary: reportSummary,
   fund: reportFund,
   pg: reportPg,

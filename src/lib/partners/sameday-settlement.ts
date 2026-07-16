@@ -2,8 +2,9 @@
  * Same Day Solution — Settlement API adapter.
  *
  * Moves money from our PARTNER wallet at Same Day to pre-verified bank
- * accounts (penny-drop verified, ₹4 per verification). Admin-only rail —
- * exposed via /api/admin/settlement/*.
+ * accounts (penny-drop verified, ₹4 per verification). Exposed via
+ * /api/admin/settlement/* (admin transfers) and wrapped by sameday-payout.ts
+ * as the bank-mode retailer payout rail.
  *
  * Activate: PARTNER_SETTLEMENT_ENABLED=true  (flags.settlement)
  *   needs: SAMEDAY_SETTLEMENT_API_KEY / SAMEDAY_SETTLEMENT_API_SECRET

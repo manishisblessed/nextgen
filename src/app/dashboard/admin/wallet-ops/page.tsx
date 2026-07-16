@@ -355,9 +355,19 @@ function UserBalancesTab({ money }: { money: (n: number) => string }) {
 
 type UserHit = { id: string; name: string; shop: string; role: string; walletBalance: number };
 
+const ROLE_OPTIONS = [
+  { value: "", label: "Select a role…" },
+  { value: "super-distributor", label: "Super Distributor" },
+  { value: "master-distributor", label: "Master Distributor" },
+  { value: "distributor", label: "Distributor" },
+  { value: "retailer", label: "Retailer" },
+] as const;
+
 function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) {
+  const [filterRole, setFilterRole] = useState("");
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<UserHit[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [selected, setSelected] = useState<UserHit | null>(null);
   const [type, setType] = useState<"PUSH" | "PULL">("PUSH");
   const [walletType, setWalletType] = useState<"PRIMARY" | "AEPS">("PRIMARY");
@@ -367,21 +377,31 @@ function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) 
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!q || q.length < 2 || selected) {
+    if (selected) {
       setHits([]);
       return;
     }
+    if (!filterRole && (!q || q.length < 2)) {
+      setHits([]);
+      return;
+    }
+    setLoadingUsers(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/users?q=${encodeURIComponent(q)}&pageSize=10`);
+        const params = new URLSearchParams({ pageSize: "20" });
+        if (filterRole) params.set("role", filterRole);
+        if (q && q.length >= 2) params.set("q", q);
+        const res = await fetch(`/api/admin/users?${params}`);
         const data = await res.json();
         if (res.ok) setHits(data.users ?? []);
       } catch {
         setHits([]);
+      } finally {
+        setLoadingUsers(false);
       }
     }, 300);
     return () => clearTimeout(t);
-  }, [q, selected]);
+  }, [q, filterRole, selected]);
 
   const submit = async () => {
     if (!selected) return onDone("Pick a target user first.", false);
@@ -439,21 +459,37 @@ function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) 
                   {selected.shop} · {selected.role} · Wallet {formatINR(selected.walletBalance)}
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
+              <Button variant="ghost" size="sm" onClick={() => { setSelected(null); setQ(""); }}>
                 Change
               </Button>
             </div>
           ) : (
-            <div className="relative mt-1.5">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search by name, shop, email…"
-                className={`${inputCls} pl-9`}
-              />
-              {hits.length > 0 && (
-                <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-ink-100 bg-white shadow-lg">
+            <div className="space-y-2 mt-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={filterRole}
+                  onChange={(e) => { setFilterRole(e.target.value); setQ(""); }}
+                  className={inputCls}
+                >
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search name / shop…"
+                    className={`${inputCls} pl-9`}
+                  />
+                </div>
+              </div>
+              {loadingUsers && (
+                <p className="py-2 text-center text-xs text-ink-400">Loading users…</p>
+              )}
+              {!loadingUsers && hits.length > 0 && (
+                <div className="max-h-52 overflow-y-auto rounded-xl border border-ink-100 bg-white">
                   {hits.map((h) => (
                     <button
                       key={h.id}
@@ -461,16 +497,19 @@ function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) 
                         setSelected(h);
                         setHits([]);
                       }}
-                      className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-brand-50"
+                      className="flex w-full items-center justify-between border-b border-ink-50 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-brand-50"
                     >
                       <span>
                         <span className="font-semibold text-ink-900">{h.name}</span>{" "}
                         <span className="text-ink-500">· {h.shop}</span>
                       </span>
-                      <span className="text-[11px] text-ink-500">{h.role}</span>
+                      <span className="shrink-0 ml-2 text-[11px] text-ink-500">{h.role} · {formatINR(h.walletBalance)}</span>
                     </button>
                   ))}
                 </div>
+              )}
+              {!loadingUsers && filterRole && hits.length === 0 && q.length < 2 && (
+                <p className="py-2 text-center text-xs text-ink-400">No users found for this role.</p>
               )}
             </div>
           )}

@@ -8,28 +8,27 @@ import { validateMdrSlab } from "@/lib/mdr/resolver";
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
+/**
+ * MDR (POS/PG/QR/UPI) slabs live on the unified Scheme. These endpoints manage
+ * the MDR rows of a scheme identified by its Scheme id (params.id).
+ */
+
 const SlabBody = z.object({
   serviceKind: z.enum(["POS", "PG", "QR", "UPI"]),
   paymentMode: z.string().min(1).max(30).default("*"),
-  // Company/card dimensions (Same Day style); null/omitted = any.
   company: z.string().trim().min(1).max(60).nullish(),
   cardType: z.string().trim().min(1).max(30).nullish(),
   brandType: z.string().trim().min(1).max(30).nullish(),
   classification: z.string().trim().min(1).max(30).nullish(),
-  minAmount: z.number().nonnegative(),
-  maxAmount: z.number().positive(),
+  minAmount: z.number().nonnegative().default(0),
+  maxAmount: z.number().positive().default(999999999),
   mdrType: z.enum(["FLAT", "PERCENT"]).default("PERCENT"),
   mdrValue: z.number().nonnegative(),
   // Instant (T+0) settlement rate; 0 = unset, falls back to mdrValue.
   mdrValueT0: z.number().nonnegative().default(0),
-  commissionType: z.enum(["FLAT", "PERCENT"]).default("PERCENT"),
-  commissionRetailer: z.number().nonnegative().default(0),
-  commissionDistributor: z.number().nonnegative().default(0),
-  commissionMaster: z.number().nonnegative().default(0),
-  commissionSuperDistributor: z.number().nonnegative().default(0),
 });
 
-/** POST — add a slab to an MDR scheme (band-overlap validated). */
+/** POST — add an MDR slab to a scheme (band-overlap validated). */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   let admin;
   try {
@@ -44,8 +43,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const scheme = await prisma.mdrScheme.findUnique({ where: { id: params.id } });
-  if (!scheme) return NextResponse.json({ error: "MDR scheme not found" }, { status: 404 });
+  const scheme = await prisma.scheme.findUnique({ where: { id: params.id }, select: { id: true } });
+  if (!scheme) return NextResponse.json({ error: "Scheme not found" }, { status: 404 });
 
   const b = parsed.data;
   const overlap = await validateMdrSlab(
@@ -95,15 +94,15 @@ const UpdateBody = z.object({
   cardType: z.string().trim().min(1).max(30).nullish(),
   brandType: z.string().trim().min(1).max(30).nullish(),
   classification: z.string().trim().min(1).max(30).nullish(),
-  minAmount: z.number().nonnegative().optional(),
-  maxAmount: z.number().positive().optional(),
+  minAmount: z.number().nonnegative().optional().default(0),
+  maxAmount: z.number().positive().optional().default(999999999),
   mdrType: z.enum(["FLAT", "PERCENT"]).optional(),
   mdrValue: z.number().nonnegative().optional(),
   mdrValueT0: z.number().nonnegative().optional(),
   active: z.boolean().optional(),
 });
 
-/** PATCH — edit a slab's values/dimensions (band-overlap revalidated). */
+/** PATCH — edit an MDR slab's values/dimensions (band-overlap revalidated). */
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   let admin;
   try {
@@ -174,7 +173,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
 const DeleteBody = z.object({ slabId: z.string().min(1) });
 
-/** DELETE — remove a slab. */
+/** DELETE — remove an MDR slab. */
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   let admin;
   try {

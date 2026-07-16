@@ -89,13 +89,13 @@ export async function quotePayoutForUser(
 
   let serviceCharge: Money;
   let source = "STATIC_SLABS";
+  let gstInclusive = false;
   if (service) {
-    // Quote with the payout partner so provider-pinned slabs match the same
-    // way they will at commission-distribution time.
-    const rate = await getEffectiveRate(userId, service, amt, "BULKPE");
+    const rate = await getEffectiveRate(userId, service, amt);
     if (rate.source !== "NONE") {
       serviceCharge = round(rate.charge);
       source = rate.source;
+      gstInclusive = rate.chargeGstInclusive;
     } else {
       serviceCharge = payoutServiceCharge(amt, mode);
     }
@@ -103,7 +103,7 @@ export async function quotePayoutForUser(
     serviceCharge = payoutServiceCharge(amt, mode);
   }
 
-  const gst = percentOf(serviceCharge, GST_PERCENT);
+  const gst = gstInclusive ? dec(0) : percentOf(serviceCharge, GST_PERCENT);
   const totalDebit = round(add(add(amt, serviceCharge), gst));
   return { amount: amt, serviceCharge, gst, totalDebit, source };
 }

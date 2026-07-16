@@ -16,6 +16,8 @@ import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { quotePayoutForUser } from "@/lib/payout/charges";
 import { requireActiveScheme } from "@/lib/scheme/gate";
+import { getSchemeLimit, PAYOUT_MODE_SERVICE } from "@/lib/scheme/resolver";
+import { dec, gt } from "@/lib/money";
 import type { SessionUser } from "@/lib/auth-server";
 
 /**
@@ -147,6 +149,17 @@ export async function POST(req: Request) {
   const userId = ctx.user.id;
 
   try {
+    const payoutService = PAYOUT_MODE_SERVICE[body.mode];
+    if (payoutService) {
+      const limit = await getSchemeLimit(userId, payoutService);
+      if (limit && gt(dec(body.amount), limit)) {
+        return NextResponse.json(
+          { ok: false, error: { code: "AMOUNT_EXCEEDS_LIMIT", message: `Amount exceeds the maximum allowed limit of ₹${limit.toNumber().toLocaleString("en-IN")}` } },
+          { status: 400 }
+        );
+      }
+    }
+
     const quote = await quotePayoutForUser(userId, body.amount, body.mode);
 
     const handleForRisk = body.mode === "UPI" ? body.vpa! : body.accountNumber!;

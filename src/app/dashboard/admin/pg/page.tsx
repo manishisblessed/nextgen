@@ -6,16 +6,35 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { ReportActions } from "@/components/dashboard/ReportActions";
-import {
-  pgMerchants,
-  pgTransactions,
-  type PgMerchant,
-  type PgTransaction
-} from "@/lib/data";
 import { formatINR } from "@/lib/utils";
 
+type PgMerchant = {
+  mid: string;
+  business: string;
+  name: string;
+  city: string;
+  modes: string[];
+  mdr: string;
+  volume30d: number;
+  status: string;
+  onboarded: string;
+};
+
+type PgTransaction = {
+  id: string;
+  merchant: string;
+  mode: string;
+  amount: number;
+  fee: number | null;
+  status: string;
+  settlement: string;
+  date: string;
+};
+
 export default function AdminPgPage() {
+  const merchants: PgMerchant[] = [];
+  const transactions: PgTransaction[] = [];
+
   const merchantCols: Column<PgMerchant>[] = [
     { key: "mid", header: "MID", render: (r) => <span className="font-mono text-xs">{r.mid}</span> },
     {
@@ -69,48 +88,31 @@ export default function AdminPgPage() {
         title="Payment Gateway"
         description="Merchant onboarding, MDR & scheme configuration, transaction monitoring and settlement control for the PG vertical."
         actions={
-          <>
-            <ReportActions
-              filename="pg-merchants"
-              title="JMP NextGenPay · PG Merchants"
-              subtitle="Payment gateway merchant master"
-              columns={[
-                { key: "mid", header: "MID" },
-                { key: "business", header: "Business" },
-                { key: "name", header: "Owner" },
-                { key: "city", header: "City" },
-                { key: "mdr", header: "MDR" },
-                { key: "volume30d", header: "Volume 30d (INR)" },
-                { key: "status", header: "Status" }
-              ]}
-              rows={pgMerchants}
-            />
-            <Button>
-              <Store className="h-4 w-4" /> Onboard merchant
-            </Button>
-          </>
+          <Button>
+            <Store className="h-4 w-4" /> Onboard merchant
+          </Button>
         }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Live Merchants" value={String(pgMerchants.filter((m) => m.status === "Live").length)} icon={Store} accent="brand" />
-        <StatCard label="GMV (30d)" value="₹1.62 Cr" delta="+18.4%" icon={IndianRupee} accent="emerald" />
-        <StatCard label="MDR Revenue (30d)" value="₹1.84 L" delta="+12.1%" icon={Percent} accent="violet" />
-        <StatCard label="Success Rate" value="96.2%" delta="+0.4%" icon={CreditCard} accent="accent" />
+        <StatCard label="Live Merchants" value="0" icon={Store} accent="brand" />
+        <StatCard label="GMV (30d)" value={formatINR(0)} icon={IndianRupee} accent="emerald" />
+        <StatCard label="MDR Revenue (30d)" value={formatINR(0)} icon={Percent} accent="violet" />
+        <StatCard label="Success Rate" value="—" icon={CreditCard} accent="accent" />
       </div>
 
       <DataTable
         title="Merchant master"
         description="All PG merchants with KYC status, enabled modes and MDR schemes."
         columns={merchantCols}
-        data={pgMerchants}
+        data={merchants}
       />
 
       <DataTable
         title="Live transaction feed"
         description="Latest orders across all merchants, with settlement state."
         columns={txnCols}
-        data={pgTransactions}
+        data={transactions}
       />
     </div>
   );

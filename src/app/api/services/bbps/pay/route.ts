@@ -10,7 +10,7 @@ import { clientIp } from "@/lib/security/audit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
-import { getEffectiveRate } from "@/lib/scheme/resolver";
+import { getEffectiveRate, withGst } from "@/lib/scheme/resolver";
 import { toNumber } from "@/lib/money";
 
 const Body = z.object({
@@ -61,12 +61,15 @@ export async function POST(req: Request) {
     // Provider-scoped slabs: a slab pinned to this BBPS partner wins over the
     // any-provider slab for the same band.
     const rate = await getEffectiveRate(user.id, service, parsed.data.amount, bbps.name);
+    const fee = rate.chargeGstInclusive
+      ? toNumber(rate.charge)
+      : toNumber(withGst(rate.charge, 18).total);
 
     const result = await runTransaction({
       userId: user.id,
       service,
       amount: parsed.data.amount,
-      fee: toNumber(rate.charge),
+      fee,
       commission: toNumber(rate.commissionOwn),
       idempotencyKey: parsed.data.idempotencyKey,
       customer: Object.values(parsed.data.customerParams)[0],

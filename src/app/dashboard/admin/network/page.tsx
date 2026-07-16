@@ -40,7 +40,6 @@ type NetworkUser = {
   held: number;
   servicesEnabled: number;
   scheme: { id: string; name: string } | null;
-  mdrScheme: { id: string; name: string } | null;
   parent: { id: string; name: string; role: string } | null;
   settlementTier: string | null;
   walletCap: number | null;
@@ -454,9 +453,7 @@ function UserDrawer({
   onRefresh: () => void;
 }) {
   const [schemes, setSchemes] = useState<SchemeOption[]>([]);
-  const [mdrSchemes, setMdrSchemes] = useState<SchemeOption[]>([]);
   const [schemeId, setSchemeId] = useState(user.scheme?.id ?? "");
-  const [mdrSchemeId, setMdrSchemeId] = useState(user.mdrScheme?.id ?? "");
   const [walletCap, setWalletCap] = useState(user.walletCap != null ? String(user.walletCap) : "");
   const [settlementTier, setSettlementTier] = useState(user.settlementTier ?? "");
   const [settlementDailyCap, setSettlementDailyCap] = useState("");
@@ -504,13 +501,6 @@ function UserDrawer({
       .then((d) => {
         const list = d?.schemes ?? d ?? [];
         if (Array.isArray(list)) setSchemes(list.map((s: SchemeOption) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {});
-    fetch("/api/admin/mdr-schemes")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const list = d?.schemes ?? [];
-        if (Array.isArray(list)) setMdrSchemes(list.map((s: SchemeOption) => ({ id: s.id, name: s.name })));
       })
       .catch(() => {});
   }, []);
@@ -868,34 +858,9 @@ function UserDrawer({
               Save
             </Button>
           </div>
-          <div className="mt-2 flex gap-2">
-            <select
-              value={mdrSchemeId}
-              onChange={(e) => setMdrSchemeId(e.target.value)}
-              className={`${inputCls} flex-1`}
-            >
-              <option value="">Default MDR scheme</option>
-              {mdrSchemes.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <Button
-              size="sm"
-              disabled={busy === "mdr"}
-              onClick={async () => {
-                try {
-                  await patch("mdr", { action: "assignMdrScheme", mdrSchemeId: mdrSchemeId || null });
-                  onChanged("MDR scheme assignment updated.", true);
-                } catch (e) {
-                  onChanged(e instanceof Error ? e.message : "Failed", false);
-                }
-              }}
-            >
-              Save
-            </Button>
-          </div>
+          <p className="mt-2 text-xs text-ink-400">
+            One scheme now covers charges and POS settlement MDR. Assigning it here sets both.
+          </p>
         </Section>
 
         {/* Limits */}

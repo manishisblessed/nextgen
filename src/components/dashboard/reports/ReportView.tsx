@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Search,
   RefreshCw,
   AlertTriangle,
+  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   Info,
@@ -234,6 +236,13 @@ export function ReportView({ type }: { type: ReportType }) {
 
   return (
     <div className="space-y-6">
+      <Link
+        href="/dashboard/reports"
+        className="inline-flex items-center gap-1 text-sm font-medium text-brand-700 hover:text-brand-800"
+      >
+        <ArrowLeft className="h-4 w-4" /> Back to reports
+      </Link>
+
       <PageHeader
         eyebrow="Reports"
         title={config.title}

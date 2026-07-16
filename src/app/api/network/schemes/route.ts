@@ -26,6 +26,18 @@ const CreateBody = z
       )
       .max(500)
       .optional(),
+    mdrOverrides: z
+      .array(
+        z
+          .object({
+            parentSlabId: z.string().min(1),
+            mdrValue: z.number().nonnegative().optional(),
+            mdrValueT0: z.number().nonnegative().optional(),
+          })
+          .strict()
+      )
+      .max(500)
+      .optional(),
   })
   .strict();
 
@@ -58,7 +70,8 @@ export async function GET() {
           where: { id: me.schemeId, active: true },
           include: {
             slabs: { where: { active: true }, orderBy: [{ service: "asc" }, { minAmount: "asc" }] },
-            _count: { select: { slabs: true, users: true } },
+            mdrSlabs: { where: { active: true }, orderBy: [{ serviceKind: "asc" }, { minAmount: "asc" }] },
+            _count: { select: { slabs: true, users: true, mdrSlabs: true } },
           },
         })
       : Promise.resolve(null),
@@ -66,7 +79,8 @@ export async function GET() {
       where: { ownerId: user.id },
       include: {
         slabs: { orderBy: [{ service: "asc" }, { minAmount: "asc" }] },
-        _count: { select: { slabs: true, users: true } },
+        mdrSlabs: { orderBy: [{ serviceKind: "asc" }, { minAmount: "asc" }] },
+        _count: { select: { slabs: true, users: true, mdrSlabs: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -110,6 +124,7 @@ export async function POST(req: Request) {
       name: parsed.data.name,
       description: parsed.data.description,
       overrides: parsed.data.overrides,
+      mdrOverrides: parsed.data.mdrOverrides,
     });
 
     await prisma.auditLog.create({

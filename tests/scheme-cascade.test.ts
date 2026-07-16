@@ -34,16 +34,18 @@ vi.mock("@/lib/db", () => ({
           return true;
         });
         if (!found) return null;
-        // Emulate `include: { slabs: ... }` used by the derived-scheme lib.
+        // Emulate `include: { slabs, mdrSlabs }` used by the derived-scheme lib
+        // (unified model: MDR slabs live on the same Scheme).
         return {
           ...found,
           slabs: state.slabs.filter((sl) => sl.schemeId === found.id && sl.active),
+          mdrSlabs: state.mdrSlabs.filter((sl) => sl.schemeId === found.id && sl.active),
         };
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const created = { id: `created-${state.createdSchemes.length + 1}`, ...data };
         state.createdSchemes.push(created);
-        return { ...created, slabs: [], _count: { slabs: 0, users: 0 } };
+        return { ...created, slabs: [], mdrSlabs: [], _count: { slabs: 0, users: 0, mdrSlabs: 0 } };
       },
     },
     schemeSlab: {
@@ -54,14 +56,6 @@ vi.mock("@/lib/db", () => ({
             (!where.service || s.service === where.service) &&
             (where.active === undefined || s.active === where.active)
         ),
-    },
-    mdrScheme: {
-      findFirst: async ({ where }: { where: Record<string, unknown> }) =>
-        state.mdrSchemes.find((s) => {
-          if (where.id && s.id !== where.id) return false;
-          if (where.active && !s.active) return false;
-          return true;
-        }) ?? null,
     },
     mdrSlab: {
       findMany: async ({ where }: { where: Record<string, unknown> }) =>
@@ -140,9 +134,9 @@ describe("applyTds", () => {
   });
 });
 
-describe("distributeCommission (margin-based with TDS)", () => {
+describe("distributeCommission (pool model, margin-based with TDS)", () => {
   beforeEach(() => {
-    // RT (commission 5) under DT (commission 6, so margin 1) under nobody.
+    // Pool service (DMT_IMPS): margin = charge markup + retained commission.
     state.users = new Map([
       ["rt", { id: "rt", role: "RETAILER", schemeId: "s-rt", parentId: "dt", status: "ACTIVE" }],
       ["dt", { id: "dt", role: "DISTRIBUTOR", schemeId: "s-dt", parentId: null, status: "ACTIVE" }],
@@ -152,13 +146,13 @@ describe("distributeCommission (margin-based with TDS)", () => {
       { id: "s-dt", name: "DT Plan", active: true },
     ];
     state.slabs = [
-      slab({ id: "sl-rt", schemeId: "s-rt", chargeValue: d(10), commissionValue: d(100) }),
-      slab({ id: "sl-dt", schemeId: "s-dt", chargeValue: d(8), commissionValue: d(150) }),
+      slab({ id: "sl-rt", schemeId: "s-rt", service: "DMT_IMPS", chargeValue: d(10), commissionValue: d(100) }),
+      slab({ id: "sl-dt", schemeId: "s-dt", service: "DMT_IMPS", chargeValue: d(8), commissionValue: d(150) }),
     ];
   });
 
   it("credits NET of TDS and records gross/tds/net per tier", async () => {
-    const credits = await distributeCommission("txn1", "rt", "BILL_ELECTRICITY", 10000);
+    const credits = await distributeCommission("txn1", "rt", "DMT_IMPS", 10000);
 
     expect(credits).toHaveLength(2);
 
@@ -180,7 +174,7 @@ describe("distributeCommission (margin-based with TDS)", () => {
 
   it("pays nothing when the transacting user has no scheme", async () => {
     state.users.set("rt", { id: "rt", role: "RETAILER", schemeId: null, parentId: "dt", status: "ACTIVE" });
-    const credits = await distributeCommission("txn1", "rt", "BILL_ELECTRICITY", 10000);
+    const credits = await distributeCommission("txn1", "rt", "DMT_IMPS", 10000);
     expect(credits).toHaveLength(0);
     expect(state.walletCredits).toHaveLength(0);
   });
@@ -188,39 +182,67 @@ describe("distributeCommission (margin-based with TDS)", () => {
   it("skips zero-margin tiers instead of writing empty credits", async () => {
     // DT prices identically to RT — no margin, no credit for DT.
     state.slabs = [
-      slab({ id: "sl-rt", schemeId: "s-rt", chargeValue: d(10), commissionValue: d(0) }),
-      slab({ id: "sl-dt", schemeId: "s-dt", chargeValue: d(10), commissionValue: d(0) }),
+      slab({ id: "sl-rt", schemeId: "s-rt", service: "DMT_IMPS", chargeValue: d(10), commissionValue: d(0) }),
+      slab({ id: "sl-dt", schemeId: "s-dt", service: "DMT_IMPS", chargeValue: d(10), commissionValue: d(0) }),
     ];
-    const credits = await distributeCommission("txn1", "rt", "BILL_ELECTRICITY", 10000);
+    const credits = await distributeCommission("txn1", "rt", "DMT_IMPS", 10000);
     expect(credits).toHaveLength(0);
+  });
+});
+
+describe("distributeCommission (BBPS/Payout charge-driven model)", () => {
+  beforeEach(() => {
+    // Charge-driven (BILL_ELECTRICITY): parent margin = charge markup − child
+    // commission. RT charges 20 & earns 2; DT's rate is 15 → DT margin = 3.
+    state.users = new Map([
+      ["rt", { id: "rt", role: "RETAILER", schemeId: "s-rt", parentId: "dt", status: "ACTIVE" }],
+      ["dt", { id: "dt", role: "DISTRIBUTOR", schemeId: "s-dt", parentId: null, status: "ACTIVE" }],
+    ]);
+    state.schemes = [
+      { id: "s-rt", name: "RT Plan", active: true },
+      { id: "s-dt", name: "DT Plan", active: true },
+    ];
+    state.slabs = [
+      slab({ id: "sl-rt", schemeId: "s-rt", service: "BILL_ELECTRICITY", chargeValue: d(20), commissionValue: d(2) }),
+      slab({ id: "sl-dt", schemeId: "s-dt", service: "BILL_ELECTRICITY", chargeValue: d(15), commissionValue: d(2.5) }),
+    ];
+  });
+
+  it("funds the child's commission out of the parent's charge markup", async () => {
+    const credits = await distributeCommission("txn1", "rt", "BILL_ELECTRICITY", 500);
+    expect(credits).toHaveLength(2);
+    // RT (leaf) earns their own commission = 2.
+    expect(credits[0]).toMatchObject({ userId: "rt", tier: "RETAILER", gross: 2 });
+    // DT margin = charge markup (20-15)=5 − child commission (2) = 3.
+    expect(credits[1]).toMatchObject({ userId: "dt", tier: "DISTRIBUTOR", gross: 3 });
   });
 });
 
 describe("requireActiveScheme (strict gate)", () => {
   it("throws NoSchemeError for a network user without a scheme", async () => {
-    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: null, mdrScheme: null });
+    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: null });
     await expect(requireActiveScheme("rt")).rejects.toBeInstanceOf(NoSchemeError);
   });
 
   it("throws when the assigned scheme is inactive", async () => {
-    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: { id: "s1", active: false }, mdrScheme: null });
+    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: { id: "s1", active: false } });
     await expect(requireActiveScheme("rt")).rejects.toBeInstanceOf(NoSchemeError);
   });
 
   it("passes with an active scheme", async () => {
-    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: { id: "s1", active: true }, mdrScheme: null });
+    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: { id: "s1", active: true } });
     await expect(requireActiveScheme("rt")).resolves.toBeUndefined();
   });
 
-  it("requires an MDR scheme too when asked", async () => {
-    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: { id: "s1", active: true }, mdrScheme: null });
-    await expect(requireActiveScheme("rt", { mdr: true })).rejects.toMatchObject({
-      code: "NO_MDR_SCHEME_ASSIGNED",
-    });
+  it("treats the unified scheme as covering MDR too (mdr option is a no-op)", async () => {
+    // The single scheme now carries both service and MDR slabs, so an active
+    // scheme satisfies requireActiveScheme even when { mdr: true } is passed.
+    state.users.set("rt", { id: "rt", role: "RETAILER", scheme: { id: "s1", active: true } });
+    await expect(requireActiveScheme("rt", { mdr: true })).resolves.toBeUndefined();
   });
 
   it("exempts staff roles", async () => {
-    state.users.set("adm", { id: "adm", role: "ADMIN", scheme: null, mdrScheme: null });
+    state.users.set("adm", { id: "adm", role: "ADMIN", scheme: null });
     await expect(requireActiveScheme("adm")).resolves.toBeUndefined();
   });
 });
@@ -244,12 +266,13 @@ describe("createDerivedScheme (parent-bound validation)", () => {
     ).rejects.toBeInstanceOf(DerivedSchemeError);
   });
 
-  it("rejects a commission above the parent's rate", async () => {
+  it("rejects a BBPS commission above the charge markup", async () => {
+    // Charge-driven: child commission must be <= charge markup (10-8 = 2).
     await expect(
       createDerivedScheme({
         ownerId: "dt",
         name: "Bad Plan",
-        overrides: [{ parentSlabId: "sl-dt", commissionValue: 151 }],
+        overrides: [{ parentSlabId: "sl-dt", chargeValue: 10, commissionValue: 3 }],
       })
     ).rejects.toBeInstanceOf(DerivedSchemeError);
   });
@@ -279,10 +302,11 @@ describe("createDerivedScheme (parent-bound validation)", () => {
   });
 
   it("creates a scheme with bands + types locked to the parent and marked with lineage", async () => {
+    // Charge-driven bound: child commission (2) <= charge markup (12-8 = 4).
     const scheme = await createDerivedScheme({
       ownerId: "dt",
       name: "Retail Silver",
-      overrides: [{ parentSlabId: "sl-dt", chargeValue: 10, commissionValue: 100 }],
+      overrides: [{ parentSlabId: "sl-dt", chargeValue: 12, commissionValue: 2 }],
     });
     expect(scheme.id).toBeDefined();
     const created = state.createdSchemes[0] as {
@@ -295,7 +319,7 @@ describe("createDerivedScheme (parent-bound validation)", () => {
     const s = created.slabs.create[0];
     expect(s.parentSlabId).toBe("sl-dt");
     expect(s.service).toBe("BILL_ELECTRICITY");
-    expect(toFixedString(s.chargeValue as never)).toBe("10.00");
-    expect(toFixedString(s.commissionValue as never)).toBe("100.00");
+    expect(toFixedString(s.chargeValue as never)).toBe("12.00");
+    expect(toFixedString(s.commissionValue as never)).toBe("2.00");
   });
 });

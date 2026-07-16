@@ -16,6 +16,7 @@ import {
   Banknote,
   CircleDollarSign,
   BookText,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import type { ReportType, ReportFieldFormat } from "./types";
@@ -84,10 +85,41 @@ const SERVICE_CODES = [
   "BILL_ELECTRICITY", "BILL_WATER", "BILL_GAS", "BILL_CREDIT_CARD", "BILL_EDUCATION", "BILL_INSURANCE",
   "TRAVEL_FLIGHT", "TRAVEL_HOTEL", "TRAVEL_BUS", "TRAVEL_TRAIN", "PAN_CARD", "INSURANCE",
 ];
+const NETWORK_ROLES = [
+  "RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR",
+];
 
 /* ------- registry ---------------------------------------------------- */
 
 export const REPORTS: Record<ReportType, ReportConfig> = {
+  "daily-user": {
+    type: "daily-user",
+    title: "Daily User Report",
+    short: "Daily User Report",
+    description:
+      "Per-user daily activity on the Primary wallet: opening, credits by reason, service-wise debits & commission, closing. Reconciles against the ledger.",
+    icon: CalendarClock,
+    accent: "brand",
+    columns: [
+      { key: "code", header: "User ID", format: "mono" },
+      { key: "name", header: "Name" },
+      { key: "role", header: "Role", format: "badge" },
+      { key: "opening", header: "Opening", format: "money", align: "right" },
+      { key: "creditsTotal", header: "Credits", format: "money", align: "right" },
+      { key: "topup", header: "Top-up", format: "money", align: "right" },
+      { key: "commissionEarned", header: "Commission", format: "money", align: "right" },
+      { key: "debitsTotal", header: "Debits", format: "money", align: "right" },
+      { key: "servicesUsed", header: "Services used", format: "text" },
+      { key: "closing", header: "Closing", format: "money", align: "right" },
+    ],
+    filters: {
+      dateRange: true,
+      search: "Search name / ID / shop…",
+      status: { label: "Role", options: opts(NETWORK_ROLES) },
+      service: { label: "Service used", options: opts(SERVICE_CODES) },
+    },
+  },
+
   summary: {
     type: "summary",
     title: "Summary Report",

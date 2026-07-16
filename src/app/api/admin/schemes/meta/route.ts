@@ -24,7 +24,7 @@ export async function GET() {
     throw e;
   }
 
-  const [routes, companies] = await Promise.all([
+  const [routes, companiesByField, companiesByModel] = await Promise.all([
     prisma.serviceRoute.findMany({
       where: { type: "SERVICE", provider: { not: null } },
       select: { kind: true, provider: true, name: true },
@@ -35,6 +35,12 @@ export async function GET() {
       select: { company: true },
       distinct: ["company"],
       orderBy: { company: "asc" },
+    }),
+    prisma.posMachine.findMany({
+      where: { model: { not: null } },
+      select: { model: true },
+      distinct: ["model"],
+      orderBy: { model: "asc" },
     }),
   ]);
 
@@ -48,8 +54,12 @@ export async function GET() {
     }
   }
 
+  const companyNames = new Set<string>();
+  for (const c of companiesByField) if (c.company) companyNames.add(c.company);
+  for (const c of companiesByModel) if (c.model) companyNames.add(c.model);
+
   return NextResponse.json({
     providersByKind,
-    posCompanies: companies.map((c) => c.company).filter(Boolean),
+    posCompanies: Array.from(companyNames).sort(),
   });
 }

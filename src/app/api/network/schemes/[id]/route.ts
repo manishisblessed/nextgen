@@ -31,6 +31,18 @@ const UpdateBody = z
       )
       .max(500)
       .optional(),
+    mdrSlabs: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            mdrValue: z.number().nonnegative().optional(),
+            mdrValueT0: z.number().nonnegative().optional(),
+          })
+          .strict()
+      )
+      .max(500)
+      .optional(),
   })
   .strict();
 
@@ -49,7 +61,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     where: { id: params.id, ownerId: user.id },
     include: {
       slabs: { orderBy: [{ service: "asc" }, { minAmount: "asc" }] },
-      _count: { select: { slabs: true, users: true } },
+      mdrSlabs: { orderBy: [{ serviceKind: "asc" }, { minAmount: "asc" }] },
+      _count: { select: { slabs: true, users: true, mdrSlabs: true } },
     },
   });
   if (!scheme) return NextResponse.json({ error: "Scheme not found" }, { status: 404 });
@@ -87,7 +100,11 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         action: "network.scheme.update",
         entity: "Scheme",
         entityId: scheme.id,
-        meta: { name: scheme.name, slabEdits: parsed.data.slabs?.length ?? 0 },
+        meta: {
+          name: scheme.name,
+          slabEdits: parsed.data.slabs?.length ?? 0,
+          mdrSlabEdits: parsed.data.mdrSlabs?.length ?? 0,
+        },
         ip: clientIp(req),
       },
     });

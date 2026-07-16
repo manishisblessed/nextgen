@@ -103,11 +103,12 @@ export class FakeDb {
     findUnique: async ({ where }: { where: { id: string } }) => {
       const row = this.users.get(where.id);
       if (!row) return null;
-      // Emulate the `scheme`/`mdrScheme` relations read by the scheme gate.
+      // Emulate the `scheme` relation read by the scheme gate (unified model:
+      // one scheme carries both service and MDR slabs).
       const scheme = row.schemeId
         ? this.schemes.find((s) => s.id === row.schemeId) ?? null
         : null;
-      return { ...row, scheme: scheme ? { ...scheme } : null, mdrScheme: null };
+      return { ...row, scheme: scheme ? { ...scheme } : null };
     },
     update: async ({ where, data }: { where: { id: string }; data: Row }) => {
       const row = this.users.get(where.id);

@@ -160,7 +160,6 @@ model User {
   walletOpsPerformed    WalletOperation[]     @relation("WalletOpActor")
   walletOpsReceived     WalletOperation[]     @relation("WalletOpTarget")
   walletOpsApproved     WalletOperation[]     @relation("WalletOpApprover")
-  mdrScheme             MdrScheme?            @relation("UserMdrScheme", fields: [mdrSchemeId], references: [id])
   userLimit             UserLimit?
   reversalsCreated      Reversal[]            @relation("ReversalActor")
   reversalsReceived     Reversal[]            @relation("ReversalTarget")
@@ -175,10 +174,6 @@ model User {
   networkTransfersOut   NetworkWalletTransfer[] @relation("NetworkTransfersOut")
   networkTransfersIn    NetworkWalletTransfer[] @relation("NetworkTransfersIn")
 
-  // MDR scheme assignment (Phase 3) — resolved by the MDR engine alongside
-  // the charge/commission Scheme. Null = platform default MDR scheme.
-  mdrSchemeId String?
-
   // POS acquirer settlement mode (admin-toggleable only).
   // true = proceeds credit instantly on webhook; false = T+1 cron.
   instantSettlement Boolean @default(false)
@@ -191,7 +186,6 @@ model User {
   @@index([parentId])
   @@index([status])
   @@index([schemeId])
-  @@index([mdrSchemeId])
   @@index([reKycRequired])
 }
 
@@ -517,6 +511,7 @@ enum ServiceCode {
   DMT_RTGS
   UPI_COLLECT
   UPI_PAYOUT
+  PAYOUT
   WALLET_TOPUP
   WALLET_WITHDRAW
   RECHARGE_MOBILE
@@ -639,6 +634,10 @@ model Scheme {
   derivedSchemes Scheme[] @relation("SchemeDerivation")
 
   slabs       SchemeSlab[]
+  // Unified model: POS/PG/QR/UPI acquiring MDR rows live on the same Scheme as
+  // the service (BBPS/Payout) slabs, so a single scheme prices every rail and
+  // is assigned once (User.schemeId). No separate MdrScheme model.
+  mdrSlabs    MdrSlab[]
   users       User[]       @relation("UserScheme")
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -666,10 +665,15 @@ model SchemeSlab {
   // chargeType = FLAT, or a fraction (0.0050 = 0.5%) when chargeType = PERCENT.
   chargeType  RateType @default(FLAT)
   chargeValue Decimal  @default(0) @db.Decimal(14, 4)
+  // When true the chargeValue already includes 18% GST (no extra GST added).
+  // When false (default) the charge is the base amount and GST is added on top.
+  chargeGstInclusive Boolean @default(false)
 
   // Commission split across the distribution chain. Same flat/percent semantics
   // as the charge (driven by commissionType). All three may be zero.
-  commissionType             RateType @default(PERCENT)
+  // BBPS/Payout commissions are always flat ₹ (never a percentage), so this
+  // defaults to FLAT to match the charge default and avoid "% of amount" payouts.
+  commissionType             RateType @default(FLAT)
   commissionRetailer         Decimal  @default(0) @db.Decimal(14, 4)
   commissionDistributor      Decimal  @default(0) @db.Decimal(14, 4)
   commissionMaster           Decimal  @default(0) @db.Decimal(14, 4)
@@ -1460,11 +1464,11 @@ model WalletOperation {
   @@index([status, createdAt])
 }
 
-// ---------- A3: MDR scheme engine ----------
-// MDR (merchant discount rate) pricing for acquiring-style rails (POS / PG /
-// QR), separate from the service charge Scheme. A slab matches on service
-// kind + payment mode + card network band and yields the platform MDR and the
-// per-tier commission share. Exactly one scheme may be the default.
+// ---------- A3: MDR (merchant discount rate) rows ----------
+// MDR pricing for acquiring-style rails (POS / PG / QR / UPI) now lives on the
+// SAME Scheme as the service charge/commission slabs (unified model). A slab
+// matches on service kind + payment mode + card network band and yields the
+// platform MDR and the per-tier commission share.
 
 enum MdrServiceKind {
   POS
@@ -1473,38 +1477,10 @@ enum MdrServiceKind {
   UPI
 }
 
-model MdrScheme {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  description String?
-  active      Boolean   @default(true)
-  isDefault   Boolean   @default(false)
-  createdById String?
-
-  // Hierarchical derivation (mirrors Scheme): ownerId = deriving network
-  // parent (null = platform scheme); parentSchemeId = source scheme. Derived
-  // MDR must be >= the parent's for each slab — the difference is the chain's
-  // margin, split at transaction time.
-  ownerId        String?
-  parentSchemeId String?
-  parentScheme   MdrScheme?  @relation("MdrSchemeDerivation", fields: [parentSchemeId], references: [id])
-  derivedSchemes MdrScheme[] @relation("MdrSchemeDerivation")
-
-  slabs       MdrSlab[]
-  users       User[]    @relation("UserMdrScheme")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  @@index([active])
-  @@index([isDefault])
-  @@index([ownerId])
-  @@index([parentSchemeId])
-}
-
 model MdrSlab {
-  id       String    @id @default(cuid())
+  id       String @id @default(cuid())
   schemeId String
-  scheme   MdrScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  scheme   Scheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
 
   serviceKind MdrServiceKind
   // Payment instrument dimension, e.g. "CARD_CREDIT", "CARD_DEBIT", "UPI",

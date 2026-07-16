@@ -13,6 +13,7 @@ const CreateBody = z.object({
   email: z.string().email(),
   phone: z.string().min(10).max(15),
   password: z.string().min(8),
+  allowedTabs: z.array(z.string()).max(100).default([]),
 });
 
 export async function GET(req: Request) {
@@ -45,6 +46,7 @@ export async function GET(req: Request) {
       email: true,
       phone: true,
       status: true,
+      allowedTabs: true,
       createdAt: true,
     },
     orderBy: { createdAt: "desc" },
@@ -67,7 +69,7 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { name, email, phone, password } = parsed.data;
+  const { name, email, phone, password, allowedTabs } = parsed.data;
 
   const existing = await prisma.user.findFirst({
     where: { OR: [{ email: email.toLowerCase() }, { phone }], deletedAt: null },
@@ -89,6 +91,7 @@ export async function POST(req: Request) {
       passwordHash,
       role: "MASTER_ADMIN",
       status: "ACTIVE",
+      allowedTabs,
     },
     select: {
       id: true,
@@ -96,6 +99,7 @@ export async function POST(req: Request) {
       email: true,
       phone: true,
       status: true,
+      allowedTabs: true,
       createdAt: true,
     },
   });

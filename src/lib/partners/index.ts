@@ -13,6 +13,7 @@ import { bulkpeConfigured, bulkpePayout, bulkpeUpi } from "./bulkpe";
 import { bulkpeBbps, bulkpeBbpsConfigured } from "./bulkpe-bbps";
 import { samedayBbps, samedayBbpsConfigured } from "./sameday-bbps";
 import { samedaySettlementConfigured } from "./sameday-settlement";
+import { samedaySettlementPayout } from "./sameday-payout";
 import { leegalityConfigured } from "./leegality";
 import { msg91Configured, msg91Sms } from "./msg91";
 import { resendConfigured, resendEmail } from "./resend";
@@ -90,6 +91,40 @@ function resolveBbps(): BbpsProvider {
   return mock.mockBbps;
 }
 
+/**
+ * Payout routing — bank transfers (IMPS/NEFT/RTGS) prefer the Same Day
+ * Settlement rail (partner wallet → penny-drop-verified accounts); UPI
+ * payouts can only ride BulkPe (or RazorpayX). With a single rail configured
+ * that rail serves what it can; otherwise MOCK.
+ */
+function resolvePayout(): PayoutProvider {
+  if (!flags.payout) return mock.mockPayout;
+  const sameday = samedaySettlementConfigured();
+  const upiRail = bulkpeConfigured()
+    ? bulkpePayout
+    : razorpayPayoutConfigured()
+      ? razorpayPayout
+      : null;
+  if (sameday && upiRail) {
+    return {
+      name: "PAYOUT_ROUTED",
+      payout: (input) => (input.mode === "UPI" ? upiRail : samedaySettlementPayout).payout(input),
+      // Status lookups can't see the mode. Our own reference ids ("PO…")
+      // only resolve at BulkPe/Razorpay; anything else is tried at Same Day
+      // first, falling back to the UPI rail's lookup.
+      status: async (ref) => {
+        if (ref.startsWith("PO")) return upiRail.status(ref);
+        const r = await samedaySettlementPayout.status(ref);
+        return r.ok ? r : upiRail.status(ref);
+      },
+      fetchBalance: () => samedaySettlementPayout.fetchBalance!(),
+    };
+  }
+  if (sameday) return samedaySettlementPayout;
+  if (upiRail) return upiRail;
+  return mock.mockPayout;
+}
+
 export function getPartner<V extends Vertical>(v: V): ProviderMap[V] {
   switch (v) {
     case "aeps":
@@ -102,10 +137,7 @@ export function getPartner<V extends Vertical>(v: V): ProviderMap[V] {
       if (flags.upi && razorpayUpiConfigured()) return razorpayUpi as ProviderMap[V];
       return mock.mockUpi as ProviderMap[V];
     case "payout":
-      // Prefer BulkPe; fall back to RazorpayX if only that is configured; else MOCK.
-      if (flags.payout && bulkpeConfigured()) return bulkpePayout as ProviderMap[V];
-      if (flags.payout && razorpayPayoutConfigured()) return razorpayPayout as ProviderMap[V];
-      return mock.mockPayout as ProviderMap[V];
+      return resolvePayout() as ProviderMap[V];
     case "bbps":
       return resolveBbps() as ProviderMap[V];
     case "recharge":
@@ -138,7 +170,11 @@ export function partnerStatus() {
     aeps:     { live: flags.aeps && paysprintConfigured(), provider: flags.aeps && paysprintConfigured() ? "PAYSPRINT" : "MOCK" },
     dmt:      { live: flags.dmt && paysprintConfigured(), provider: flags.dmt && paysprintConfigured() ? "PAYSPRINT" : "MOCK" },
     upi:      { live: flags.upi && (bulkpeConfigured() || razorpayUpiConfigured()), provider: flags.upi && bulkpeConfigured() ? "BULKPE_PG" : flags.upi && razorpayUpiConfigured() ? "RAZORPAY" : "MOCK" },
-    payout:   { live: flags.payout && (bulkpeConfigured() || razorpayPayoutConfigured()), provider: flags.payout && bulkpeConfigured() ? "BULKPE" : flags.payout && razorpayPayoutConfigured() ? "RAZORPAYX" : "MOCK" },
+    payout:   (() => {
+      const p = resolvePayout();
+      const live = p.name !== "MOCK-PAYOUT";
+      return { live, provider: !live ? "MOCK" : p.name === "PAYOUT_ROUTED" ? "SAMEDAY_SETTLEMENT+BULKPE" : p.name };
+    })(),
     bbps:     (() => {
       const p = resolveBbps();
       const live = flags.bbps && (samedayBbpsConfigured() || bulkpeBbpsConfigured());

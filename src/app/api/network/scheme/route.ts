@@ -13,17 +13,16 @@ const PARENT_ROLES = ["DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"];
 const Body = z.object({
   childId: z.string().min(1),
   schemeId: z.string().min(1).nullable(),
-  mdrSchemeId: z.string().min(1).nullable().optional(),
 }).strict();
 
 /**
  * POST /api/network/scheme
  *
- * A network parent assigns (or clears) a commission/charge scheme and/or MDR
- * scheme on a direct child. Cascade model: only schemes the CALLER OWNS
- * (derived from their own scheme via /api/network/schemes) can be assigned.
- * Clearing (null) leaves the child with no scheme — which blocks them from
- * transacting until a scheme is assigned again.
+ * A network parent assigns (or clears) the unified scheme (charges + MDR) on a
+ * direct child. Cascade model: only schemes the CALLER OWNS (derived from their
+ * own scheme via /api/network/schemes) can be assigned. Clearing (null) leaves
+ * the child with no scheme — which blocks them from transacting until a scheme
+ * is assigned again.
  */
 export async function POST(req: Request) {
   let user;
@@ -43,11 +42,11 @@ export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const { childId, schemeId, mdrSchemeId } = parsed.data;
+  const { childId, schemeId } = parsed.data;
 
   const child = await prisma.user.findFirst({
     where: { id: childId, parentId: user.id, deletedAt: null },
-    select: { id: true, name: true, schemeId: true, mdrSchemeId: true },
+    select: { id: true, name: true, schemeId: true },
   });
   if (!child)
     return NextResponse.json({ error: "User not found in your direct network" }, { status: 404 });
@@ -66,30 +65,9 @@ export async function POST(req: Request) {
       );
   }
 
-  const updateData: Record<string, unknown> = {};
-  if (schemeId !== undefined) updateData.schemeId = schemeId;
-
-  if (mdrSchemeId !== undefined) {
-    if (mdrSchemeId) {
-      const mdr = await prisma.mdrScheme.findFirst({
-        where: { id: mdrSchemeId, active: true, ownerId: user.id },
-        select: { id: true },
-      });
-      if (!mdr)
-        return NextResponse.json(
-          { error: "MDR scheme not found, inactive, or not one of your derived MDR schemes" },
-          { status: 404 }
-        );
-    }
-    updateData.mdrSchemeId = mdrSchemeId;
-  }
-
-  if (Object.keys(updateData).length === 0)
-    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
-
   await prisma.user.update({
     where: { id: childId },
-    data: updateData,
+    data: { schemeId },
   });
 
   await prisma.auditLog.create({
@@ -102,8 +80,6 @@ export async function POST(req: Request) {
         childName: child.name,
         previousSchemeId: child.schemeId,
         newSchemeId: schemeId ?? null,
-        previousMdrSchemeId: child.mdrSchemeId,
-        newMdrSchemeId: mdrSchemeId ?? null,
       },
       ip: clientIp(req),
     },
@@ -128,18 +104,11 @@ export async function GET() {
     throw e;
   }
 
-  const [schemes, mdrSchemes] = await Promise.all([
-    prisma.scheme.findMany({
-      where: { active: true, ownerId: user.id },
-      select: { id: true, name: true, description: true, isDefault: true },
-      orderBy: { name: "asc" },
-    }),
-    prisma.mdrScheme.findMany({
-      where: { active: true, ownerId: user.id },
-      select: { id: true, name: true, isDefault: true },
-      orderBy: { name: "asc" },
-    }),
-  ]);
+  const schemes = await prisma.scheme.findMany({
+    where: { active: true, ownerId: user.id },
+    select: { id: true, name: true, description: true, isDefault: true },
+    orderBy: { name: "asc" },
+  });
 
-  return NextResponse.json({ schemes, mdrSchemes });
+  return NextResponse.json({ schemes });
 }

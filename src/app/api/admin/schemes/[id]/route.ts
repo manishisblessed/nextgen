@@ -20,8 +20,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const scheme = await prisma.scheme.findUnique({
       where: { id: params.id },
       include: {
-        _count: { select: { slabs: true, users: true } },
+        _count: { select: { slabs: true, users: true, mdrSlabs: true } },
         slabs: { orderBy: [{ service: "asc" }, { minAmount: "asc" }] },
+        mdrSlabs: { orderBy: [{ serviceKind: "asc" }, { minAmount: "asc" }] },
       },
     });
     if (!scheme) return NextResponse.json({ error: "Scheme not found" }, { status: 404 });

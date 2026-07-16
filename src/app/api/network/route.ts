@@ -69,6 +69,8 @@ export async function GET(req: Request) {
           state: true,
           walletBalance: true,
           createdAt: true,
+          schemeId: true,
+          scheme: { select: { id: true, name: true } },
           _count: { select: { children: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -130,6 +132,8 @@ export async function GET(req: Request) {
       walletBalance: Number(u.walletBalance),
       monthlyTurnover: turnoverMap.get(u.id) ?? 0,
       retailers: u._count.children,
+      schemeId: u.schemeId,
+      schemeName: u.scheme?.name ?? null,
     }));
 
     return NextResponse.json({ users: mapped, total, page, pageSize });

@@ -280,10 +280,10 @@ describe("validateNonOverlapping", () => {
 });
 
 describe("payout mode → service mapping", () => {
-  it("maps every payout mode to a scheme service code", () => {
-    expect(PAYOUT_MODE_SERVICE.IMPS).toBe("DMT_IMPS");
-    expect(PAYOUT_MODE_SERVICE.NEFT).toBe("DMT_NEFT");
-    expect(PAYOUT_MODE_SERVICE.RTGS).toBe("DMT_RTGS");
-    expect(PAYOUT_MODE_SERVICE.UPI).toBe("UPI_PAYOUT");
+  it("maps every payout mode to the unified PAYOUT scheme service code", () => {
+    expect(PAYOUT_MODE_SERVICE.IMPS).toBe("PAYOUT");
+    expect(PAYOUT_MODE_SERVICE.NEFT).toBe("PAYOUT");
+    expect(PAYOUT_MODE_SERVICE.RTGS).toBe("PAYOUT");
+    expect(PAYOUT_MODE_SERVICE.UPI).toBe("PAYOUT");
   });
 });

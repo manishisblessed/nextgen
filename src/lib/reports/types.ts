@@ -8,6 +8,7 @@
 
 /** Machine slugs for every data-backed report. Order drives the hub grid. */
 export const REPORT_TYPES = [
+  "daily-user",
   "summary",
   "fund",
   "pg",

@@ -1,4 +1,5 @@
-import type { Scheme, SchemeSlab } from "@prisma/client";
+import type { MdrSlab, Scheme, SchemeSlab } from "@prisma/client";
+import { serializeMdrSlab } from "@/lib/mdr/serialize";
 
 /** JSON-safe shape for a SchemeSlab (Decimals -> numbers). */
 export function serializeSlab(s: SchemeSlab) {
@@ -11,6 +12,7 @@ export function serializeSlab(s: SchemeSlab) {
     maxAmount: Number(s.maxAmount),
     chargeType: s.chargeType,
     chargeValue: Number(s.chargeValue),
+    chargeGstInclusive: s.chargeGstInclusive,
     commissionType: s.commissionType,
     commissionRetailer: Number(s.commissionRetailer),
     commissionDistributor: Number(s.commissionDistributor),
@@ -25,11 +27,12 @@ export function serializeSlab(s: SchemeSlab) {
 }
 
 type SchemeWithCounts = Scheme & {
-  _count?: { slabs: number; users: number };
+  _count?: { slabs: number; users: number; mdrSlabs?: number };
   slabs?: SchemeSlab[];
+  mdrSlabs?: MdrSlab[];
 };
 
-/** JSON-safe shape for a Scheme, optionally embedding counts + slabs. */
+/** JSON-safe shape for a Scheme, optionally embedding counts + slabs (service + MDR). */
 export function serializeScheme(s: SchemeWithCounts) {
   return {
     id: s.id,
@@ -41,8 +44,10 @@ export function serializeScheme(s: SchemeWithCounts) {
     ownerId: s.ownerId,
     parentSchemeId: s.parentSchemeId,
     slabCount: s._count?.slabs ?? (s.slabs ? s.slabs.length : 0),
+    mdrSlabCount: s._count?.mdrSlabs ?? (s.mdrSlabs ? s.mdrSlabs.length : 0),
     userCount: s._count?.users ?? 0,
     slabs: s.slabs ? s.slabs.map(serializeSlab) : undefined,
+    mdrSlabs: s.mdrSlabs ? s.mdrSlabs.map(serializeMdrSlab) : undefined,
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
   };

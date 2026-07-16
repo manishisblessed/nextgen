@@ -34,7 +34,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         createdAt: true,
         instantSettlement: true,
         scheme: { select: { id: true, name: true } },
-        mdrScheme: { select: { id: true, name: true } },
         parent: { select: { id: true, name: true, role: true } },
         kyc: { select: { status: true } },
         userLimit: true,
@@ -93,7 +92,6 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
 const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("assignScheme"), schemeId: z.string().nullable() }),
-  z.object({ action: z.literal("assignMdrScheme"), mdrSchemeId: z.string().nullable() }),
   z.object({ action: z.literal("resetPassword") }),
   z.object({
     action: z.literal("setLimits"),
@@ -186,35 +184,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
           data: { schemeId: body.schemeId },
         });
         await audit("network.scheme_assigned", { schemeId: body.schemeId });
-        return NextResponse.json({ ok: true });
-      }
-
-      case "assignMdrScheme": {
-        if (body.mdrSchemeId) {
-          const scheme = await prisma.mdrScheme.findFirst({
-            where: { id: body.mdrSchemeId, active: true },
-            select: { id: true, ownerId: true },
-          });
-          if (!scheme)
-            return NextResponse.json({ error: "MDR scheme not found or inactive" }, { status: 404 });
-          const allowed = scheme.ownerId
-            ? scheme.ownerId === target.parentId
-            : target.role === "SUPER_DISTRIBUTOR";
-          if (!allowed)
-            return NextResponse.json(
-              {
-                error: scheme.ownerId
-                  ? "MDR scheme belongs to a different parent — assign one of this user's parent's MDR schemes"
-                  : "Platform MDR schemes can only be assigned to super-distributors; lower tiers get MDR schemes from their parent",
-              },
-              { status: 400 }
-            );
-        }
-        await prisma.user.update({
-          where: { id: target.id },
-          data: { mdrSchemeId: body.mdrSchemeId },
-        });
-        await audit("network.mdr_scheme_assigned", { mdrSchemeId: body.mdrSchemeId });
         return NextResponse.json({ ok: true });
       }
 

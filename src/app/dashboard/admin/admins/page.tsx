@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { ASSIGNABLE_ADMIN_TABS } from "@/lib/roles";
+import { ASSIGNABLE_ADMIN_TABS, ASSIGNABLE_MASTER_ADMIN_TABS } from "@/lib/roles";
 import { generateRandomPassword } from "@/lib/utils";
 
 type AdminRecord = {
@@ -43,6 +43,7 @@ type MasterAdminRecord = {
   email: string;
   phone: string;
   status: string;
+  allowedTabs: string[];
   createdAt: string;
 };
 
@@ -54,8 +55,10 @@ export default function ManageAdminsPage() {
   const [showNew, setShowNew] = useState(false);
   const [showNewMaster, setShowNewMaster] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<AdminRecord | null>(null);
+  const [editingMasterAdmin, setEditingMasterAdmin] = useState<MasterAdminRecord | null>(null);
   const [created, setCreated] = useState<{ admin: AdminRecord | MasterAdminRecord; password: string; isMaster: boolean } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminRecord | null>(null);
+  const [deleteMasterTarget, setDeleteMasterTarget] = useState<MasterAdminRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -100,11 +103,36 @@ export default function ManageAdminsPage() {
     refresh();
   }
 
+  async function handleMasterAction(id: string, action: string) {
+    await fetch(`/api/admin/master-admins/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    refresh();
+  }
+
   async function handleDelete(admin: AdminRecord) {
     setDeleting(true);
     try {
       await fetch(`/api/admin/admins/${admin.id}`, { method: "DELETE" });
       toast.success(`Admin ${admin.name} deleted.`);
+      refresh();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleDeleteMaster(admin: MasterAdminRecord) {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/master-admins/${admin.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to delete");
+        return;
+      }
+      toast.success(`Master admin ${admin.name} deleted.`);
       refresh();
     } finally {
       setDeleting(false);
@@ -210,11 +238,26 @@ export default function ManageAdminsPage() {
     },
     { key: "phone", header: "Mobile" },
     {
+      key: "allowedTabs",
+      header: "Permissions",
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          {r.allowedTabs.length === 0 ? (
+            <Badge variant="success">All access</Badge>
+          ) : (
+            <Badge variant="default">
+              {r.allowedTabs.length} of {ASSIGNABLE_MASTER_ADMIN_TABS.length} tabs
+            </Badge>
+          )}
+        </div>
+      )
+    },
+    {
       key: "status",
       header: "Status",
       render: (r) => (
-        <Badge variant={r.status === "ACTIVE" ? "success" : "danger"}>
-          {r.status === "ACTIVE" ? "Active" : r.status}
+        <Badge variant={r.status === "ACTIVE" ? "success" : r.status === "SUSPENDED" ? "danger" : "default"}>
+          {r.status === "ACTIVE" ? "Active" : r.status === "SUSPENDED" ? "Suspended" : r.status}
         </Badge>
       )
     },
@@ -223,6 +266,46 @@ export default function ManageAdminsPage() {
       header: "Created",
       render: (r) => new Date(r.createdAt).toLocaleString("en-IN")
     },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (r) => (
+        <div className="flex justify-end gap-1">
+          <button
+            onClick={() => setEditingMasterAdmin(r)}
+            className="grid h-8 w-8 place-items-center rounded-lg text-amber-700 hover:bg-amber-50"
+            title="Edit permissions"
+          >
+            <Settings2 className="h-4 w-4" />
+          </button>
+          {r.status === "ACTIVE" ? (
+            <button
+              onClick={() => handleMasterAction(r.id, "suspend")}
+              className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
+              title="Suspend"
+            >
+              <ShieldOff className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              onClick={() => handleMasterAction(r.id, "activate")}
+              className="grid h-8 w-8 place-items-center rounded-lg text-emerald-700 hover:bg-emerald-50"
+              title="Reactivate"
+            >
+              <ShieldCheck className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            onClick={() => setDeleteMasterTarget(r)}
+            className="grid h-8 w-8 place-items-center rounded-lg text-rose-700 hover:bg-rose-50"
+            title="Delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      )
+    }
   ];
 
   return (
@@ -327,9 +410,20 @@ export default function ManageAdminsPage() {
             />
           )}
 
+          {editingMasterAdmin && (
+            <EditMasterTabsDialog
+              admin={editingMasterAdmin}
+              onClose={() => setEditingMasterAdmin(null)}
+              onSaved={() => {
+                setEditingMasterAdmin(null);
+                refresh();
+              }}
+            />
+          )}
+
           <DataTable
             title={`${masterRows.length} master admin${masterRows.length !== 1 ? "s" : ""}`}
-            description="Master admins have full unrestricted access to the entire platform."
+            description="Master admins see only the tabs you have assigned. Leave empty for full access."
             columns={masterCols}
             data={masterRows}
             empty="No other master admins yet."
@@ -358,6 +452,20 @@ export default function ManageAdminsPage() {
           if (!deleteTarget) return;
           await handleDelete(deleteTarget);
           setDeleteTarget(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteMasterTarget !== null}
+        onClose={() => setDeleteMasterTarget(null)}
+        busy={deleting}
+        title={deleteMasterTarget ? `Delete master admin ${deleteMasterTarget.name}?` : "Delete master admin?"}
+        description="This master admin will lose all platform access. This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (!deleteMasterTarget) return;
+          await handleDeleteMaster(deleteMasterTarget);
+          setDeleteMasterTarget(null);
         }}
       />
     </div>
@@ -572,8 +680,23 @@ function NewMasterAdminForm({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("+91 ");
+  const [selectedTabs, setSelectedTabs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function toggleTab(href: string) {
+    setSelectedTabs((prev) =>
+      prev.includes(href) ? prev.filter((t) => t !== href) : [...prev, href]
+    );
+  }
+
+  function selectAll() {
+    setSelectedTabs(ASSIGNABLE_MASTER_ADMIN_TABS.map((t) => t.href));
+  }
+
+  function clearAll() {
+    setSelectedTabs([]);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -584,7 +707,7 @@ function NewMasterAdminForm({
       const res = await fetch("/api/admin/master-admins", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, phone, password }),
+        body: JSON.stringify({ name, email, phone, password, allowedTabs: selectedTabs }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create master admin");
@@ -610,7 +733,7 @@ function NewMasterAdminForm({
             New master admin
           </h3>
           <p className="text-xs text-ink-500">
-            Master admins have unrestricted access to all platform features. Add with caution.
+            Create a new master admin. You can control which tabs they can access.
           </p>
         </div>
       </div>
@@ -650,9 +773,47 @@ function NewMasterAdminForm({
         </div>
       </div>
 
+      <div className="mt-5">
+        <div className="flex items-center justify-between">
+          <Label>Assign tabs & permissions</Label>
+          <div className="flex gap-2">
+            <button type="button" onClick={selectAll} className="text-xs font-medium text-amber-700 hover:underline">
+              Select all
+            </button>
+            <span className="text-ink-300">|</span>
+            <button type="button" onClick={clearAll} className="text-xs font-medium text-amber-700 hover:underline">
+              Clear all
+            </button>
+          </div>
+        </div>
+        <p className="mb-3 text-xs text-ink-500">
+          Leave empty to grant full access to all tabs. Select specific tabs to restrict what this master admin can see.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {ASSIGNABLE_MASTER_ADMIN_TABS.map((tab) => (
+            <label
+              key={tab.href}
+              className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition ${
+                selectedTabs.includes(tab.href)
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
+                  : "border-ink-100 bg-white text-ink-700 hover:border-ink-200"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedTabs.includes(tab.href)}
+                onChange={() => toggleTab(tab.href)}
+                className="h-4 w-4 rounded border-ink-300 text-amber-600 focus:ring-amber-500"
+              />
+              {tab.label}
+            </label>
+          ))}
+        </div>
+      </div>
+
       <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-        <strong>Warning:</strong> Master admins can create other admins, manage all users, toggle services,
-        and access every feature. Only grant this level to fully trusted personnel.
+        <strong>Note:</strong> Master admins can create other admins and manage users.
+        Only grant this level to fully trusted personnel.
       </div>
 
       {error && (
@@ -757,6 +918,104 @@ function EditTabsDialog({
               checked={selectedTabs.includes(tab.href)}
               onChange={() => toggleTab(tab.href)}
               className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            {tab.label}
+          </label>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/* ----------------------------------------------------------------------- */
+
+function EditMasterTabsDialog({
+  admin,
+  onClose,
+  onSaved
+}: {
+  admin: MasterAdminRecord;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [selectedTabs, setSelectedTabs] = useState<string[]>(admin.allowedTabs);
+  const [saving, setSaving] = useState(false);
+
+  function toggleTab(href: string) {
+    setSelectedTabs((prev) =>
+      prev.includes(href) ? prev.filter((t) => t !== href) : [...prev, href]
+    );
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const res = await fetch(`/api/admin/master-admins/${admin.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update-tabs", allowedTabs: selectedTabs }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (!res.ok) {
+      toast.error(data.error ?? "Failed to update permissions");
+      return;
+    }
+    toast.success("Permissions updated");
+    onSaved();
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Edit permissions"
+      title={admin.name}
+      subtitle="Select tabs this master admin can access. Empty = full access."
+      headerClassName="bg-gradient-to-br from-amber-50 to-white"
+      size="md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} isLoading={saving}>
+            Save permissions
+          </Button>
+        </>
+      }
+    >
+      <div className="mb-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setSelectedTabs(ASSIGNABLE_MASTER_ADMIN_TABS.map((t) => t.href))}
+          className="text-xs font-medium text-amber-700 hover:underline"
+        >
+          Select all
+        </button>
+        <span className="text-ink-300">|</span>
+        <button
+          type="button"
+          onClick={() => setSelectedTabs([])}
+          className="text-xs font-medium text-amber-700 hover:underline"
+        >
+          Clear all (full access)
+        </button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {ASSIGNABLE_MASTER_ADMIN_TABS.map((tab) => (
+          <label
+            key={tab.href}
+            className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition ${
+              selectedTabs.includes(tab.href)
+                ? "border-amber-300 bg-amber-50 text-amber-800"
+                : "border-ink-100 bg-white text-ink-700 hover:border-ink-200"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selectedTabs.includes(tab.href)}
+              onChange={() => toggleTab(tab.href)}
+              className="h-4 w-4 rounded border-ink-300 text-amber-600 focus:ring-amber-500"
             />
             {tab.label}
           </label>

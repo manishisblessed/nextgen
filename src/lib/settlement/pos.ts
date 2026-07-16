@@ -22,8 +22,8 @@ import type { MdrServiceKind, ServiceCode } from "@prisma/client";
  * capture, or in the T+1 sweep — the transaction is re-verified against the
  * brand's current rate, MDR deducted, and the net credited to the retailer.
  *
- * Machines with no brand fall back to the machine owner's own MdrScheme
- * (legacy cascade model) so existing fleets keep settling.
+ * Machines with no brand fall back to the machine owner's own unified Scheme
+ * MDR slabs (cascade model) so existing fleets keep settling.
  */
 
 export type PosCaptureInput = {
@@ -58,7 +58,7 @@ type PricedMdr = {
 
 /**
  * Price a capture's MDR. Brand rate card wins when the machine has a brand;
- * otherwise the owner's own MdrScheme (cascade) is used. Returns null when the
+ * otherwise the owner's own unified Scheme (cascade) is used. Returns null when the
  * money cannot be priced (no matching brand rate / no user scheme) — the caller
  * must park it rather than settle unpriced money.
  */
@@ -284,7 +284,7 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
 
 /**
  * POS commission distribution (cascade model): each ancestor earns the MDR
- * margin between their child's MdrScheme and their own, net of 2% TDS.
+ * margin between their child's Scheme MDR and their own, net of 2% TDS.
  * Creates a placeholder Transaction for the CommissionCredit FK, then
  * distributes via the MDR chain.
  */

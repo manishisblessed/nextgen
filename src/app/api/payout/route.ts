@@ -21,6 +21,8 @@ import { quotePayoutForUser } from "@/lib/payout/charges";
 import { assertServiceEnabled, ServiceDisabledError } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { requireActiveScheme, NoSchemeError } from "@/lib/scheme/gate";
+import { getSchemeLimit, PAYOUT_MODE_SERVICE } from "@/lib/scheme/resolver";
+import { dec, gt } from "@/lib/money";
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_RE = /^\d{9,18}$/;
@@ -154,6 +156,17 @@ export async function POST(req: Request) {
   const parsed = CreateBody.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const body = parsed.data;
+
+  const payoutService = PAYOUT_MODE_SERVICE[body.mode];
+  if (payoutService) {
+    const limit = await getSchemeLimit(user.id, payoutService);
+    if (limit && gt(dec(body.amount), limit)) {
+      return NextResponse.json(
+        { error: `Amount exceeds the maximum allowed limit of ₹${limit.toNumber().toLocaleString("en-IN")}` },
+        { status: 400 }
+      );
+    }
+  }
 
   const quote = await quotePayoutForUser(user.id, body.amount, body.mode);
 

@@ -183,7 +183,7 @@ export default function PayoutPage() {
       <PageHeader
         eyebrow="Payouts"
         title="Send a payout"
-        description="Disburse to any bank account or UPI ID via BulkPe. The beneficiary receives the full amount; service charge + 18% GST are added on top."
+        description="Disburse to any bank account via IMPS/NEFT/RTGS, or to a UPI ID. The beneficiary receives the full amount; service charge + 18% GST are added on top."
         actions={
           <>
             <ReportActions

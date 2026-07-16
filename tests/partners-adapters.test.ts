@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { samedaySign, samedayAuthHeaders } from "@/lib/partners/sameday-core";
 import { mapPay2NewBill, mapPay2NewStatus } from "@/lib/partners/sameday-bbps";
 import { mapSettlementStatus } from "@/lib/partners/sameday-settlement";
+import { mapSettlementToPayoutStatus } from "@/lib/partners/sameday-payout";
 import { mapPgStatus } from "@/lib/partners/bulkpe";
 import {
   buildCustParams,
@@ -96,6 +97,14 @@ describe("Same Day settlement status mapping", () => {
     expect(mapSettlementStatus("PENDING")).toBe("PENDING");
     expect(mapSettlementStatus("PROCESSING")).toBe("PENDING");
     expect(mapSettlementStatus(undefined)).toBe("PENDING");
+  });
+});
+
+describe("Same Day settlement → payout status mapping", () => {
+  it("maps terminal states and keeps PENDING in-flight", () => {
+    expect(mapSettlementToPayoutStatus("SUCCESS")).toBe("PAID");
+    expect(mapSettlementToPayoutStatus("FAILED")).toBe("FAILED");
+    expect(mapSettlementToPayoutStatus("PENDING")).toBe("PROCESSING");
   });
 });
 

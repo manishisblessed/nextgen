@@ -17,6 +17,7 @@ const UpdateBody = z
     maxAmount: z.number().min(0).max(100000000).optional(),
     chargeType: z.enum(["FLAT", "PERCENT"]).optional(),
     chargeValue: z.number().min(0).optional(),
+    chargeGstInclusive: z.boolean().optional(),
     commissionType: z.enum(["FLAT", "PERCENT"]).optional(),
     commissionRetailer: z.number().min(0).optional(),
     commissionDistributor: z.number().min(0).optional(),

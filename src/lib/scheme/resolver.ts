@@ -1,6 +1,7 @@
 import type { Prisma, RateType, ServiceCode, SchemeSlab } from "@prisma/client";
 import { prisma } from "../db";
 import { add, dec, gte, gt, lte, mul, round, type Money } from "../money";
+import { isChargeDrivenService } from "./constants";
 
 /**
  * Scheme resolver — the single source of truth for "what does this user pay
@@ -45,6 +46,8 @@ export type EffectiveRate = {
   /** Absolute customer-facing charge (₹) for `amount`. Zero when no slab. */
   charge: Money;
   chargeType: RateType | null;
+  /** true = charge already includes 18% GST; false = GST should be added. */
+  chargeGstInclusive: boolean;
   /** Absolute commission (₹) for each level for `amount` (legacy columns). */
   commission: CommissionSplit;
   /** Commission for the resolving user's own role, picked from the split. */
@@ -59,10 +62,10 @@ export type EffectiveRate = {
 
 /** Map a payout mode to the ServiceCode used for scheme charge lookups. */
 export const PAYOUT_MODE_SERVICE: Record<string, ServiceCode> = {
-  IMPS: "DMT_IMPS",
-  NEFT: "DMT_NEFT",
-  RTGS: "DMT_RTGS",
-  UPI: "UPI_PAYOUT",
+  IMPS: "PAYOUT",
+  NEFT: "PAYOUT",
+  RTGS: "PAYOUT",
+  UPI: "PAYOUT",
 };
 
 /** Turn a FLAT/PERCENT slab value into an absolute rupee amount for `amount`. */
@@ -107,6 +110,7 @@ function emptyRate(role: string): EffectiveRate {
     slabId: null,
     charge: dec(0),
     chargeType: null,
+    chargeGstInclusive: false,
     commission: ZERO_SPLIT(),
     commissionForUser: dec(0),
     commissionOwn: dec(0),
@@ -136,6 +140,7 @@ function rateFromSlab(
     slabId: slab.id,
     charge,
     chargeType: slab.chargeType,
+    chargeGstInclusive: (slab as any).chargeGstInclusive ?? false,
     commission,
     commissionForUser: commissionForRole(role, commission),
     commissionOwn: applyRate(amount, slab.commissionType, slab.commissionValue),
@@ -194,8 +199,8 @@ export type ChainMember = {
   /**
    * Gross commission (₹) this member earns on the transaction:
    *   level 0 → their own commissionValue;
-   *   level>0 → margin vs the child: max(0, childCharge − ownCharge)
-   *             + max(0, ownCommission − childCommission).
+   *   level>0 (BBPS/Payout, charge-driven) → max(0, childCharge − ownCharge − childCommission);
+   *   level>0 (AePS/DMT, pool) → max(0, childCharge − ownCharge) + max(0, ownCommission − childCommission).
    */
   gross: Money;
 };
@@ -299,15 +304,28 @@ export async function resolvePricingChain(
     gross: childCommission,
   });
 
+  const chargeDriven = isChargeDrivenService(service);
+
   for (let i = 1; i < walk.length; i++) {
     const r = resolved[i];
     if (r.slab) {
       const ownCharge = applyRate(amt, r.slab.chargeType, r.slab.chargeValue);
       const ownCommission = applyRate(amt, r.slab.commissionType, r.slab.commissionValue);
       const chargeMargin = gt(childCharge, ownCharge) ? round(childCharge.sub(ownCharge)) : dec(0);
-      const commissionMargin = gt(ownCommission, childCommission)
-        ? round(ownCommission.sub(childCommission))
-        : dec(0);
+      let gross: Money;
+      if (chargeDriven) {
+        // BBPS/Payout: the parent funds the child's commission out of their
+        // charge markup — margin = charge markup − child commission (never
+        // negative). The parent's own rate-card commission is not added.
+        gross = gt(chargeMargin, childCommission) ? round(chargeMargin.sub(childCommission)) : dec(0);
+      } else {
+        // Pool model (AePS/DMT/…): margin = charge markup + retained commission
+        // (own commission − commission passed to the child).
+        const commissionMargin = gt(ownCommission, childCommission)
+          ? round(ownCommission.sub(childCommission))
+          : dec(0);
+        gross = round(add(chargeMargin, commissionMargin));
+      }
       members.push({
         userId: walk[i].id,
         role: walk[i].role,
@@ -316,7 +334,7 @@ export async function resolvePricingChain(
         slabId: r.slab.id,
         charge: ownCharge,
         commission: ownCommission,
-        gross: round(add(chargeMargin, commissionMargin)),
+        gross,
       });
       childCharge = ownCharge;
       childCommission = ownCommission;
@@ -368,6 +386,35 @@ async function findSlab(
     if (exact) return exact;
   }
   return inBand.find((s) => s.provider == null) ?? null;
+}
+
+/**
+ * Return the maximum allowed transaction amount for a user+service based on
+ * their scheme slabs. If the user has no scheme or no slabs for the service,
+ * returns null (no limit).
+ */
+export async function getSchemeLimit(
+  userId: string,
+  service: ServiceCode
+): Promise<Money | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { schemeId: true },
+  });
+  if (!user?.schemeId) return null;
+
+  const scheme = await prisma.scheme.findFirst({
+    where: { id: user.schemeId, active: true },
+    select: { id: true },
+  });
+  if (!scheme) return null;
+
+  const topSlab = await prisma.schemeSlab.findFirst({
+    where: { schemeId: scheme.id, service, active: true },
+    orderBy: { maxAmount: "desc" },
+    select: { maxAmount: true },
+  });
+  return topSlab ? dec(topSlab.maxAmount) : null;
 }
 
 export type SlabRange = { minAmount: Money | string | number; maxAmount: Money | string | number };

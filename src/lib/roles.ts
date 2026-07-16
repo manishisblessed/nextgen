@@ -37,7 +37,6 @@ import {
   ShieldAlert,
   FileSignature,
   BookOpenCheck,
-  Percent,
   Timer,
   Undo2,
   ReceiptText,
@@ -99,7 +98,6 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "billers", label: "Billers / Routing" },
   { href: "commissions", label: "Commission Master" },
   { href: "schemes", label: "Scheme Manager" },
-  { href: "mdr", label: "MDR Engine" },
   { href: "settlements", label: "Settlements" },
   { href: "settlement-ops", label: "Settlement Ops" },
   { href: "reversals", label: "Reversal Desk" },
@@ -115,6 +113,13 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "slider", label: "Slider & Pop-ups" },
   { href: "audit", label: "Audit Log" },
   { href: "system", label: "System Health" },
+] as const;
+
+/** Tabs a master-admin creator can assign to another master-admin.
+ *  Includes everything from ASSIGNABLE_ADMIN_TABS + the "admins" tab. */
+export const ASSIGNABLE_MASTER_ADMIN_TABS = [
+  { href: "admins", label: "Manage Admins" },
+  ...ASSIGNABLE_ADMIN_TABS,
 ] as const;
 
 /** Tab slugs an admin (or master-admin) can grant to a sub-admin. Matches the
@@ -136,7 +141,6 @@ export const ASSIGNABLE_SUB_ADMIN_TABS = [
 const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/wallet-ops", label: "Wallet Operations", icon: Wallet, badge: "New" },
   { href: "/dashboard/admin/ledger", label: "Ledger Explorer", icon: BookOpenCheck, badge: "New" },
-  { href: "/dashboard/admin/mdr", label: "MDR Engine", icon: Percent, badge: "New" },
   { href: "/dashboard/admin/brands", label: "Brands & MDR", icon: Tag, badge: "New" },
   { href: "/dashboard/admin/settlement-ops", label: "Settlement Ops", icon: Timer, badge: "New" },
   { href: "/dashboard/admin/reversals", label: "Reversal Desk", icon: Undo2, badge: "New" },
