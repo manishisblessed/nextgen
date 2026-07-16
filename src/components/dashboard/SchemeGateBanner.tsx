@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { AlertTriangle } from "lucide-react";
+import { schemeAssignerLabel } from "@/lib/scheme/constants";
 
 type SchemeStatus = {
   applicable: boolean;
@@ -9,6 +10,7 @@ type SchemeStatus = {
   hasMdrScheme: boolean;
   schemeName: string | null;
   mdrSchemeName: string | null;
+  role: string | null;
 };
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -26,15 +28,16 @@ export function SchemeGateBanner() {
 
   if (!data?.applicable || data.hasScheme) return null;
 
+  const assigner = schemeAssignerLabel(data.role);
+
   return (
     <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
       <div>
         <p className="font-semibold">Transactions are disabled — no scheme assigned yet</p>
         <p className="mt-0.5 text-amber-800">
-          Your distributor (or admin) must assign you a commission scheme before you can perform
-          payouts, bill payments, settlements or any other transaction. Contact them to get
-          activated.
+          Your {assigner} must assign you a commission scheme before you can perform payouts, bill
+          payments, settlements or any other transaction. Contact them to get activated.
         </p>
       </div>
     </div>

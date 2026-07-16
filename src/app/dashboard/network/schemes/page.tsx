@@ -21,7 +21,7 @@ import {
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { SERVICE_FAMILIES, familyOf, isChargeDrivenService, type ServiceFamily } from "@/lib/scheme/constants";
+import { SERVICE_FAMILIES, familyOf, isChargeDrivenService, schemeAssignerLabel, type ServiceFamily } from "@/lib/scheme/constants";
 
 /**
  * My Schemes — SD/MD/DT scheme workspace (cascade model, unified scheme).
@@ -114,6 +114,7 @@ export default function MySchemesPage() {
   const [loading, setLoading] = useState(true);
   const [base, setBase] = useState<Scheme | null>(null);
   const [schemes, setSchemes] = useState<Scheme[]>([]);
+  const [role, setRole] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ scheme: Scheme | null; focusFamily?: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -122,6 +123,7 @@ export default function MySchemesPage() {
       const a = await fetch("/api/network/schemes").then((r) => r.json());
       setBase(a.baseScheme ?? null);
       setSchemes(a.schemes ?? []);
+      setRole(a.role ?? null);
     } catch {
       // network hiccup — keep whatever we have
     } finally {
@@ -166,8 +168,8 @@ export default function MySchemesPage() {
           <div>
             <p className="font-semibold">No scheme assigned to you yet</p>
             <p className="mt-1">
-              Ask your parent (or admin) to assign one. Until then you cannot transact or create
-              schemes for your network.
+              Ask your {schemeAssignerLabel(role)} to assign one. Until then you cannot transact or
+              create schemes for your network.
             </p>
           </div>
         </div>

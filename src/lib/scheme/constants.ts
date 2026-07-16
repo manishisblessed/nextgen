@@ -105,3 +105,24 @@ export function familyOf(code: string): ServiceFamily {
     (PAYOUT_LEGACY.has(code) ? SERVICE_FAMILIES.find((f) => f.key === "PAYOUT")! : SERVICE_FAMILIES[0])
   );
 }
+
+/**
+ * Who assigns a network user's scheme, per the strict cascade hierarchy
+ * (admin → SUPER_DISTRIBUTOR → MASTER_DISTRIBUTOR → DISTRIBUTOR → RETAILER).
+ * Returns a lowercase noun to slot into "Your {label} must assign you…" so each
+ * tier is told exactly who activates them (not a generic "distributor or admin").
+ */
+export function schemeAssignerLabel(role: string | null | undefined): string {
+  switch (role) {
+    case "SUPER_DISTRIBUTOR":
+      return "admin";
+    case "MASTER_DISTRIBUTOR":
+      return "super-distributor";
+    case "DISTRIBUTOR":
+      return "master-distributor";
+    case "RETAILER":
+      return "distributor";
+    default:
+      return "parent (or admin)";
+  }
+}

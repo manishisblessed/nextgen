@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { dec, gte, lte } from "@/lib/money";
-import { isChargeDrivenService } from "@/lib/scheme/constants";
+import { isChargeDrivenService, schemeAssignerLabel } from "@/lib/scheme/constants";
 
 /**
  * Derived schemes (cascade model).
@@ -57,9 +57,10 @@ async function ownBaseScheme(ownerId: string) {
   if (!user) throw new DerivedSchemeError("User not found", 404);
   if (!DERIVING_ROLES.includes(user.role as (typeof DERIVING_ROLES)[number]))
     throw new DerivedSchemeError("Only SD/MD/DT can create schemes for their network", 403);
+  const assigner = schemeAssignerLabel(user.role);
   if (!user.schemeId)
     throw new DerivedSchemeError(
-      "You have no scheme assigned yet — ask your parent (or admin) to assign one before creating schemes",
+      `You have no scheme assigned yet — ask your ${assigner} to assign one before creating schemes`,
       409
     );
   const base = await prisma.scheme.findFirst({
@@ -70,7 +71,7 @@ async function ownBaseScheme(ownerId: string) {
     },
   });
   if (!base)
-    throw new DerivedSchemeError("Your assigned scheme is inactive — contact your parent or admin", 409);
+    throw new DerivedSchemeError(`Your assigned scheme is inactive — contact your ${assigner}`, 409);
   return base;
 }
 

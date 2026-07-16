@@ -89,6 +89,7 @@ export async function GET() {
   return NextResponse.json({
     baseScheme: base ? serializeScheme(base) : null,
     schemes: mine.map(serializeScheme),
+    role: user.role,
   });
 }
 

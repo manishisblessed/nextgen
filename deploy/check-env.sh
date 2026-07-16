@@ -78,6 +78,25 @@ for key in "${ALWAYS_REQUIRED[@]}"; do
   require "$key"
 done
 
+# ---------- Database region guard -----------------------------------
+# The Tokyo project (ap-northeast-1) was retired in favour of Mumbai
+# (ap-south-1). Pointing production at Tokyo splits writes across two
+# databases (local/prod drift — schemes/data silently missing). Fail the
+# check so a bad DATABASE_URL never reaches a PM2 restart. Emergency
+# override: ALLOW_TOKYO_DB=1 bash deploy/check-env.sh
+DB_URL_VALUE=$(get_env "DATABASE_URL")
+if [[ "$DB_URL_VALUE" == *"ap-northeast-1"* ]]; then
+  if [[ "${ALLOW_TOKYO_DB:-0}" == "1" ]]; then
+    echo "[check-env] WARN: DATABASE_URL points at the retired Tokyo project (ap-northeast-1) — allowed via ALLOW_TOKYO_DB=1" >&2
+  else
+    echo "" >&2
+    echo "[check-env] FAILED — DATABASE_URL points at the retired Tokyo project (ap-northeast-1)." >&2
+    echo "Production must use the Mumbai project (ap-south-1). Fix $ENV_FILE and re-run." >&2
+    echo "Override only if you REALLY mean it:  ALLOW_TOKYO_DB=1 bash deploy/check-env.sh $ENV_FILE" >&2
+    exit 1
+  fi
+fi
+
 # ---------- Conditionally required (per partner feature flag) --------
 
 # Map: PARTNER_*_ENABLED=true => the secret keys that MUST be set.

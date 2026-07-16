@@ -66,6 +66,28 @@ log "Copying production .env..."
 cp "$ENV_SOURCE" "$APP_DIR/.env"
 echo "  Copied from $ENV_SOURCE"
 
+# ── Guard: the database MUST be the Mumbai project (ap-south-1) ────────
+# The Tokyo project (ap-northeast-1) was retired. If a deploy ever points
+# production at it again, local (Mumbai) and prod writes split across two
+# databases and data silently goes missing (schemes not showing, etc.).
+# Fail hard here BEFORE migrations/build/restart. Emergency override:
+#   ALLOW_TOKYO_DB=1 ./deploy.sh
+db_url_line=$(grep -E '^[[:space:]]*DATABASE_URL=' "$APP_DIR/.env" | tail -n 1 || true)
+if [ -z "$db_url_line" ]; then
+  fail "DATABASE_URL is missing from $APP_DIR/.env — refusing to deploy."
+fi
+if echo "$db_url_line" | grep -q "ap-northeast-1"; then
+  if [ "${ALLOW_TOKYO_DB:-0}" = "1" ]; then
+    warn "DATABASE_URL points at the retired Tokyo project (ap-northeast-1) — continuing because ALLOW_TOKYO_DB=1."
+  else
+    fail "DATABASE_URL points at the retired Tokyo project (ap-northeast-1).\n   Production must use the Mumbai project (ap-south-1).\n   Fix $ENV_SOURCE, then redeploy. Override only if you REALLY mean it:\n     ALLOW_TOKYO_DB=1 ./deploy.sh"
+  fi
+elif echo "$db_url_line" | grep -q "ap-south-1"; then
+  echo "  DB region OK: ap-south-1 (Mumbai)"
+else
+  warn "DATABASE_URL region is neither ap-south-1 nor ap-northeast-1 — double-check $ENV_SOURCE points at the intended database."
+fi
+
 # ── Step 3: Install dependencies ─────────────────────────────────────
 
 log "Installing dependencies (npm ci)..."

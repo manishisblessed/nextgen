@@ -64,6 +64,7 @@ export async function getSchemeStatus(userId: string): Promise<{
   hasMdrScheme: boolean;
   schemeName: string | null;
   mdrSchemeName: string | null;
+  role: string | null;
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -82,5 +83,6 @@ export async function getSchemeStatus(userId: string): Promise<{
     hasMdrScheme: hasScheme,
     schemeName,
     mdrSchemeName: schemeName,
+    role: user?.role ?? null,
   };
 }
