@@ -63,6 +63,11 @@ export const QUEUES = {
   // entries left PENDING (e.g. webhook credit failed). Runs every few minutes;
   // the primary instant path is the POS webhook itself.
   POS_SETTLEMENT_INSTANT: "pos.settlement.instant",
+  // POS capture ingestion — Same Day sends no capture webhooks, so this sweep
+  // pulls CAPTURED transactions from the partner API and creates PENDING
+  // settlement entries (idempotent per txn ref). Runs periodically before the
+  // T+1 settlement hour. See src/lib/settlement/pos-ingest.ts.
+  POS_INGEST: "pos.ingest",
   // BBPS bill payment reconciliation — polls PROCESSING BBPS transactions
   // and settles them. BulkPe BBPS has no webhooks, so this sweep is the
   // only way to finalize PENDING payments. Runs every 5 minutes.

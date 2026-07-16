@@ -67,6 +67,22 @@ const SETTING_SCHEMAS = {
     paused: z.boolean().default(false),
     minAmount: z.number().nonnegative().default(50),
   }),
+
+  /**
+   * POS capture ingestion sweep. Same Day doesn't POST capture webhooks, so a
+   * worker cron pulls CAPTURED transactions from the partner API and creates
+   * PENDING settlement entries (idempotent per txn ref). The T+1 sweep then
+   * settles them on their capture day. This MOVES MONEY indirectly, so it can
+   * be paused/disabled independently of the webhook path.
+   */
+  "settlement.pos_ingest": z.object({
+    enabled: z.boolean().default(true),
+    paused: z.boolean().default(false),
+    /** How many days back to pull each run (covers late captures / retries). */
+    lookbackDays: z.number().int().min(1).max(31).default(3),
+    /** Safety cap on pages fetched per run (page_size 100). */
+    maxPages: z.number().int().min(1).max(200).default(50),
+  }),
 } as const;
 
 export type SettingKey = keyof typeof SETTING_SCHEMAS;

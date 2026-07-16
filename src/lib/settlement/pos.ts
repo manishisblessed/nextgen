@@ -40,6 +40,10 @@ export type PosCaptureInput = {
   cardType?: string;
   brandType?: string;
   classification?: string;
+  // When the swipe actually happened at the terminal. Defaults to now (the
+  // webhook path). Pull-ingestion passes the partner's txn time so T+1 settles
+  // on the correct capture day even when we learn of the capture a day late.
+  capturedAt?: Date | string;
 };
 
 export type PosCaptureResult = {
@@ -202,6 +206,9 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
   const netAmount = round(sub(input.grossAmount, priced.mdrAmount));
   if (!gt(netAmount, 0)) return { status: "SKIPPED" };
 
+  const capturedAt = input.capturedAt ? new Date(input.capturedAt) : new Date();
+  const capturedAtValid = !Number.isNaN(capturedAt.getTime());
+
   if (mode === "INSTANT") {
     // Instant settlement — credit the wallet now. If the credit fails mid-flight
     // (e.g. a transient ledger error), park a PENDING/INSTANT entry so the
@@ -236,6 +243,7 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
         settledAt: wtxnId ? new Date() : null,
         walletTxnId: wtxnId,
         paymentMode,
+        capturedAt: capturedAtValid ? capturedAt : null,
         brandId: priced.brandId,
         provider: priced.provider,
         mdrRateId: priced.mdrRateId,
@@ -265,6 +273,7 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
       mode: "T1",
       status: "PENDING",
       paymentMode,
+      capturedAt: capturedAtValid ? capturedAt : null,
       brandId: priced.brandId,
       provider: priced.provider,
       mdrRateId: priced.mdrRateId,
@@ -425,12 +434,15 @@ export async function runPosT1SettlementSweep(): Promise<{
     return { processed: 0, settled: 0, failed: 0, totalAmount: 0 };
   }
 
+  // True T+1: only captures from previous IST days are due. Settle by CAPTURE
+  // date so a capture pull-ingested a day late still settles on its correct
+  // day; legacy rows without capturedAt fall back to their createdAt.
+  const cutoff = startOfTodayIst();
   const entries = await prisma.posSettlementEntry.findMany({
     where: {
       status: "PENDING",
       mode: "T1",
-      // True T+1: only captures from previous IST days are due.
-      createdAt: { lt: startOfTodayIst() },
+      OR: [{ capturedAt: { lt: cutoff } }, { capturedAt: null, createdAt: { lt: cutoff } }],
     },
     orderBy: { createdAt: "asc" },
     take: 500,

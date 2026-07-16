@@ -1974,6 +1974,12 @@ model PosSettlementEntry {
   walletTxnId    String?  // ref to the credit WalletTxn
   paymentMode    String?  // CARD | UPI | NFC | BHARATQR
 
+  // When the swipe actually happened at the terminal (partner txn time). The
+  // T+1 sweep settles by CAPTURE date, not row-creation date, so captures that
+  // are pull-ingested a day late still settle on their correct IST day. Null on
+  // legacy rows → the sweep falls back to createdAt.
+  capturedAt     DateTime?
+
   // Brand / provider pricing context (for per-brand MDR). The T+1 sweep
   // re-verifies MDR against the brand rate before crediting, so these record
   // the dimensions the capture was priced against.
@@ -1986,6 +1992,7 @@ model PosSettlementEntry {
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@index([status, capturedAt])
   @@index([brandId])
 }
 

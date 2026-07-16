@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { getSetting, setSetting } from "@/lib/settings";
 import { runPosT1SettlementSweep, runPosInstantSettlementSweep } from "@/lib/settlement/pos";
+import { runPosIngestSweep } from "@/lib/settlement/pos-ingest";
 import { clientIp } from "@/lib/security/audit";
 import type { Prisma } from "@prisma/client";
 
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
   if (userId) where.userId = userId;
   if (status) where.status = status;
 
-  const [total, entries, config, t1Config, counts] = await Promise.all([
+  const [total, entries, config, t1Config, ingestConfig, counts] = await Promise.all([
     prisma.posSettlementEntry.count({ where }),
     prisma.posSettlementEntry.findMany({
       where,
@@ -49,6 +50,7 @@ export async function GET(req: Request) {
     }),
     getSetting("settlement.pos_instant"),
     getSetting("settlement.pos_t1"),
+    getSetting("settlement.pos_ingest"),
     prisma.posSettlementEntry.groupBy({
       by: ["status"],
       _count: true,
@@ -57,7 +59,7 @@ export async function GET(req: Request) {
   ]);
 
   return NextResponse.json({
-    config: { posInstant: config, posT1: t1Config },
+    config: { posInstant: config, posT1: t1Config, posIngest: ingestConfig },
     summary: counts.map((c) => ({
       status: c.status,
       count: c._count,
@@ -88,8 +90,14 @@ const ActionBody = z.discriminatedUnion("action", [
     action: z.literal("run_instant_sweep"),
   }),
   z.object({
+    action: z.literal("run_ingest"),
+    // Optional explicit window (ISO). Omit to use the configured lookback.
+    dateFrom: z.string().datetime().optional(),
+    dateTo: z.string().datetime().optional(),
+  }),
+  z.object({
     action: z.literal("configure"),
-    key: z.enum(["settlement.pos_instant", "settlement.pos_t1"]),
+    key: z.enum(["settlement.pos_instant", "settlement.pos_t1", "settlement.pos_ingest"]),
     value: z.record(z.unknown()),
   }),
 ]);
@@ -138,9 +146,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, ...result });
   }
 
+  if (action === "run_ingest") {
+    const result = await runPosIngestSweep({
+      dateFrom: parsed.data.dateFrom,
+      dateTo: parsed.data.dateTo,
+    });
+    await prisma.auditLog.create({
+      data: {
+        userId: admin.id,
+        action: "pos.settlement.manual_ingest",
+        entity: "PosSettlementEntry",
+        meta: result as unknown as Prisma.InputJsonValue,
+        ip: clientIp(req),
+      },
+    });
+    return NextResponse.json({ ok: true, ...result });
+  }
+
   if (action === "configure") {
     const { key, value } = parsed.data;
-    const stored = await setSetting(key as "settlement.pos_instant" | "settlement.pos_t1", value, admin.id);
+    const stored = await setSetting(
+      key as "settlement.pos_instant" | "settlement.pos_t1" | "settlement.pos_ingest",
+      value,
+      admin.id
+    );
     await prisma.auditLog.create({
       data: {
         userId: admin.id,
