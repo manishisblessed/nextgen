@@ -72,7 +72,7 @@ export type ProviderMap = {
  */
 function resolveBbps(): BbpsProvider {
   const sameday = flags.bbps && samedayBbpsConfigured();
-  const bulkpe = flags.bbps && bulkpeBbpsConfigured();
+  const bulkpe = flags.bbpsBulkpe && bulkpeBbpsConfigured();
   if (sameday && bulkpe) {
     const pick = (category: string) => (category === "CREDIT_CARD" ? samedayBbps : bulkpeBbps);
     return {
@@ -177,7 +177,7 @@ export function partnerStatus() {
     })(),
     bbps:     (() => {
       const p = resolveBbps();
-      const live = flags.bbps && (samedayBbpsConfigured() || bulkpeBbpsConfigured());
+      const live = p.name !== "MOCK-BBPS";
       return { live, provider: !live ? "MOCK" : p.name === "BBPS_ROUTED" ? "SAMEDAY_PAY2NEW+BULKPE_BBPS" : p.name };
     })(),
     recharge: { live: false, provider: "MOCK" },

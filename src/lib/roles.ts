@@ -70,7 +70,9 @@ const services: NavItem[] = [
   { href: "/dashboard/aadhaar-pay", label: "AePS / Aadhaar Pay", icon: Fingerprint },
   { href: "/dashboard/upi", label: "UPI Collect", icon: Send },
   { href: "/dashboard/recharge/mobile", label: "Recharges", icon: Smartphone },
-  { href: "/dashboard/bill-pay/electricity", label: "Bill Payments", icon: Receipt },
+  { href: "/dashboard/bill-pay/credit-card", label: "Credit Card", icon: CreditCard, badge: "New" },
+  { href: "/dashboard/bill-pay/bbps-1", label: "BBPS-1 (Same Day)", icon: Receipt, badge: "New" },
+  { href: "/dashboard/bill-pay/bbps-2", label: "BBPS-2 (BulkPe)", icon: Receipt, badge: "New" },
   { href: "/dashboard/travel/flight", label: "Travel", icon: Plane },
   { href: "/dashboard/virtual-account", label: "Virtual Account", icon: Building2 }
 ];

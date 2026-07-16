@@ -36,6 +36,10 @@ const schema = z.object({
   PARTNER_UPI_ENABLED: z.string().default("false"),
   PARTNER_PAYOUT_ENABLED: z.string().default("false"),
   PARTNER_BBPS_ENABLED: z.string().default("false"),
+  // Sub-toggle: hold ONLY the BulkPe BBPS rail (Same Day Pay2New keeps
+  // serving credit-card bills) without touching the BulkPe token, which the
+  // PG top-up and UPI payout rails still need.
+  PARTNER_BBPS_BULKPE_ENABLED: z.string().default("true"),
   PARTNER_RECHARGE_ENABLED: z.string().default("false"),
   PARTNER_TRAVEL_ENABLED: z.string().default("false"),
   PARTNER_PAN_ENABLED: z.string().default("false"),
@@ -222,6 +226,7 @@ export const flags = {
   upi: env.PARTNER_UPI_ENABLED === "true",
   payout: env.PARTNER_PAYOUT_ENABLED === "true",
   bbps: env.PARTNER_BBPS_ENABLED === "true",
+  bbpsBulkpe: env.PARTNER_BBPS_ENABLED === "true" && env.PARTNER_BBPS_BULKPE_ENABLED === "true",
   recharge: env.PARTNER_RECHARGE_ENABLED === "true",
   travel: env.PARTNER_TRAVEL_ENABLED === "true",
   pan: env.PARTNER_PAN_ENABLED === "true",

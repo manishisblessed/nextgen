@@ -10,7 +10,7 @@ export default function CreditCardBillPage() {
       <ServicePageHeader
         icon={CreditCard}
         title="Credit Card Bill Payment"
-        description="Pay credit card bills across all major banks via BBPS. Fetch the live bill with the card's last 4 digits and registered mobile."
+        description="Pay credit card bills across all major banks via Same Day BBPS — fetch the live bill with the card's last 4 digits and registered mobile."
       />
       <CreditCardBillForm />
     </div>

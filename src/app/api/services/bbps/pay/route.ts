@@ -10,6 +10,7 @@ import { clientIp } from "@/lib/security/audit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
+import { bbpsServiceKey } from "@/lib/services/bbpsKey";
 import { getEffectiveRate, withGst } from "@/lib/scheme/resolver";
 import { toNumber } from "@/lib/money";
 
@@ -38,8 +39,8 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
-    // Admin kill-switch + per-user allowlist (default-disabled) for this rail.
     await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
+    // will re-check per-category below after body parse
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
@@ -51,6 +52,13 @@ export async function POST(req: Request) {
 
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  const catKey = bbpsServiceKey(parsed.data.category);
+  try {
+    if (catKey) await assertServiceEnabled(catKey, { name: "Bill Payments", userId: user.id, role: user.role });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 
   const bbps = getPartner("bbps");
   try {

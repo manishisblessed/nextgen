@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
-import { assertServiceEnabled } from "@/lib/services/guard";
+import { assertServiceEnabled, isServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { bulkpeBbpsCategories } from "@/lib/partners/bulkpe-bbps";
 import { flags } from "@/lib/env";
@@ -44,7 +44,10 @@ export async function GET() {
     return toErrorResponse(e);
   }
 
-  if (!flags.bbps) {
+  // The live category catalog is a BulkPe feature. Serve the static list when
+  // BulkPe is held (env flag) or BBPS-2 is disabled on the admin panel.
+  const bbps2On = flags.bbpsBulkpe && (await isServiceEnabled(SERVICE_KEYS.BBPS_BULKPE));
+  if (!bbps2On) {
     return NextResponse.json({ source: "FALLBACK", categories: FALLBACK_CATEGORIES });
   }
 

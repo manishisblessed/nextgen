@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
-import { assertServiceEnabled } from "@/lib/services/guard";
+import { assertServiceEnabled, isServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { bulkpeBbpsPendingBills } from "@/lib/partners/bulkpe-bbps";
 import { flags } from "@/lib/env";
@@ -26,8 +26,11 @@ export async function GET(req: Request) {
     return toErrorResponse(e);
   }
 
-  if (!flags.bbps) {
-    return NextResponse.json({ bills: [], total: 0, message: "BBPS is not enabled" });
+  // Pending-bill auto-fetch is a BulkPe-only feature — return an empty list
+  // when BulkPe is held (env flag) or BBPS-2 is disabled by admin.
+  const bbps2On = flags.bbpsBulkpe && (await isServiceEnabled(SERVICE_KEYS.BBPS_BULKPE));
+  if (!bbps2On) {
+    return NextResponse.json({ bills: [], total: 0, message: "BBPS-2 (BulkPe) is not enabled" });
   }
 
   const url = new URL(req.url);

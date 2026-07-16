@@ -6,6 +6,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
+import { bbpsServiceKey } from "@/lib/services/bbpsKey";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -28,6 +29,14 @@ export async function POST(req: Request) {
   }
 
   const parsed = Body.safeParse(await req.json());
+  if (parsed.success) {
+    const catKey = bbpsServiceKey(parsed.data.category);
+    try {
+      if (catKey) await assertServiceEnabled(catKey, { name: "Bill Payments", userId: user.id, role: user.role });
+    } catch (e) {
+      return toErrorResponse(e);
+    }
+  }
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const bbps = getPartner("bbps");

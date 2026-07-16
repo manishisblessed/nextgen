@@ -7,6 +7,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
+import { bbpsServiceKey } from "@/lib/services/bbpsKey";
 
 /**
  * GET /api/services/bbps/billers?category=CREDIT_CARD
@@ -21,16 +22,18 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
   let user;
   try {
     user = await requireAuth();
     await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
+    const catKey = bbpsServiceKey(url.searchParams.get("category") ?? "CREDIT_CARD");
+    if (catKey) await assertServiceEnabled(catKey, { name: "Bill Payments", userId: user.id, role: user.role });
     await enforceRateLimit(`bbps:billers:${user.id}`, RATE_LIMITS.default);
   } catch (e) {
     return toErrorResponse(e);
   }
 
-  const url = new URL(req.url);
   const parsed = Category.safeParse(url.searchParams.get("category") ?? "CREDIT_CARD");
   if (!parsed.success) return NextResponse.json({ error: "Invalid category" }, { status: 400 });
   const category = parsed.data;
