@@ -241,6 +241,19 @@ export async function PATCH(
           where: { id: invite.userId },
           data: { status: "ACTIVE" },
         });
+
+        // Keep the KYC review queue in sync: approving the onboarding invite
+        // also clears the applicant's pending KYC so it doesn't linger in the
+        // "Awaiting review" tab.
+        await tx.kyc.updateMany({
+          where: { userId: invite.userId, status: "PENDING_REVIEW" },
+          data: {
+            status: "APPROVED",
+            reviewedById: user.id,
+            reviewedAt: new Date(),
+            rejectedReason: null,
+          },
+        });
       }
     });
 
@@ -305,6 +318,17 @@ export async function PATCH(
         await tx.user.update({
           where: { id: invite.userId },
           data: { status: "SUSPENDED" },
+        });
+
+        // Mirror the rejection onto the KYC queue so it doesn't stay pending.
+        await tx.kyc.updateMany({
+          where: { userId: invite.userId, status: "PENDING_REVIEW" },
+          data: {
+            status: "REJECTED",
+            reviewedById: user.id,
+            reviewedAt: new Date(),
+            rejectedReason: parsed.data.reason ?? "Rejected by admin",
+          },
         });
       }
     });

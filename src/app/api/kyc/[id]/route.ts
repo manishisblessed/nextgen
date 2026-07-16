@@ -57,6 +57,15 @@ export async function PATCH(
         where: { id: kyc.user.id },
         data: { status: "ACTIVE" },
       }),
+      // Keep the onboarding invite in sync so it doesn't stay stuck at
+      // VERIFIED/REGISTERED once KYC has been approved.
+      prisma.invite.updateMany({
+        where: {
+          userId: kyc.user.id,
+          status: { in: ["VERIFIED", "REGISTERED"] },
+        },
+        data: { status: "APPROVED", approvedAt: new Date() },
+      }),
       prisma.auditLog.create({
         data: {
           userId: admin.id,
@@ -80,6 +89,18 @@ export async function PATCH(
         reviewedById: admin.id,
         reviewedAt: new Date(),
         rejectedReason: parsed.data.reason ?? null,
+      },
+    }),
+    // Mirror the rejection onto the onboarding invite.
+    prisma.invite.updateMany({
+      where: {
+        userId: kyc.user.id,
+        status: { in: ["VERIFIED", "REGISTERED"] },
+      },
+      data: {
+        status: "REJECTED",
+        rejectedAt: new Date(),
+        rejectedReason: parsed.data.reason ?? "Rejected by admin",
       },
     }),
     prisma.auditLog.create({

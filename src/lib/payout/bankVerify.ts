@@ -1,27 +1,27 @@
 import { nanoid } from "nanoid";
-import { isProd } from "@/lib/env";
+import { isProd, flags } from "@/lib/env";
+import {
+  samedaySettlementConfigured,
+  settlementAddAccount,
+  settlementListAccounts,
+} from "@/lib/partners/sameday-settlement";
 
 /**
- * Bank penny-drop verification (stub).
+ * Bank penny-drop verification.
  *
  * WHY THIS FILE EXISTS
  * --------------------
  * Payout beneficiaries must be validated by the bank before money can flow to
  * them (penny-drop: ₹1 is sent via IMPS and the bank returns the registered
- * account-holder name). NEXTGEN doesn't have a live verification provider
- * wired up yet, so this module ships a deterministic stub that
+ * account-holder name).
  *
- *   - accepts the same input shape a real provider would,
- *   - returns { status: "SUCCESS", nameAtBank } in development so the whole
- *     beneficiary UI/flow is exercisable end-to-end, and
- *   - returns { status: "PENDING" } in production so real users see the exact
- *     "verification in progress, click Re-check" state (and can't accidentally
- *     spend on a fake success).
- *
- * When a real provider is picked (Cashfree / Razorpay / Decentro / etc.),
- * replace the body of `verifyBankPennyDrop` and `recheckBankVerification` with
- * the provider SDK calls. The public shape here is intentionally minimal so
- * callers don't need to change.
+ * Live provider: Same Day Solution Settlement API. Adding an account there runs
+ * the penny-drop and returns the bank-verified name (see
+ * postman/SameDaySolution-Settlement-API.postman_collection.json → "Add &
+ * Verify Account"). When the Settlement partner is enabled + configured we use
+ * it for real verification; otherwise we fall back to a deterministic dev stub
+ * (SUCCESS in development, PENDING in production so nothing spends on a fake
+ * success).
  */
 
 export type BankVerifyStatus = "SUCCESS" | "PENDING" | "FAILED";
@@ -53,14 +53,24 @@ export function newBankVerifyOrderId(prefix = "PB"): string {
   return `${prefix}${nanoid(18).toUpperCase()}`;
 }
 
+/** Whether the live Same Day Settlement penny-drop rail is available. */
+function liveProviderReady(): boolean {
+  return flags.settlement && samedaySettlementConfigured();
+}
+
 /**
- * Kick off a penny-drop verification. In dev this synchronously resolves
- * SUCCESS with the caller-provided name (echoed back the way most providers do
- * when name-match is not requested). In prod it stays PENDING so the UI must
- * show a Re-check button — safer default while the real provider is not wired.
+ * Kick off a penny-drop verification.
+ *
+ * Live path (Same Day configured): reuse an account already added at the
+ * provider, otherwise add + penny-drop verify it and map the outcome.
+ * Fallback: SUCCESS stub in dev, PENDING "ask an admin" stub in prod.
  */
 export async function verifyBankPennyDrop(input: BankVerifyInput): Promise<BankVerifyResult> {
   const orderId = input.orderId ?? newBankVerifyOrderId();
+
+  if (liveProviderReady()) {
+    return liveVerify(input, orderId);
+  }
 
   if (!isProd) {
     // Deterministic dev outcome. Providers usually normalise the name (uppercase,
@@ -89,8 +99,8 @@ export async function verifyBankPennyDrop(input: BankVerifyInput): Promise<BankV
 }
 
 /**
- * Poll a previously-initiated verification. In dev it flips to SUCCESS
- * immediately; in prod it stays PENDING until the provider is wired.
+ * Poll a previously-initiated verification. Live path re-lists Same Day
+ * accounts and resolves SUCCESS once the bank confirms; otherwise stays PENDING.
  */
 export async function recheckBankVerification(input: {
   orderId: string;
@@ -98,6 +108,10 @@ export async function recheckBankVerification(input: {
   ifsc: string;
   holderName: string;
 }): Promise<BankVerifyResult> {
+  if (liveProviderReady()) {
+    return liveRecheck(input);
+  }
+
   if (!isProd) {
     const nameAtBank = normalizeName(input.holderName) || input.holderName.trim();
     return {
@@ -110,6 +124,130 @@ export async function recheckBankVerification(input: {
     };
   }
 
+  return {
+    status: "PENDING",
+    nameAtBank: null,
+    orderId: input.orderId,
+    utr: null,
+    failureReason: null,
+    pendingMessage: "Still waiting on the bank. Try again in a few minutes.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Same Day Settlement live path
+// ---------------------------------------------------------------------------
+
+const PENDING_MESSAGE =
+  "Penny-drop verification is in progress at the bank. Use Re-check in a moment.";
+
+/** Match a Same Day account row against our (plaintext) account + IFSC. */
+function accountMatches(a: { accountNumber: string; ifscCode: string }, accountNumber: string, ifsc: string) {
+  return a.accountNumber === accountNumber && a.ifscCode?.toUpperCase() === ifsc.toUpperCase();
+}
+
+async function liveVerify(input: BankVerifyInput, orderId: string): Promise<BankVerifyResult> {
+  // Reuse an account already added at Same Day (avoids a duplicate ₹4 charge
+  // and handles retries after a transient failure).
+  const listed = await settlementListAccounts();
+  if (listed.ok) {
+    const match = listed.data.find((a) => accountMatches(a, input.accountNumber, input.ifsc));
+    if (match) {
+      return match.isVerified
+        ? {
+            status: "SUCCESS",
+            nameAtBank: match.verifiedName || normalizeName(input.holderName) || input.holderName.trim(),
+            orderId,
+            utr: null,
+            failureReason: null,
+            pendingMessage: null,
+          }
+        : {
+            status: "PENDING",
+            nameAtBank: null,
+            orderId,
+            utr: null,
+            failureReason: null,
+            pendingMessage: PENDING_MESSAGE,
+          };
+    }
+  }
+
+  const added = await settlementAddAccount({
+    accountNumber: input.accountNumber,
+    ifscCode: input.ifsc,
+    accountHolderName: input.holderName,
+    contactMobile: input.contactMobile,
+  });
+
+  if (!added.ok) {
+    // Don't hard-fail (and eat the fee) on transient/provider errors — leave it
+    // PENDING so the user can Re-check once Same Day settles the penny-drop.
+    return {
+      status: "PENDING",
+      nameAtBank: null,
+      orderId,
+      utr: null,
+      failureReason: null,
+      pendingMessage: added.message || PENDING_MESSAGE,
+    };
+  }
+
+  const status = (added.data.verificationStatus || "").toUpperCase();
+  if (status === "SUCCESS") {
+    return {
+      status: "SUCCESS",
+      nameAtBank:
+        added.data.verifiedName ||
+        added.data.account.verifiedName ||
+        normalizeName(input.holderName) ||
+        input.holderName.trim(),
+      orderId,
+      utr: null,
+      failureReason: null,
+      pendingMessage: null,
+    };
+  }
+  if (status === "FAILED") {
+    return {
+      status: "FAILED",
+      nameAtBank: null,
+      orderId,
+      utr: null,
+      failureReason: "The bank could not verify this account. Check the account number and IFSC, then try again.",
+      pendingMessage: null,
+    };
+  }
+  return {
+    status: "PENDING",
+    nameAtBank: null,
+    orderId,
+    utr: null,
+    failureReason: null,
+    pendingMessage: PENDING_MESSAGE,
+  };
+}
+
+async function liveRecheck(input: {
+  orderId: string;
+  accountNumber: string;
+  ifsc: string;
+  holderName: string;
+}): Promise<BankVerifyResult> {
+  const listed = await settlementListAccounts();
+  if (listed.ok) {
+    const match = listed.data.find((a) => accountMatches(a, input.accountNumber, input.ifsc));
+    if (match?.isVerified) {
+      return {
+        status: "SUCCESS",
+        nameAtBank: match.verifiedName || normalizeName(input.holderName) || input.holderName.trim(),
+        orderId: input.orderId,
+        utr: null,
+        failureReason: null,
+        pendingMessage: null,
+      };
+    }
+  }
   return {
     status: "PENDING",
     nameAtBank: null,

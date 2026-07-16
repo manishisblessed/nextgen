@@ -19,6 +19,19 @@ import { getEffectiveRate, PAYOUT_MODE_SERVICE } from "@/lib/scheme/resolver";
 
 export const GST_PERCENT = 18;
 
+/**
+ * Route family that actually disburses each payout mode, used to resolve the
+ * provider-scoped scheme slab (bank rails go via Same Day settlement, UPI via
+ * BulkPe). Mirrors resolvePayout() in partners/index.ts. Matched loosely by
+ * normalizeProviderTag, so a slab pinned to "SAMEDAY" resolves here.
+ */
+const PAYOUT_MODE_PROVIDER: Record<PayoutMode, string> = {
+  IMPS: "SAMEDAY",
+  NEFT: "SAMEDAY",
+  RTGS: "SAMEDAY",
+  UPI: "BULKPE",
+};
+
 type Slab = { upTo: number | null; charge: number };
 
 // Flat service charge by mode and amount band (₹). `upTo: null` = no upper bound.
@@ -91,7 +104,7 @@ export async function quotePayoutForUser(
   let source = "STATIC_SLABS";
   let gstInclusive = false;
   if (service) {
-    const rate = await getEffectiveRate(userId, service, amt);
+    const rate = await getEffectiveRate(userId, service, amt, PAYOUT_MODE_PROVIDER[mode]);
     if (rate.source !== "NONE") {
       serviceCharge = round(rate.charge);
       source = rate.source;

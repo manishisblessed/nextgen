@@ -366,9 +366,37 @@ export async function resolvePricingChain(
 }
 
 /**
+ * Normalize a provider identifier to its route "family" so pricing lookups are
+ * resilient to the two different vocabularies in play:
+ *
+ *   - Scheme slabs / ServiceRoute store the SHORT catalog name the admin picks
+ *     in Commission Master (e.g. "SAMEDAY", "BULKPE" — see services/catalog.ts).
+ *   - Runtime callers pass the partner ADAPTER `.name` handling the txn
+ *     (e.g. "SAMEDAY_PAY2NEW", "SAMEDAY_SETTLEMENT", "BULKPE_BBPS").
+ *
+ * Without collapsing both to a family, a slab pinned to "SAMEDAY" would never
+ * match a caller passing "SAMEDAY_PAY2NEW", silently resolving the charge to ₹0.
+ * Routed wrappers ("*_ROUTED") aren't a single family, so callers should pass
+ * the concrete rail instead.
+ */
+export function normalizeProviderTag(provider?: string | null): string | null {
+  if (!provider) return null;
+  const p = provider.trim().toUpperCase();
+  if (!p) return null;
+  if (p.startsWith("SAMEDAY")) return "SAMEDAY";
+  if (p.startsWith("BULKPE")) return "BULKPE";
+  if (p.startsWith("RAZORPAY")) return "RAZORPAY";
+  if (p.startsWith("PAYSPRINT")) return "PAYSPRINT";
+  if (p.startsWith("NPCI")) return "NPCI";
+  if (p.startsWith("EKYCHUB")) return "EKYCHUB";
+  return p;
+}
+
+/**
  * Find the active slab in a scheme whose band contains `amount`. When a
- * provider is given, an exact provider slab wins over the null (any-provider)
- * slab; a slab pinned to a DIFFERENT provider never matches.
+ * provider is given, an exact provider slab (matched by route family) wins over
+ * the null (any-provider) slab; a slab pinned to a DIFFERENT family never
+ * matches.
  */
 async function findSlab(
   schemeId: string,
@@ -381,8 +409,9 @@ async function findSlab(
     orderBy: { minAmount: "asc" },
   });
   const inBand = slabs.filter((s) => gte(amount, s.minAmount) && lte(amount, s.maxAmount));
-  if (provider) {
-    const exact = inBand.find((s) => s.provider === provider);
+  const wanted = normalizeProviderTag(provider);
+  if (wanted) {
+    const exact = inBand.find((s) => normalizeProviderTag(s.provider) === wanted);
     if (exact) return exact;
   }
   return inBand.find((s) => s.provider == null) ?? null;
