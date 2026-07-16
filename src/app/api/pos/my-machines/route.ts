@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { assertServiceEnabled, ServiceDisabledError } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
-import { scopeUserIdFilter } from "@/lib/security/ownership";
+import { scopeUserIdFilter, canAccessUser, getDescendantIds } from "@/lib/security/ownership";
 import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
 import { posMachineSelect, serializePosMachine } from "@/lib/pos/assignments";
@@ -39,14 +39,28 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const page = Math.max(1, Number(searchParams.get("page") ?? 1));
-  const pageSize = Math.min(100, Math.max(10, Number(searchParams.get("pageSize") ?? 50)));
+  const pageSize = Math.min(200, Math.max(10, Number(searchParams.get("pageSize") ?? 50)));
 
-  // scopeUserIdFilter returns { userId: { in: [...] } } for non-admins, {} for
-  // admins. The machine's owner column is `assignedUserId`, so remap it.
-  const scope = await scopeUserIdFilter(user);
-  const where: Prisma.PosMachineWhereInput = scope.userId
-    ? { assignedUserId: scope.userId }
-    : { assignedUserId: { not: null } };
+  // Optional `forChild` scoping: the POS Rental page uses this to list machines
+  // it may rent to a specific downline member. A machine can be rented to a
+  // child even after it has flowed further down the chain (MD → DT → RT), so
+  // we scope to the child's whole subtree (child + descendants), not just
+  // machines the child holds directly.
+  const forChild = searchParams.get("forChild");
+  let where: Prisma.PosMachineWhereInput;
+  if (forChild) {
+    if (!(await canAccessUser(forChild, user)))
+      return NextResponse.json({ error: "User not in your network" }, { status: 403 });
+    const subtreeIds = [forChild, ...(await getDescendantIds(forChild))];
+    where = { assignedUserId: { in: subtreeIds } };
+  } else {
+    // scopeUserIdFilter returns { userId: { in: [...] } } for non-admins, {} for
+    // admins. The machine's owner column is `assignedUserId`, so remap it.
+    const scope = await scopeUserIdFilter(user);
+    where = scope.userId
+      ? { assignedUserId: scope.userId }
+      : { assignedUserId: { not: null } };
+  }
 
   const [rows, total] = await Promise.all([
     prisma.posMachine.findMany({

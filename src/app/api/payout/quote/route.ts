@@ -6,9 +6,11 @@ import { toNumber } from "@/lib/money";
 import { quotePayoutForUser, GST_PERCENT } from "@/lib/payout/charges";
 import { requireActiveScheme, NoSchemeError } from "@/lib/scheme/gate";
 
+// Only IMPS is exposed to the payout UI today. Kept as an enum (not a literal)
+// so future modes can be added here without changing every caller.
 const QuerySchema = z.object({
   amount: z.coerce.number().positive().max(500000),
-  mode: z.enum(["IMPS", "NEFT", "RTGS", "UPI"]),
+  mode: z.enum(["IMPS"]),
 });
 
 /** Server-authoritative charge preview for the payout form. */

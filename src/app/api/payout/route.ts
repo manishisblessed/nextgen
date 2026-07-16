@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
 import { holdFunds, getBalances, LedgerError } from "@/lib/ledger";
 import { toNumber } from "@/lib/money";
-import { encryptField } from "@/lib/crypto/fieldEncryption";
+import { encryptField, decryptField } from "@/lib/crypto/fieldEncryption";
 import { scopeUserIdFilter } from "@/lib/security/ownership";
 import { assertKycCurrent, ReKycRequiredError } from "@/lib/security/kycGate";
 import { assertLivenessReady, LivenessRequiredError } from "@/lib/security/livenessGate";
@@ -26,34 +26,44 @@ import { dec, gt } from "@/lib/money";
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_RE = /^\d{9,18}$/;
-const VPA_RE = /^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/;
 
+/**
+ * Payout submission body. Two shapes are accepted:
+ *
+ *   A) `beneficiaryId` — the new (preferred) flow. The account is loaded from
+ *      the verified beneficiary book; caller does NOT resend account details.
+ *   B) Inline `beneficiaryName` + `accountNumber` + `confirmAccountNumber` +
+ *      `ifsc` — legacy shape kept for mobile / bulk clients that haven't been
+ *      migrated to the beneficiary book yet.
+ *
+ * Only IMPS is exposed today (UPI/NEFT/RTGS were removed from the UI per
+ * product spec). The zod enum uses a literal list so it can be widened later
+ * without touching downstream code.
+ */
 const CreateBody = z
   .object({
-    mode: z.enum(["IMPS", "NEFT", "RTGS", "UPI"]),
+    mode: z.enum(["IMPS"]).default("IMPS"),
     amount: z.number().positive().max(500000),
-    beneficiaryName: z.string().trim().min(2).max(120),
+    beneficiaryId: z.string().min(1).optional(),
+    beneficiaryName: z.string().trim().min(2).max(120).optional(),
     accountNumber: z.string().trim().optional(),
     confirmAccountNumber: z.string().trim().optional(),
     ifsc: z.string().trim().toUpperCase().optional(),
-    vpa: z.string().trim().optional(),
   })
   .strict()
   .superRefine((v, ctx) => {
-    if (v.mode === "UPI") {
-      if (!v.vpa || !VPA_RE.test(v.vpa)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["vpa"], message: "Valid UPI ID required" });
-      }
-    } else {
-      if (!v.accountNumber || !ACCOUNT_RE.test(v.accountNumber)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountNumber"], message: "Account number must be 9-18 digits" });
-      }
-      if (v.confirmAccountNumber !== undefined && v.confirmAccountNumber !== v.accountNumber) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmAccountNumber"], message: "Account numbers do not match" });
-      }
-      if (!v.ifsc || !IFSC_RE.test(v.ifsc)) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ifsc"], message: "Invalid IFSC code" });
-      }
+    if (v.beneficiaryId) return; // beneficiary book lookup takes over
+    if (!v.beneficiaryName) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["beneficiaryName"], message: "Beneficiary name is required" });
+    }
+    if (!v.accountNumber || !ACCOUNT_RE.test(v.accountNumber)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountNumber"], message: "Account number must be 9-18 digits" });
+    }
+    if (v.confirmAccountNumber !== undefined && v.confirmAccountNumber !== v.accountNumber) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmAccountNumber"], message: "Account numbers do not match" });
+    }
+    if (!v.ifsc || !IFSC_RE.test(v.ifsc)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["ifsc"], message: "Invalid IFSC code" });
     }
   });
 
@@ -157,6 +167,40 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const body = parsed.data;
 
+  // Resolve the beneficiary: prefer the saved (verified) beneficiary book;
+  // fall back to inline fields for legacy callers. `beneficiaryName`,
+  // `accountNumber`, `ifsc` at the end of this block are what the payout
+  // routes downstream all consume.
+  let beneficiaryName: string;
+  let accountNumber: string;
+  let ifsc: string;
+  if (body.beneficiaryId) {
+    const bene = await prisma.payoutBeneficiary.findFirst({
+      where: { id: body.beneficiaryId, userId: user.id },
+    });
+    if (!bene) return NextResponse.json({ error: "Beneficiary not found" }, { status: 404 });
+    if (!bene.isVerified) {
+      return NextResponse.json(
+        { error: "Beneficiary is not yet verified. Please re-check verification first." },
+        { status: 400 }
+      );
+    }
+    beneficiaryName = bene.verifiedName || bene.holderName;
+    try {
+      accountNumber = decryptField(bene.accountNumber);
+      ifsc = decryptField(bene.ifsc);
+    } catch {
+      return NextResponse.json(
+        { error: "Beneficiary data could not be read. Please delete and re-add it." },
+        { status: 500 }
+      );
+    }
+  } else {
+    beneficiaryName = body.beneficiaryName!;
+    accountNumber = body.accountNumber!;
+    ifsc = body.ifsc!;
+  }
+
   const payoutService = PAYOUT_MODE_SERVICE[body.mode];
   if (payoutService) {
     const limit = await getSchemeLimit(user.id, payoutService);
@@ -173,13 +217,12 @@ export async function POST(req: Request) {
   // Risk rules: rolling daily/night caps, hourly velocity, and the
   // new-beneficiary cooling cap (mule defense). Evaluated on the full debit.
   try {
-    const handleForRisk = body.mode === "UPI" ? body.vpa! : body.accountNumber!;
     await assertTransactionRisk({
       userId: user.id,
       service: "PAYOUT",
       amount: quote.totalDebit,
       beneficiary: {
-        accountLast4: handleForRisk.replace(/@.*/, "").slice(-4),
+        accountLast4: accountNumber.slice(-4),
         mode: body.mode,
       },
       ip: clientIp(req),
@@ -201,9 +244,7 @@ export async function POST(req: Request) {
     const result = await withIdempotency(
       { key: idemKey, scope: "payout.create", userId: user.id },
       async () => {
-        const isUpi = body.mode === "UPI";
-        const handle = isUpi ? body.vpa! : body.accountNumber!;
-        const accountLast4 = handle.replace(/@.*/, "").slice(-4);
+        const accountLast4 = accountNumber.slice(-4);
         const bulkpeReferenceId = `PO${nanoid(18).toUpperCase()}`;
 
         const created = await prisma.$transaction(async (tx) => {
@@ -214,9 +255,9 @@ export async function POST(req: Request) {
             data: {
               userId: user.id,
               makerId: user.id,
-              beneficiaryName: body.beneficiaryName,
-              accountNumber: encryptField(handle),
-              ifsc: !isUpi && body.ifsc ? encryptField(body.ifsc) : null,
+              beneficiaryName,
+              accountNumber: encryptField(accountNumber),
+              ifsc: encryptField(ifsc),
               accountLast4,
               mode: body.mode,
               amount: quote.amount,

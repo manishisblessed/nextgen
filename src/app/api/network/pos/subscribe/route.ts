@@ -4,6 +4,7 @@ import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/rateLimit";
 import { clientIp } from "@/lib/security/audit";
+import { getDescendantIds } from "@/lib/security/ownership";
 import { flags } from "@/lib/env";
 import { dec, toNumber } from "@/lib/money";
 
@@ -76,12 +77,21 @@ export async function POST(req: Request) {
       { status: 400 },
     );
 
+  // The machine may sit with the child directly OR have already flowed further
+  // down the chain to one of the child's own descendants (e.g. MD → DT → RT,
+  // where the machine now rests with the retailer). In every such case the
+  // child is part of the machine's assignment chain, so the parent may still
+  // charge them rent. Assignment only flows parent → child, so a machine held
+  // anywhere in the child's subtree necessarily passed through the child.
+  // Billing (lib/pos/rental.ts) bills only the lowest active tier and cascades
+  // commission upward, so per-tier subscriptions can coexist on one machine.
+  const childHolderIds = [childId, ...(await getDescendantIds(childId))];
   const machine = await prisma.posMachine.findFirst({
-    where: { id: machineId, assignedUserId: childId },
+    where: { id: machineId, assignedUserId: { in: childHolderIds } },
     select: { id: true, tid: true },
   });
   if (!machine)
-    return NextResponse.json({ error: "Machine is not assigned to this user" }, { status: 400 });
+    return NextResponse.json({ error: "Machine is not held by this user or their downline" }, { status: 400 });
 
   const plan = await prisma.posRentalPlan.findFirst({
     where: { id: planId, active: true, OR: [{ ownerId: user.id }, { ownerId: null }] },
@@ -111,18 +121,43 @@ export async function POST(req: Request) {
   const parentCost = parentSub ? toNumber(dec(parentSub.monthlyRent ?? parentSub.plan.monthlyRent)) : 0;
   const commission = Math.max(0, Math.round((monthlyRent - parentCost) * 100) / 100);
 
-  const sub = await prisma.posSubscription.create({
-    data: {
-      machineId,
-      userId: childId,
-      planId,
-      billingDay,
-      monthlyRent: dec(monthlyRent),
-      commission: dec(commission),
-      includeGst,
-      createdById: user.id,
-      status: "ACTIVE",
-    },
+  const sub = await prisma.$transaction(async (tx) => {
+    const created = await tx.posSubscription.create({
+      data: {
+        machineId,
+        userId: childId,
+        planId,
+        billingDay,
+        monthlyRent: dec(monthlyRent),
+        commission: dec(commission),
+        includeGst,
+        createdById: user.id,
+        status: "ACTIVE",
+      },
+    });
+
+    // The child may have already assigned this machine further downstream and
+    // set up their own subscription (createdById = child) before this upstream
+    // subscription existed — in which case that downstream commission was
+    // computed against a ₹0 upstream cost (full rent). Now that the child is
+    // charged `monthlyRent`, recalculate their downstream spread so commission
+    // cascades correctly: newSpread = max(0, downstreamRent − thisRent). This
+    // mirrors the admin route's recalc so ordering of subscription creation
+    // never leaves a stale spread.
+    const downstreamSubs = await tx.posSubscription.findMany({
+      where: { machineId, createdById: childId, status: "ACTIVE" },
+      select: { id: true, monthlyRent: true, plan: { select: { monthlyRent: true } } },
+    });
+    for (const ds of downstreamSubs) {
+      const dsRent = toNumber(dec(ds.monthlyRent ?? ds.plan.monthlyRent));
+      const newCommission = Math.max(0, Math.round((dsRent - monthlyRent) * 100) / 100);
+      await tx.posSubscription.update({
+        where: { id: ds.id },
+        data: { commission: dec(newCommission) },
+      });
+    }
+
+    return created;
   });
 
   await prisma.auditLog.create({

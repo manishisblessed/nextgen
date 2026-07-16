@@ -66,19 +66,21 @@ export async function runPosRentalBilling(now = new Date()): Promise<{
     include: { plan: true },
   });
 
-  // Build a set of (machineId, userId) pairs where the subscriber has created
-  // a further-downstream active subscription on the same machine. These
-  // upstream subscriptions are cost anchors only — billing is handled at the
-  // lowest active tier.
-  const downstreamCreators = await prisma.posSubscription.findMany({
+  // Full active-subscription graph, indexed by (machine, subscriber). Upstream
+  // subscriptions are cost anchors only — billing happens at the lowest active
+  // tier. This map lets billing (a) skip upstream tiers that have a downstream
+  // subscription and (b) cascade commission up EVERY tier of the chain when the
+  // lowest tier is billed — not just the immediate parent.
+  const allActiveSubs = await prisma.posSubscription.findMany({
     where: { status: "ACTIVE" },
-    select: { machineId: true, createdById: true },
+    include: { plan: true },
   });
-  const hasDownstream = new Set(
-    downstreamCreators
-      .filter((d) => d.createdById)
-      .map((d) => `${d.machineId}:${d.createdById}`),
-  );
+  const subByMachineUser = new Map<string, (typeof allActiveSubs)[number]>();
+  const hasDownstream = new Set<string>();
+  for (const s of allActiveSubs) {
+    subByMachineUser.set(`${s.machineId}:${s.userId}`, s);
+    if (s.createdById) hasDownstream.add(`${s.machineId}:${s.createdById}`);
+  }
 
   let billed = 0;
   let failed = 0;
@@ -125,30 +127,47 @@ export async function runPosRentalBilling(now = new Date()): Promise<{
         idempotencyKey: `rent:${sub.id}:${periodKey}`,
       });
 
-      // Credit commission to the assigner (parent). When the subscription
-      // carries GST, 18% GST is added on top of the commission spread; 2% TDS
-      // is deducted from the base spread only (GST is a pass-through, not
-      // income). net = spread + GST(spread) − TDS(spread).
+      // Cascade commission UP the entire chain on this machine. The lowest tier
+      // (`sub`) is the only one debited; every tier above it earns its own
+      // spread, credited to that tier's creator. Starting from the billed sub,
+      // follow createdById → the parent's own subscription on the same machine,
+      // crediting each tier. Each credit is idempotent per (subscription,
+      // period) via its own key, and `visited` guards against any cycle.
+      // When a subscription carries GST, 18% GST is added on top of that tier's
+      // spread; 2% TDS is deducted from the base spread only (GST is a
+      // pass-through, not income). net = spread + GST(spread) − TDS(spread).
       let commissionTxnId: string | null = null;
-      if (commissionAmount.gt(0) && sub.createdById) {
-        const commissionGst = sub.includeGst ? round(mul(commissionAmount, GST_RATE)) : dec(0);
-        const tdsAmount = round(mul(commissionAmount, TDS_RATE));
-        const netCommission = add(subtract(commissionAmount, tdsAmount), commissionGst);
-        try {
-          if (netCommission.gt(0)) {
-            const commTxn = await creditWallet({
-              userId: sub.createdById,
-              amount: netCommission,
-              reason: "COMMISSION",
-              refType: "PosSubscription",
-              refId: sub.id,
-              note: `POS rental commission · ${sub.plan.name} · ${periodKey} (₹${toNumber(commissionAmount)} spread${sub.includeGst ? ` + ₹${toNumber(commissionGst)} GST` : ""} − 2% TDS ₹${toNumber(tdsAmount)})`,
-              idempotencyKey: `rent-comm:${sub.id}:${periodKey}`,
-            });
-            commissionTxnId = commTxn.id;
+      {
+        let node: (typeof allActiveSubs)[number] | undefined =
+          subByMachineUser.get(`${sub.machineId}:${sub.userId}`);
+        const visited = new Set<string>();
+        while (node && node.createdById && !visited.has(node.id)) {
+          visited.add(node.id);
+          const spread = dec(node.commission);
+          if (spread.gt(0)) {
+            const commissionGst = node.includeGst ? round(mul(spread, GST_RATE)) : dec(0);
+            const tdsAmount = round(mul(spread, TDS_RATE));
+            const netCommission = add(subtract(spread, tdsAmount), commissionGst);
+            if (netCommission.gt(0)) {
+              try {
+                const commTxn = await creditWallet({
+                  userId: node.createdById,
+                  amount: netCommission,
+                  reason: "COMMISSION",
+                  refType: "PosSubscription",
+                  refId: node.id,
+                  note: `POS rental commission · ${node.plan.name} · ${periodKey} (₹${toNumber(spread)} spread${node.includeGst ? ` + ₹${toNumber(commissionGst)} GST` : ""} − 2% TDS ₹${toNumber(tdsAmount)})`,
+                  idempotencyKey: `rent-comm:${node.id}:${periodKey}`,
+                });
+                if (node.id === sub.id) commissionTxnId = commTxn.id;
+              } catch (e) {
+                console.error(`[pos-rental] commission credit failed for sub ${node.id}:`, e);
+              }
+            }
           }
-        } catch (e) {
-          console.error(`[pos-rental] commission credit failed for sub ${sub.id}:`, e);
+          node = node.createdById
+            ? subByMachineUser.get(`${sub.machineId}:${node.createdById}`)
+            : undefined;
         }
       }
 

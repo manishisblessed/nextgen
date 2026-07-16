@@ -156,7 +156,7 @@ export default function ManageAdminsPage() {
       header: "Permissions",
       render: (r) => (
         <div className="flex flex-wrap gap-1">
-          {r.allowedTabs.length === 0 ? (
+          {r.allowedTabs.length === 0 || r.allowedTabs.length >= ASSIGNABLE_ADMIN_TABS.length ? (
             <Badge variant="success">All access</Badge>
           ) : (
             <Badge variant="default">
@@ -242,7 +242,7 @@ export default function ManageAdminsPage() {
       header: "Permissions",
       render: (r) => (
         <div className="flex flex-wrap gap-1">
-          {r.allowedTabs.length === 0 ? (
+          {r.allowedTabs.length === 0 || r.allowedTabs.length >= ASSIGNABLE_MASTER_ADMIN_TABS.length ? (
             <Badge variant="success">All access</Badge>
           ) : (
             <Badge variant="default">

@@ -140,6 +140,7 @@ model User {
   notifications        Notification[]
   commissionSlabs      CommissionSlab[]
   payoutRequests       PayoutRequest[]  @relation("PayoutOwner")
+  payoutBeneficiaries  PayoutBeneficiary[] @relation("PayoutBeneficiaries")
   schemesCreated       Scheme[]         @relation("SchemeCreator")
   posMachines          PosMachine[]     @relation("PosAssignee")
   slidersCreated       Slider[]         @relation("SliderCreator")
@@ -1217,6 +1218,61 @@ model PayoutRequest {
   @@index([userId, status])
   @@index([status, createdAt])
   @@index([checkerId, status])
+}
+
+// ---------- Payout beneficiary book (penny-drop verified) ----------
+// A retailer/network user's saved bank accounts for future payouts. Every row
+// is proven live by a penny-drop verification (₹4 + GST debited from the user
+// wallet as a FEE ledger entry). Only VERIFIED (isVerified=true) rows may be
+// used as the source of a new PayoutRequest.
+//
+// PII posture matches PayoutRequest: `accountNumber` and `ifsc` are stored
+// AES-256-GCM encrypted (fieldEncryption), and `accountLast4` is kept in plain
+// text purely for safe display.
+
+enum PayoutBeneVerifyStatus {
+  PENDING // penny-drop initiated, awaiting bank confirmation
+  SUCCESS // verified — usable for payouts
+  FAILED // provider declined; user must delete + re-add or re-check
+}
+
+model PayoutBeneficiary {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation("PayoutBeneficiaries", fields: [userId], references: [id], onDelete: Cascade)
+
+  accountNumber String // ENCRYPTED at rest (fieldEncryption.ts)
+  ifsc          String // ENCRYPTED at rest
+  accountLast4  String // plain, display-only
+
+  // User-entered name (as printed on the passbook); replaced by verifiedName
+  // once the bank confirms it via penny-drop.
+  holderName    String
+  verifiedName  String?
+  contactMobile String?
+
+  isVerified         Boolean                @default(false)
+  verificationStatus PayoutBeneVerifyStatus @default(PENDING)
+
+  // Provider correlation for penny-drop attempts + the ledger entry that
+  // captured the ₹4 + GST verification fee. Kept for reconciliation / support.
+  verificationOrderId       String?
+  verificationUtr           String?
+  verificationChargeInPaise Int?
+  verificationWalletTxnId   String?
+  failureReason             String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  verifiedAt DateTime?
+
+  // The (encrypted) accountNumber is included in the uniqueness key so a user
+  // cannot double-add the same account. IFSC is part of the key because the
+  // same account number can legitimately exist across different bank branches
+  // (rare, but the DB must not refuse it).
+  @@unique([userId, accountNumber, ifsc])
+  @@index([userId, isVerified])
+  @@index([userId, verificationStatus])
 }
 
 // =====================================================================

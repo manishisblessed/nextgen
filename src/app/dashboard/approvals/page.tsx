@@ -12,6 +12,7 @@ import {
   MapPin,
   RefreshCw,
   AlertTriangle,
+  PenTool,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -209,14 +210,17 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
 
   // Signature
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const isDrawingRef = useRef(false);
   const [hasSigned, setHasSigned] = useState(false);
 
   // Selfie
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selfieDataUrl, setSelfieDataUrl] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
 
   // GPS
   const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
@@ -229,91 +233,201 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
     };
   }, []);
 
-  // Canvas drawing
-  function initCanvas() {
+  // Canvas drawing — DPR-aware so that pointer coordinates line up 1:1
+  // with the drawing surface (fixes the "signs from the middle" bug that
+  // happens when internal canvas resolution differs from CSS display size).
+  const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "#1e293b";
-    ctx.lineWidth = 2;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
-  }
+    ctx.lineJoin = "round";
+  }, []);
 
-  useEffect(() => { initCanvas(); }, []);
+  useEffect(() => {
+    setupCanvas();
+    const onResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      // Preserve current strokes across resizes.
+      const snapshot = canvas.toDataURL("image/png");
+      setupCanvas();
+      const img = new window.Image();
+      img.onload = () => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const rect = canvas.getBoundingClientRect();
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      };
+      img.src = snapshot;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [setupCanvas]);
 
   function getPos(e: React.MouseEvent | React.TouchEvent) {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    if ("touches" in e) {
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-    }
-    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top };
+    const clientX = "touches" in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top };
   }
 
   function startDraw(e: React.MouseEvent | React.TouchEvent) {
     e.preventDefault();
-    setIsDrawing(true);
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
     const pos = getPos(e);
+    isDrawingRef.current = true;
+    lastPointRef.current = pos;
+    // A small dot so a single tap still leaves a visible mark.
+    ctx.beginPath();
+    ctx.fillStyle = "#0f172a";
+    ctx.arc(pos.x, pos.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
   }
 
   function draw(e: React.MouseEvent | React.TouchEvent) {
-    if (!isDrawing) return;
+    if (!isDrawingRef.current) return;
     e.preventDefault();
     const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
+    const last = lastPointRef.current;
+    if (!ctx || !last) return;
     const pos = getPos(e);
-    ctx.lineTo(pos.x, pos.y);
+    // Quadratic curve through the midpoint of last->current gives a smooth,
+    // organic-looking signature stroke instead of jagged straight segments.
+    const midX = (last.x + pos.x) / 2;
+    const midY = (last.y + pos.y) / 2;
+    ctx.quadraticCurveTo(last.x, last.y, midX, midY);
     ctx.stroke();
-    setHasSigned(true);
+    ctx.beginPath();
+    ctx.moveTo(midX, midY);
+    lastPointRef.current = pos;
+    if (!hasSigned) setHasSigned(true);
   }
 
   function endDraw() {
-    setIsDrawing(false);
+    if (!isDrawingRef.current) return;
+    const ctx = canvasRef.current?.getContext("2d");
+    const last = lastPointRef.current;
+    if (ctx && last) {
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    }
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
   }
 
   function clearSignature() {
     setHasSigned(false);
-    initCanvas();
+    setupCanvas();
   }
+
+  // Attach the stream to the <video> only AFTER it has been mounted (the
+  // element lives inside a `{cameraOpen && ...}` block). Doing this in an
+  // effect keyed on `cameraOpen` fixes the "empty camera box" bug where the
+  // stream was assigned before the element existed.
+  useEffect(() => {
+    if (!cameraOpen) return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (video && stream) {
+      video.srcObject = stream;
+      video.muted = true;
+      video.play().catch(() => {});
+    }
+  }, [cameraOpen]);
 
   // Camera
   async function openCamera() {
+    setError("");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("This browser can't access the camera. Please use Chrome or Safari, or use your phone's camera app below.");
+      return;
+    }
+    setCameraStarting(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "user" } },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       }
+      streamRef.current = stream;
       setCameraOpen(true);
-    } catch {
-      setError("Camera access is required for the approval selfie.");
+    } catch (err) {
+      const name = (err as DOMException)?.name;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        setError("Camera permission is blocked. Please allow camera access in your browser settings, or use your phone's camera app below.");
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        setError("No camera was found on this device. Use your phone's camera app below.");
+      } else if (name === "NotReadableError") {
+        setError("Your camera is being used by another app. Close it and try again.");
+      } else {
+        setError("Couldn't open the camera. Please try again or use your phone's camera app below.");
+      }
+    } finally {
+      setCameraStarting(false);
     }
   }
 
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+
   function capturePhoto() {
-    if (!videoRef.current) return;
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
     const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(videoRef.current, 0, 0);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    // Mirror so the saved selfie matches the preview the user sees.
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     setSelfieDataUrl(dataUrl);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    stopCamera();
     setCameraOpen(false);
   }
 
   function retakeSelfie() {
     setSelfieDataUrl(null);
     openCamera();
+  }
+
+  // Native camera-app fallback — works even when getUserMedia is blocked or
+  // unavailable (e.g. inside a WebView).
+  function handleNativeSelfie(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelfieDataUrl(reader.result as string);
+      stopCamera();
+      setCameraOpen(false);
+    };
+    reader.readAsDataURL(file);
   }
 
   // GPS
@@ -510,17 +624,27 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
 
       {/* Signature */}
       <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-soft">
-        <div className="flex items-center gap-2 mb-3">
-          <FileSignature className="h-5 w-5 text-brand-600" />
-          <h3 className="font-bold text-ink-900">Your Signature</h3>
-          {hasSigned && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <FileSignature className="h-5 w-5 text-brand-600" />
+            <h3 className="font-bold text-ink-900">Your Signature</h3>
+            {hasSigned && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+          </div>
+          {hasSigned && (
+            <button
+              type="button"
+              onClick={clearSignature}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-600 hover:bg-ink-50"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Clear
+            </button>
+          )}
         </div>
-        <div className="relative rounded-xl border-2 border-dashed border-ink-200 bg-ink-50 overflow-hidden">
+        <div className="relative rounded-xl border-2 border-dashed border-ink-200 bg-white overflow-hidden">
           <canvas
             ref={canvasRef}
-            width={500}
-            height={200}
-            className="w-full cursor-crosshair touch-none"
+            className="block w-full touch-none cursor-crosshair"
+            style={{ height: 200 }}
             onMouseDown={startDraw}
             onMouseMove={draw}
             onMouseUp={endDraw}
@@ -529,15 +653,21 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
             onTouchMove={draw}
             onTouchEnd={endDraw}
           />
+          {!hasSigned && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="flex items-center gap-2 rounded-full bg-ink-50 px-4 py-2 text-sm font-medium text-ink-400 shadow-sm">
+                <PenTool className="h-4 w-4" />
+                <span>Sign here</span>
+              </div>
+            </div>
+          )}
+          <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-brand-50 p-1.5 text-brand-600">
+            <PenTool className="h-3.5 w-3.5" />
+          </div>
         </div>
-        {hasSigned && (
-          <button type="button" onClick={clearSignature} className="mt-2 text-xs text-brand-600 hover:underline">
-            Clear & redraw
-          </button>
-        )}
-        {!hasSigned && (
-          <p className="mt-2 text-xs text-ink-400">Draw your signature above using mouse or touch.</p>
-        )}
+        <p className="mt-2 text-xs text-ink-400">
+          Draw your signature using mouse or touch. Signature is captured exactly as drawn.
+        </p>
       </div>
 
       {/* Selfie */}
@@ -548,20 +678,49 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
           {selfieDataUrl && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
         </div>
 
+        {/* Native camera-app input (front-camera hint via capture="user"). */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="user"
+          className="hidden"
+          onChange={handleNativeSelfie}
+        />
+
         {!selfieDataUrl && !cameraOpen && (
-          <Button variant="outline" onClick={openCamera}>
-            <Camera className="h-4 w-4" /> Open Camera
-          </Button>
+          <div className="space-y-2">
+            <Button variant="outline" onClick={openCamera} disabled={cameraStarting}>
+              {cameraStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+              {cameraStarting ? "Starting camera…" : "Open Camera"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
+            >
+              <Camera className="h-3.5 w-3.5" /> Camera not opening? Use your phone&apos;s camera app
+            </button>
+          </div>
         )}
 
         {cameraOpen && (
           <div className="space-y-3">
-            <div className="relative mx-auto max-w-sm overflow-hidden rounded-2xl border border-ink-200">
-              <video ref={videoRef} className="w-full" muted playsInline autoPlay />
+            <div className="relative mx-auto max-w-sm overflow-hidden rounded-2xl border border-ink-200 bg-ink-900/90">
+              <video ref={videoRef} className="w-full -scale-x-100" muted playsInline autoPlay />
             </div>
-            <Button className="w-full max-w-sm mx-auto" onClick={capturePhoto}>
-              <Camera className="h-4 w-4" /> Capture Photo
-            </Button>
+            <div className="flex flex-col items-center gap-2">
+              <Button className="w-full max-w-sm" onClick={capturePhoto}>
+                <Camera className="h-4 w-4" /> Capture Photo
+              </Button>
+              <button
+                type="button"
+                onClick={() => { stopCamera(); setCameraOpen(false); }}
+                className="text-xs text-ink-500 hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 

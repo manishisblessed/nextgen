@@ -2022,21 +2022,94 @@ function OnboardContent() {
               )}
 
               <div className="space-y-3">
-                {REQUIRED_DOCUMENTS.map((doc) =>
-                  doc.requiresGps ? (
-                    <GpsPhotoCapture
-                      key={doc.type}
-                      label={doc.label}
-                      description={doc.description}
-                      required={doc.required}
-                      uploaded={!!uploadedDocs[doc.type]}
-                      uploading={uploading === doc.type}
-                      removing={removing === doc.type}
-                      facing={doc.type === "GPS_SELFIE_DISTRIBUTOR" ? "user" : "environment"}
-                      onCapture={(file, gps) => uploadDocument(doc.type, file, { gps })}
-                      onRemove={() => removeDocument(doc.type)}
-                    />
-                  ) : (
+                {REQUIRED_DOCUMENTS.map((doc) => {
+                  if (doc.requiresGps) {
+                    return (
+                      <GpsPhotoCapture
+                        key={doc.type}
+                        label={doc.label}
+                        description={doc.description}
+                        required={doc.required}
+                        uploaded={!!uploadedDocs[doc.type]}
+                        uploading={uploading === doc.type}
+                        removing={removing === doc.type}
+                        facing={doc.type === "GPS_SELFIE_DISTRIBUTOR" ? "user" : "environment"}
+                        onCapture={(file, gps) => uploadDocument(doc.type, file, { gps })}
+                        onRemove={() => removeDocument(doc.type)}
+                      />
+                    );
+                  }
+                  if (doc.type === "PG_FORM") {
+                    const pgUploaded = !!uploadedDocs.PG_FORM;
+                    return (
+                      <div
+                        key={doc.type}
+                        className={`rounded-xl border p-4 ${
+                          pgUploaded ? "border-emerald-200 bg-emerald-50" : "border-ink-200 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          {pgUploaded ? (
+                            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                          ) : (
+                            <FileText className="h-5 w-5 text-ink-400" />
+                          )}
+                          <p className="text-sm font-medium text-ink-900">
+                            {doc.label} <span className="text-rose-500">*</span>
+                          </p>
+                        </div>
+
+                        {!pgUploaded && (
+                          <div className="space-y-3">
+                            <a
+                              href={`/api/onboard/${token}/pg-form/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+                            >
+                              <ArrowDown className="h-4 w-4" /> Download Prefilled PG Form
+                            </a>
+                            <p className="text-xs text-ink-500">
+                              Download, print, sign, and upload the signed PG onboarding form.
+                            </p>
+                            <DocumentUploadField
+                              label="Upload Signed PG Form"
+                              type="PG_FORM"
+                              uploaded={pgUploaded}
+                              uploading={uploading === "PG_FORM"}
+                              removing={removing === "PG_FORM"}
+                              required
+                              accept={doc.accept}
+                              onUpload={(file) => uploadDocument("PG_FORM", file)}
+                              onRemove={() => removeDocument("PG_FORM")}
+                            />
+                          </div>
+                        )}
+
+                        {pgUploaded && (
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs text-emerald-700">
+                              Signed PG form uploaded successfully
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => removeDocument("PG_FORM")}
+                              disabled={removing === "PG_FORM"}
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                            >
+                              {removing === "PG_FORM" ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3 w-3" />
+                              )}
+                              Remove & re-upload
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  return (
                     <DocumentUploadField
                       key={doc.type}
                       label={doc.label}
@@ -2054,8 +2127,8 @@ function OnboardContent() {
                       }
                       onRemove={() => removeDocument(doc.type)}
                     />
-                  )
-                )}
+                  );
+                })}
               </div>
 
               <div className="mt-2 rounded-xl bg-ink-50 p-3 text-xs text-ink-500">

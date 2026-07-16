@@ -121,13 +121,19 @@ export default function NetworkPosRentalPage() {
     setMachLoading(true);
     setSelectedMachines(new Set());
 
-    fetch(`/api/pos/my-machines?pageSize=200`)
+    // Scope to the selected child's subtree server-side: a machine can be
+    // rented to this child even after it has flowed further down the chain
+    // (e.g. MD → DT → RT), so it may currently be held by the child or any of
+    // the child's own descendants.
+    fetch(`/api/pos/my-machines?pageSize=200&forChild=${encodeURIComponent(selectedChild)}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
-        const allMachines = (d?.data ?? []) as Array<{ id: string; serial: string | null; tid: string | null; model: string | null; status: string; assignedUserId: string | null }>;
-        // Only show machines currently assigned to the selected child
-        const childMachines = allMachines.filter((m) => m.assignedUserId === selectedChild);
-        const activeSubs = new Set(subs.filter((s) => s.status === "ACTIVE").map((s) => s.machine.id));
+        const childMachines = (d?.data ?? []) as Array<{ id: string; serial: string | null; tid: string | null; model: string | null; status: string; assignedUserId: string | null }>;
+        // A machine is "subscribed" for this child only if the caller already
+        // created an active subscription for this machine + this child.
+        const activeSubs = new Set(
+          subs.filter((s) => s.status === "ACTIVE" && s.user.id === selectedChild).map((s) => s.machine.id),
+        );
         setMachines(childMachines.map((m) => ({ ...m, hasSub: activeSubs.has(m.id) })));
       })
       .catch(() => {})

@@ -45,6 +45,14 @@ export function BbpsBillForm({
   consumerLabel?: string;
   refPrefix?: string;
 }) {
+  type ChargeQuote = {
+    serviceCharge: number;
+    gst: number;
+    totalCharge: number;
+    totalDebit: number;
+    commission: number;
+  };
+
   const [billers, setBillers] = useState<Biller[]>([]);
   const [billersSource, setBillersSource] = useState("");
   const [billersError, setBillersError] = useState<string | null>(null);
@@ -53,6 +61,8 @@ export function BbpsBillForm({
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [bill, setBill] = useState<FetchedBill | null>(null);
   const [amount, setAmount] = useState("");
+  const [quote, setQuote] = useState<ChargeQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,9 +108,34 @@ export function BbpsBillForm({
     .filter((f) => !f.optional)
     .every((f) => (paramValues[f.name] ?? "").trim().length > 0);
 
+  useEffect(() => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) { setQuote(null); return; }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setQuoteLoading(true);
+      try {
+        const res = await fetch(`/api/services/bbps/quote?amount=${amt}&category=${category}`);
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          setQuote({
+            serviceCharge: data.serviceCharge,
+            gst: data.gst,
+            totalCharge: data.totalCharge,
+            totalDebit: data.totalDebit,
+            commission: data.commission,
+          });
+        }
+      } catch { /* swallow */ }
+      finally { if (!cancelled) setQuoteLoading(false); }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [amount, category]);
+
   function resetBill() {
     setBill(null);
     setAmount("");
+    setQuote(null);
     setError(null);
   }
 
@@ -337,9 +372,38 @@ export function BbpsBillForm({
                 </button>
               </div>
             </div>
+            {quote && Number(amount) > 0 && (
+              <div className="sm:col-span-2 rounded-xl border border-ink-200 bg-ink-50/50 p-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-ink-600">Bill amount</span>
+                  <span className="font-medium text-ink-900">{formatINR(Number(amount))}</span>
+                </div>
+                <div className="mt-1 flex justify-between">
+                  <span className="text-ink-600">
+                    Charges{quote.gst > 0 ? " (incl. 18% GST)" : ""}
+                  </span>
+                  <span className="font-medium text-ink-900">{formatINR(quote.totalCharge)}</span>
+                </div>
+                <hr className="my-2 border-ink-200" />
+                <div className="flex justify-between font-semibold">
+                  <span className="text-ink-700">Total debit from wallet</span>
+                  <span className="text-ink-900">{formatINR(quote.totalDebit)}</span>
+                </div>
+                {quote.commission > 0 && (
+                  <p className="mt-2 text-xs text-emerald-600">
+                    Commission earned: {formatINR(quote.commission)} (net of 2% TDS)
+                  </p>
+                )}
+              </div>
+            )}
+            {quoteLoading && Number(amount) > 0 && (
+              <p className="sm:col-span-2 text-center text-xs text-ink-400 animate-pulse">
+                Calculating charges…
+              </p>
+            )}
             <div className="sm:col-span-2">
               <Button type="submit" size="lg" className="w-full" disabled={paying || !amount} isLoading={paying}>
-                Pay {amount ? formatINR(Number(amount)) : "bill"}
+                Pay {quote ? formatINR(quote.totalDebit) : amount ? formatINR(Number(amount)) : "bill"}
               </Button>
               <p className="mt-2 text-center text-[11px] text-ink-400">
                 Confirmed with your transaction PIN. Debited from your wallet — failed payments are auto-refunded.
