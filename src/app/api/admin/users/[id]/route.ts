@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { requireRole } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { bumpTokenVersion } from "@/lib/security/session";
+import { generateRandomPassword } from "@/lib/utils";
 
-const Body = z.object({
-  action: z.enum(["suspend", "activate", "close"]),
-  reason: z.string().optional(),
-}).strict();
+const Body = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("suspend"), reason: z.string().optional() }),
+  z.object({ action: z.literal("activate"), reason: z.string().optional() }),
+  z.object({ action: z.literal("close"), reason: z.string().optional() }),
+  z.object({ action: z.literal("resetPassword") }),
+]);
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -23,10 +27,10 @@ export async function PATCH(
     if (!parsed.success)
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-    const { action, reason } = parsed.data;
+    const body = parsed.data;
     const targetUser = await prisma.user.findUnique({
       where: { id: params.id },
-      select: { id: true, role: true, status: true },
+      select: { id: true, role: true, status: true, email: true },
     });
 
     if (!targetUser)
@@ -35,6 +39,27 @@ export async function PATCH(
     if (targetUser.role === "ADMIN")
       return NextResponse.json({ error: "Cannot modify admin users" }, { status: 403 });
 
+    if (body.action === "resetPassword") {
+      const password = generateRandomPassword(12);
+      const passwordHash = await bcrypt.hash(password, 12);
+      await prisma.$transaction([
+        prisma.user.update({ where: { id: params.id }, data: { passwordHash } }),
+        prisma.auditLog.create({
+          data: {
+            userId: admin.id,
+            action: "user.password_reset",
+            entity: "User",
+            entityId: params.id,
+            meta: { email: targetUser.email },
+            ip: clientIp(req),
+          },
+        }),
+      ]);
+      await bumpTokenVersion(params.id, { swallow: true });
+      return NextResponse.json({ ok: true, password });
+    }
+
+    const { action, reason } = body;
     const statusMap = {
       suspend: "SUSPENDED" as const,
       activate: "ACTIVE" as const,
@@ -60,7 +85,6 @@ export async function PATCH(
       }),
     ]);
 
-    // Status change is a privilege change → invalidate the target's sessions.
     await bumpTokenVersion(params.id, { swallow: true });
 
     return NextResponse.json({ ok: true, status: newStatus });

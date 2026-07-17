@@ -13,6 +13,7 @@ const CreateBody = z.object({
   email: z.string().email(),
   name: z.string().min(2).optional(),
   role: z.enum(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]).optional(),
+  parentId: z.string().cuid().optional(),
 });
 
 export const fetchCache = "force-no-store";
@@ -73,10 +74,30 @@ export async function POST(req: Request) {
     );
   }
 
-  // For network roles, they are the parent. For admin, no parent (SD is top-level).
-  const parentId = ["MASTER_ADMIN", "ADMIN", "SUPPORT"].includes(user.role)
-    ? undefined
-    : user.id;
+  // Determine parentId:
+  // - Network roles creating their child → they are the parent
+  // - Master Admin providing an explicit parentId → use it (validated below)
+  // - Admin/Staff creating SD (top-level) → no parent needed
+  let parentId: string | undefined;
+  if (["MASTER_ADMIN", "ADMIN", "SUPPORT"].includes(user.role)) {
+    if (parsed.data.parentId && user.role === "MASTER_ADMIN" && role !== "SUPER_DISTRIBUTOR") {
+      const parentUser = await prisma.user.findFirst({
+        where: { id: parsed.data.parentId, status: "ACTIVE" },
+        select: { id: true, role: true },
+      });
+      if (!parentUser) {
+        return NextResponse.json(
+          { error: "Selected parent user not found or inactive" },
+          { status: 400 }
+        );
+      }
+      parentId = parentUser.id;
+    } else {
+      parentId = undefined;
+    }
+  } else {
+    parentId = user.id;
+  }
 
   const invite = await prisma.invite.create({
     data: {

@@ -447,7 +447,7 @@ export async function POST(
             </div>
             <p style="color:#64748b;font-size:13px;">${["MASTER_ADMIN", "ADMIN", "SUPPORT"].includes(inviter.role) ? "Please review and approve within 48–72 working hours." : "An admin will review and activate the account within 48–72 working hours."}</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;" />
-            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NextGenPay Pvt. Ltd.</p>
+            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NEXTGENPAY PRIVATE LIMITED</p>
           </div>
         `,
       });
@@ -584,7 +584,7 @@ export async function POST(
             <tr>
               <td style="padding:24px 32px 28px;background:#0f172a;color:#94a3b8;font-size:12px;line-height:1.6;text-align:center;">
                 <p style="margin:0 0 4px;color:#f1f5f9;font-weight:700;letter-spacing:0.4px;">NextGenPay</p>
-                <p style="margin:0 0 10px;color:#cbd5e1;">JMP NextGen Tech Private Limited</p>
+                <p style="margin:0 0 10px;color:#cbd5e1;">JMP NEXTGENPAY PRIVATE LIMITED</p>
                 <p style="margin:0;color:#64748b;">&copy; ${year} NextGenPay. All rights reserved.<br />This is an automated message &mdash; please do not reply.</p>
               </td>
             </tr>

@@ -105,7 +105,7 @@ export async function POST(
             </div>
             <p>Please contact your upline to resolve this and re-submit your declaration.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;" />
-            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NextGen Tech Pvt. Ltd.</p>
+            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NEXTGENPAY PRIVATE LIMITED</p>
           </div>
         `,
       });

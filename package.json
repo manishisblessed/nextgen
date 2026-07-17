@@ -2,7 +2,7 @@
   "name": "nextgenpay-portal",
   "version": "0.1.0",
   "private": true,
-  "description": "NextGenPay (JMP NextGenPay Pvt. Ltd.) - Digital banking & utility fintech portal",
+  "description": "NextGenPay (JMP NEXTGENPAY PRIVATE LIMITED) - Digital banking & utility fintech portal",
   "scripts": {
     "dev": "next dev --turbo",
     "build": "next build",

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth, AuthError } from "@/lib/auth-server";
-import { toNumber } from "@/lib/money";
+import { toNumber, add } from "@/lib/money";
 import { getEffectiveRate, withGst } from "@/lib/scheme/resolver";
 import { getPartner } from "@/lib/partners";
 import { requireActiveScheme, NoSchemeError } from "@/lib/scheme/gate";
@@ -52,16 +52,17 @@ export async function GET(req: Request) {
   const bbps = getPartner("bbps");
   const rate = await getEffectiveRate(user.id, service, amount, bbps.name);
 
-  const charge = toNumber(rate.charge);
-  const gstOnCharge = rate.chargeGstInclusive ? 0 : toNumber(withGst(rate.charge, 18).gst);
-  const totalCharge = charge + gstOnCharge;
-  const totalDebit = amount + totalCharge;
+  const serviceCharge = toNumber(rate.charge);
+  const gstBreakdown = withGst(rate.charge, 18);
+  const gst = rate.chargeGstInclusive ? 0 : toNumber(gstBreakdown.gst);
+  const totalCharge = rate.chargeGstInclusive ? serviceCharge : toNumber(gstBreakdown.total);
+  const totalDebit = toNumber(add(amount, rate.chargeGstInclusive ? rate.charge : gstBreakdown.total));
   const commission = toNumber(rate.commissionOwn);
 
   return NextResponse.json({
     amount,
-    serviceCharge: charge,
-    gst: gstOnCharge,
+    serviceCharge,
+    gst,
     gstPercent: rate.chargeGstInclusive ? 0 : 18,
     totalCharge,
     totalDebit,

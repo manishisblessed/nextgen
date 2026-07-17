@@ -8,6 +8,7 @@ import { enqueue, QUEUES } from "@/lib/queue";
 import { emitWebhookEvent } from "@/lib/platform/webhooks";
 import { distributeCommission } from "@/lib/commission/distribute";
 import { PAYOUT_MODE_SERVICE } from "@/lib/scheme/resolver";
+import { PAYOUT_MODE_PROVIDER } from "@/lib/payout/charges";
 import { logger } from "@/lib/logger";
 
 /**
@@ -102,6 +103,7 @@ export async function finalizePayoutSuccess(
   try {
     const service = PAYOUT_MODE_SERVICE[row.mode] as ServiceCode | undefined;
     if (service) {
+      const provider = PAYOUT_MODE_PROVIDER[row.mode] ?? "BULKPE";
       const refId = `PYC${row.id.slice(-10).toUpperCase()}`;
       let txn = await prisma.transaction.findUnique({ where: { refId } });
       if (!txn) {
@@ -113,12 +115,12 @@ export async function finalizePayoutSuccess(
             amount: row.amount,
             fee: row.serviceCharge,
             status: "SUCCESS",
-            partner: "BULKPE",
+            partner: provider,
             partnerTxnId: row.bulkpeTxnId ?? row.id,
           },
         });
       }
-      await distributeCommission(txn.id, row.userId, service, row.amount.toNumber(), undefined, "BULKPE");
+      await distributeCommission(txn.id, row.userId, service, row.amount.toNumber(), undefined, provider);
     }
   } catch (err) {
     logger.warn({ action: "payout.commission_failed", payoutId: row.id, err: String(err) });

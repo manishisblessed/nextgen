@@ -152,7 +152,7 @@ export function downloadPDF<T>(
 <body>
   <header>
     <div>
-      <p class="brand">JMP NextGenPay Pvt. Ltd.</p>
+      <p class="brand">JMP NEXTGENPAY PRIVATE LIMITED</p>
       <h1>${escapeHtml(title)}</h1>
       ${meta?.subtitle ? `<p style="margin:2px 0 0;font-size:12px;color:#5a6675;">${escapeHtml(meta.subtitle)}</p>` : ""}
     </div>

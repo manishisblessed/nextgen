@@ -17,6 +17,10 @@ import {
   Network,
   Copy,
   Ban,
+  KeyRound,
+  Eye,
+  EyeOff,
+  ClipboardCopy,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
@@ -55,6 +59,9 @@ export default function AdminUsersPage() {
   const [servicesUser, setServicesUser] = useState<UserRow | null>(null);
   const [moreUser, setMoreUser] = useState<UserRow | null>(null);
   const [closeTarget, setCloseTarget] = useState<UserRow | null>(null);
+  const [resetPwUser, setResetPwUser] = useState<UserRow | null>(null);
+  const [resetPwResult, setResetPwResult] = useState<{ user: UserRow; password: string } | null>(null);
+  const [resettingPw, setResettingPw] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const notify = useCallback((text: string, ok: boolean) => {
@@ -127,6 +134,26 @@ export default function AdminUsersPage() {
       notify(e instanceof Error ? e.message : "Close failed", false);
     } finally {
       setActing(null);
+    }
+  }
+
+  async function resetPassword(user: UserRow) {
+    setResettingPw(true);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resetPassword" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Reset failed");
+      setResetPwUser(null);
+      setResetPwResult({ user, password: data.password });
+      notify("Password reset successfully", true);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Reset failed", false);
+    } finally {
+      setResettingPw(false);
     }
   }
 
@@ -352,6 +379,10 @@ export default function AdminUsersPage() {
             setServicesUser(moreUser);
             setMoreUser(null);
           }}
+          onResetPassword={() => {
+            setResetPwUser(moreUser);
+            setMoreUser(null);
+          }}
           onCloseAccount={() => {
             setCloseTarget(moreUser);
             setMoreUser(null);
@@ -388,6 +419,27 @@ export default function AdminUsersPage() {
           setCloseTarget(null);
         }}
       />
+
+      <ConfirmDialog
+        open={resetPwUser !== null}
+        onClose={() => setResetPwUser(null)}
+        busy={resettingPw}
+        title={resetPwUser ? `Reset password for ${resetPwUser.name}?` : "Reset password?"}
+        description="This generates a new random password and immediately signs the user out of all sessions. You will see the new password once — share it securely."
+        confirmLabel="Reset password"
+        onConfirm={async () => {
+          if (!resetPwUser) return;
+          await resetPassword(resetPwUser);
+        }}
+      />
+
+      {resetPwResult && (
+        <ResetPasswordResultDialog
+          userName={resetPwResult.user.name}
+          password={resetPwResult.password}
+          onClose={() => setResetPwResult(null)}
+        />
+      )}
     </div>
   );
 }
@@ -398,12 +450,14 @@ function UserMoreMenu({
   user,
   onClose,
   onManageServices,
+  onResetPassword,
   onCloseAccount,
   onCopied,
 }: {
   user: UserRow;
   onClose: () => void;
   onManageServices: () => void;
+  onResetPassword: () => void;
   onCloseAccount: () => void;
   onCopied: () => void;
 }) {
@@ -490,6 +544,15 @@ function UserMoreMenu({
             <Copy className="h-4 w-4 text-ink-500" />
             Copy user ID
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-amber-700 transition hover:bg-amber-50"
+            onClick={onResetPassword}
+          >
+            <KeyRound className="h-4 w-4" />
+            Reset password
+          </button>
 
           {user.status !== "Closed" && (
             <button
@@ -502,6 +565,87 @@ function UserMoreMenu({
               Close account
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------------- */
+
+function ResetPasswordResultDialog({
+  userName,
+  password,
+  onClose,
+}: {
+  userName: string;
+  password: string;
+  onClose: () => void;
+}) {
+  const [visible, setVisible] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copyPw() {
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 px-4">
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-ink-100 bg-gradient-to-br from-amber-50 to-white px-5 py-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700">
+            Password reset
+          </p>
+          <h3 className="mt-1 font-display text-base font-bold text-ink-900">{userName}</h3>
+          <p className="mt-1 text-xs text-ink-500">
+            Share this password securely. It will not be shown again.
+          </p>
+        </div>
+
+        <div className="px-5 py-4">
+          <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+            New password
+          </label>
+          <div className="mt-2 flex items-center gap-2 rounded-xl border border-ink-200 bg-ink-50 px-3 py-2.5">
+            <code className="flex-1 text-sm font-semibold tracking-wide text-ink-900">
+              {visible ? password : "••••••••••••"}
+            </code>
+            <button
+              type="button"
+              onClick={() => setVisible((v) => !v)}
+              className="grid h-7 w-7 place-items-center rounded-lg text-ink-500 hover:bg-ink-200"
+              title={visible ? "Hide" : "Show"}
+            >
+              {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              type="button"
+              onClick={copyPw}
+              className="grid h-7 w-7 place-items-center rounded-lg text-ink-500 hover:bg-ink-200"
+              title="Copy"
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {copied && (
+            <p className="mt-1.5 text-xs font-medium text-emerald-600">Copied to clipboard</p>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t border-ink-100 bg-ink-50/40 px-5 py-3">
+          <Button variant="outline" onClick={onClose}>
+            Done
+          </Button>
         </div>
       </div>
     </div>

@@ -340,11 +340,15 @@ export function CreditCardBillForm() {
                   <span className="font-medium text-ink-900">{formatINR(Number(amount))}</span>
                 </div>
                 <div className="mt-1 flex justify-between">
-                  <span className="text-ink-600">
-                    Charges{quote.gst > 0 ? " (incl. 18% GST)" : ""}
-                  </span>
-                  <span className="font-medium text-ink-900">{formatINR(quote.totalCharge)}</span>
+                  <span className="text-ink-600">Service charge</span>
+                  <span className="font-medium text-ink-900">{formatINR(quote.serviceCharge)}</span>
                 </div>
+                {quote.gst > 0 && (
+                  <div className="mt-1 flex justify-between">
+                    <span className="text-ink-600">GST (18%)</span>
+                    <span className="font-medium text-ink-900">{formatINR(quote.gst)}</span>
+                  </div>
+                )}
                 <hr className="my-2 border-ink-200" />
                 <div className="flex justify-between font-semibold">
                   <span className="text-ink-700">Total debit from wallet</span>

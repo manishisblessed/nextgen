@@ -7,7 +7,6 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { Topbar } from "@/components/dashboard/Topbar";
 import { TwoFactorSetupModal } from "@/components/dashboard/TwoFactorSetupModal";
 import { ReKycGate } from "@/components/dashboard/ReKycGate";
-import { LivenessGate } from "@/components/dashboard/LivenessGate";
 import { SliderSurface } from "@/components/dashboard/sliders/SliderSurface";
 import { SchemeGateBanner } from "@/components/dashboard/SchemeGateBanner";
 import { NavigationProgress } from "@/components/dashboard/NavigationProgress";
@@ -56,9 +55,6 @@ export default function DashboardLayout({
 
       {needs2FASetup && <TwoFactorSetupModal />}
       {!needs2FASetup && <ReKycGate />}
-      {/* Onboarding liveness gate — rendered last so it sits above the monthly
-          re-KYC gate in the rare case a user owes both. Network tiers only. */}
-      {!needs2FASetup && <LivenessGate />}
     </div>
   );
 }

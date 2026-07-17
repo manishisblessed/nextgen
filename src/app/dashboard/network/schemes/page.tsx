@@ -68,6 +68,13 @@ type MdrSlab = {
   active: boolean;
 };
 
+type AssignedUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
 type Scheme = {
   id: string;
   name: string;
@@ -76,6 +83,7 @@ type Scheme = {
   userCount: number;
   slabs?: Slab[];
   mdrSlabs?: MdrSlab[];
+  assignedUsers?: AssignedUser[];
 };
 
 const FAMILY_ICONS: Record<string, { icon: typeof CreditCard; className: string }> = {
@@ -520,6 +528,41 @@ function DerivedSchemeCard({
                   </div>
                 );
               })()}
+
+              {(scheme.assignedUsers ?? []).length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <Users className="h-4 w-4 text-violet-600" />
+                    <h5 className="text-sm font-semibold text-violet-600">
+                      Assigned Users ({scheme.assignedUsers!.length})
+                    </h5>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+                    <table className="w-full min-w-max text-sm">
+                      <thead className="bg-ink-50/60 text-left text-[11px] uppercase tracking-wider text-ink-500">
+                        <tr>
+                          <th className="px-4 py-2 font-semibold">Name</th>
+                          <th className="px-4 py-2 font-semibold">Email</th>
+                          <th className="px-4 py-2 font-semibold">Role</th>
+                          <th className="px-4 py-2 font-semibold">User ID</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ink-100 text-ink-800">
+                        {scheme.assignedUsers!.map((u) => (
+                          <tr key={u.id} className="hover:bg-violet-50/30">
+                            <td className="px-4 py-2.5 font-medium">{u.name}</td>
+                            <td className="px-4 py-2.5 text-ink-600">{u.email}</td>
+                            <td className="px-4 py-2.5">
+                              <Badge variant="brand">{u.role.replace(/_/g, " ")}</Badge>
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-xs text-ink-400">{u.id}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

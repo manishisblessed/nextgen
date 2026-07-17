@@ -28,39 +28,11 @@ export class LivenessRequiredError extends Error {
 }
 
 /**
- * Throw {@link LivenessRequiredError} (403, code LIVENESS_REQUIRED) when a
- * network-tier user has not yet completed their onboarding liveness video.
- * No-op for staff/admin roles and for network users who already have it.
- *
- * Cheap by design: staff roles never hit the database; network users incur a
- * single primary-key lookup of the flag.
+ * Liveness gate disabled — users are now approved manually by admin.
+ * Kept as no-ops so every call site still compiles without changes.
  */
 export async function assertLivenessReady(
-  user: Pick<SessionUser, "id" | "role">
-): Promise<void> {
-  if (!isNetworkTier(user.role)) return;
+  _user: Pick<SessionUser, "id" | "role">
+): Promise<void> {}
 
-  const row = await prisma.user.findUnique({
-    where: { id: user.id },
-    select: { hasLivenessVideo: true },
-  });
-
-  if (!row?.hasLivenessVideo) {
-    throw new LivenessRequiredError();
-  }
-}
-
-/**
- * Like {@link assertLivenessReady} but fetches the role too — for ledger
- * chokepoints (e.g. runTransaction) that only carry a userId. One indexed
- * lookup; no-op for staff/admin.
- */
-export async function assertLivenessReadyById(userId: string): Promise<void> {
-  const row = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true, hasLivenessVideo: true },
-  });
-  if (!row) return;
-  if (!isNetworkTier(row.role)) return;
-  if (!row.hasLivenessVideo) throw new LivenessRequiredError();
-}
+export async function assertLivenessReadyById(_userId: string): Promise<void> {}

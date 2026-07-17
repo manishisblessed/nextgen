@@ -184,7 +184,7 @@ export async function POST(
             <p><strong>${user.name}</strong> (${approval.approverRole.replace(/_/g, " ")}) has approved your responsibility declaration.</p>
             <p>You can now return to your onboarding and complete your registration.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;" />
-            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NextGen Tech Pvt. Ltd.</p>
+            <p style="color:#94a3b8;font-size:12px;text-align:center;">NextGenPay — JMP NEXTGENPAY PRIVATE LIMITED</p>
           </div>
         `,
       });

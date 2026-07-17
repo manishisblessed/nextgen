@@ -48,7 +48,7 @@ export default function Splash() {
         <Text style={styles.brand}>NextGenPay</Text>
         <Text style={styles.tagline}>Banking that builds Bharat</Text>
       </View>
-      <Text style={styles.foot}>Powered by JMP NextGenPay Pvt. Ltd.</Text>
+      <Text style={styles.foot}>Powered by JMP NEXTGENPAY PRIVATE LIMITED</Text>
     </LinearGradient>
   );
 }

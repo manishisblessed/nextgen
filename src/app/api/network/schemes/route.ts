@@ -80,6 +80,7 @@ export async function GET() {
       include: {
         slabs: { orderBy: [{ service: "asc" }, { minAmount: "asc" }] },
         mdrSlabs: { orderBy: [{ serviceKind: "asc" }, { minAmount: "asc" }] },
+        users: { select: { id: true, name: true, email: true, role: true } },
         _count: { select: { slabs: true, users: true, mdrSlabs: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -88,7 +89,15 @@ export async function GET() {
 
   return NextResponse.json({
     baseScheme: base ? serializeScheme(base) : null,
-    schemes: mine.map(serializeScheme),
+    schemes: mine.map((s) => ({
+      ...serializeScheme(s),
+      assignedUsers: (s.users ?? []).map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+      })),
+    })),
     role: user.role,
   });
 }

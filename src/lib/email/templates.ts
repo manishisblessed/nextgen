@@ -109,7 +109,7 @@ function shell({
             </tr>
           </table>
           <div style="max-width:600px;margin:16px auto 0;font-size:11px;color:${BRAND.inkLight};text-align:center;">
-            &copy; ${new Date().getFullYear()} JMP NextGenPay Private Limited. All rights reserved.
+            &copy; ${new Date().getFullYear()} JMP NEXTGENPAY PRIVATE LIMITED. All rights reserved.
           </div>
         </td>
       </tr>

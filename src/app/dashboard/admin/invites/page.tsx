@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import {
   UserPlus,
@@ -24,6 +25,19 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label, Select } from "@/components/ui/Input";
+
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: "SUPER_DISTRIBUTOR", label: "Super Distributor" },
+  { value: "MASTER_DISTRIBUTOR", label: "Master Distributor" },
+  { value: "DISTRIBUTOR", label: "Distributor" },
+  { value: "RETAILER", label: "Retailer" },
+];
+
+function getAllowedRoles(userRole: string): { value: string; label: string }[] {
+  if (userRole === "MASTER_ADMIN") return ROLE_OPTIONS;
+  if (userRole === "ADMIN") return ROLE_OPTIONS.filter((r) => r.value === "SUPER_DISTRIBUTOR");
+  return ROLE_OPTIONS;
+}
 
 type Invite = {
   id: string;
@@ -95,6 +109,7 @@ type OnboardDocument = {
 };
 
 export default function AdminInvitesPage() {
+  const { data: session } = useSession();
   const [invites, setInvites] = useState<Invite[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -208,6 +223,7 @@ export default function AdminInvitesPage() {
 
       {showCreate && (
         <CreateInviteForm
+          userRole={(session?.user as any)?.role ?? "ADMIN"}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
@@ -358,25 +374,76 @@ export default function AdminInvitesPage() {
   );
 }
 
+type ParentUser = {
+  id: string;
+  name: string;
+  phone: string;
+  shopName: string | null;
+  city: string | null;
+  state: string | null;
+};
+
 function CreateInviteForm({
+  userRole,
   onClose,
   onCreated,
 }: {
+  userRole: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const allowedRoles = getAllowedRoles(userRole);
   const [form, setForm] = useState({
     phone: "",
     email: "",
     name: "",
-    role: "SUPER_DISTRIBUTOR",
+    role: allowedRoles[0]?.value ?? "SUPER_DISTRIBUTOR",
+    parentId: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [parents, setParents] = useState<ParentUser[]>([]);
+  const [parentsLoading, setParentsLoading] = useState(false);
+  const [parentSearch, setParentSearch] = useState("");
+
+  const needsParent = userRole === "MASTER_ADMIN" && form.role !== "SUPER_DISTRIBUTOR";
+
+  useEffect(() => {
+    if (!needsParent) {
+      setParents([]);
+      setForm((f) => ({ ...f, parentId: "" }));
+      return;
+    }
+    setParentsLoading(true);
+    fetch(`/api/admin/invite/parents?role=${form.role}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setParents(data.parents ?? []);
+        setForm((f) => ({ ...f, parentId: "" }));
+      })
+      .catch(() => setParents([]))
+      .finally(() => setParentsLoading(false));
+  }, [form.role, needsParent]);
+
+  const filteredParents = parentSearch
+    ? parents.filter(
+        (p) =>
+          p.name.toLowerCase().includes(parentSearch.toLowerCase()) ||
+          p.phone.includes(parentSearch) ||
+          (p.shopName ?? "").toLowerCase().includes(parentSearch.toLowerCase())
+      )
+    : parents;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (needsParent && !form.parentId) {
+      setError("Please select a parent user to assign this invite under.");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
     setSuccess("");
@@ -389,6 +456,7 @@ function CreateInviteForm({
         email: form.email,
         name: form.name || undefined,
         role: form.role,
+        ...(form.parentId ? { parentId: form.parentId } : {}),
       }),
     });
 
@@ -459,16 +527,85 @@ function CreateInviteForm({
         </div>
         <div>
           <Label>Role *</Label>
-          <Select
-            value={form.role}
-            onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
-          >
-            <option value="SUPER_DISTRIBUTOR">Super Distributor</option>
-            <option value="MASTER_DISTRIBUTOR">Master Distributor</option>
-            <option value="DISTRIBUTOR">Distributor</option>
-            <option value="RETAILER">Retailer</option>
-          </Select>
+          {allowedRoles.length === 1 ? (
+            <Input value={allowedRoles[0].label} disabled />
+          ) : (
+            <Select
+              value={form.role}
+              onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
+            >
+              {allowedRoles.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
+
+        {needsParent && (
+          <div className="md:col-span-2">
+            <Label>
+              Assign Under *{" "}
+              <span className="text-xs font-normal text-ink-500">
+                (Select the {form.role === "MASTER_DISTRIBUTOR" ? "Super Distributor" : form.role === "DISTRIBUTOR" ? "Master Distributor" : "Distributor"} this user will work under)
+              </span>
+            </Label>
+            {parentsLoading ? (
+              <div className="flex items-center gap-2 py-2 text-sm text-ink-500">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+              </div>
+            ) : parents.length === 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+                No active {form.role === "MASTER_DISTRIBUTOR" ? "Super Distributors" : form.role === "DISTRIBUTOR" ? "Master Distributors" : "Distributors"} found. Create one first.
+              </div>
+            ) : (
+              <>
+                <div className="relative mt-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+                  <Input
+                    value={parentSearch}
+                    onChange={(e) => setParentSearch(e.target.value)}
+                    placeholder="Search by name, phone, or shop..."
+                    className="pl-9"
+                  />
+                </div>
+                <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-ink-200 bg-white">
+                  {filteredParents.length === 0 ? (
+                    <p className="px-4 py-3 text-sm text-ink-500">No match found.</p>
+                  ) : (
+                    filteredParents.map((p) => (
+                      <label
+                        key={p.id}
+                        className={`flex cursor-pointer items-center gap-3 border-b border-ink-50 px-4 py-2.5 last:border-b-0 hover:bg-brand-50/50 ${
+                          form.parentId === p.id ? "bg-brand-50 ring-1 ring-inset ring-brand-300" : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="parentId"
+                          value={p.id}
+                          checked={form.parentId === p.id}
+                          onChange={() => setForm((f) => ({ ...f, parentId: p.id }))}
+                          className="h-4 w-4 text-brand-600 focus:ring-brand-500"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-ink-900">{p.name}</p>
+                          <p className="truncate text-xs text-ink-500">
+                            {p.phone}
+                            {p.shopName ? ` · ${p.shopName}` : ""}
+                            {p.city ? ` · ${p.city}` : ""}
+                          </p>
+                        </div>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 md:col-span-2">
           <Button type="submit" disabled={submitting}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

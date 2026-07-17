@@ -25,7 +25,7 @@ export const GST_PERCENT = 18;
  * BulkPe). Mirrors resolvePayout() in partners/index.ts. Matched loosely by
  * normalizeProviderTag, so a slab pinned to "SAMEDAY" resolves here.
  */
-const PAYOUT_MODE_PROVIDER: Record<PayoutMode, string> = {
+export const PAYOUT_MODE_PROVIDER: Record<PayoutMode, string> = {
   IMPS: "SAMEDAY",
   NEFT: "SAMEDAY",
   RTGS: "SAMEDAY",

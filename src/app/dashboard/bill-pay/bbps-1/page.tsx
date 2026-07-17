@@ -38,8 +38,8 @@ export default function Bbps1Page() {
     <div className="mx-auto max-w-3xl">
       <ServicePageHeader
         icon={Receipt}
-        title="BBPS-1 (Same Day)"
-        description="Bill payments powered by Same Day Solution — pay credit card bills, electricity, water, gas, education, insurance, and broadband via BBPS."
+        title="BBPS-Bharat BillPay"
+        description="Bill payments powered by Bharat BillPay — pay credit card bills, electricity, water, gas, education, insurance, and broadband via BBPS."
       />
 
       <div className="mb-6 flex gap-2 overflow-x-auto rounded-xl border border-ink-100 bg-ink-50 p-1">

@@ -211,12 +211,12 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
   },
   {
     key: SERVICE_KEYS.BBPS_SAMEDAY,
-    name: "BBPS-1 (Same Day)",
+    name: "BBPS-Bharat BillPay",
     type: "SERVICE",
     kind: "BBPS",
     provider: "SAMEDAY",
     enabled: true,
-    note: "Bill payments via Same Day Pay2New — credit card bills. Appears in sidebar as BBPS-1.",
+    note: "Bill payments via Bharat BillPay — credit card bills, electricity, water, gas, and more.",
     sortOrder: 90,
   },
   {
@@ -231,12 +231,12 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
   },
   {
     key: SERVICE_KEYS.BBPS_BULKPE,
-    name: "BBPS-2 (BulkPe)",
+    name: "Unified Bill Payment Platform",
     type: "SERVICE",
     kind: "BBPS",
     provider: "BULKPE",
     enabled: false,
-    note: "BBPS via BulkPe (electricity, water, gas, and all non-credit-card categories). Enable once BulkPe IP whitelist is active.",
+    note: "Unified Bill Payment Platform (electricity, water, gas, and all non-credit-card categories). Enable once BulkPe IP whitelist is active.",
     sortOrder: 92,
   },
   {

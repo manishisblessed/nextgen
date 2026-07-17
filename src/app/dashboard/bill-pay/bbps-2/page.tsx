@@ -35,8 +35,8 @@ export default function Bbps2Page() {
     <div className="mx-auto max-w-3xl">
       <ServicePageHeader
         icon={Receipt}
-        title="BBPS-2 (BulkPe)"
-        description="Utility bill payments via BulkPe BBPS — electricity, water, gas, education, insurance, and broadband."
+        title="Unified Bill Payment Platform"
+        description="Utility bill payments via Unified Bill Payment Platform — electricity, water, gas, education, insurance, and broadband."
       />
 
       <div className="mb-6 flex gap-2 overflow-x-auto rounded-xl border border-ink-100 bg-ink-50 p-1">

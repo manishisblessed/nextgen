@@ -37,7 +37,7 @@ import { company } from "@/lib/data";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "NextGenPay (operated by JMP NextGenPay Pvt. Ltd.) is a Surat-born digital banking & utility fintech building the rails that bring formal financial services to every Indian — from village kiranas to urban distributors."
+    "NextGenPay (operated by JMP NEXTGENPAY PRIVATE LIMITED) is a Surat-born digital banking & utility fintech building the rails that bring formal financial services to every Indian — from village kiranas to urban distributors."
 };
 
 const values = [

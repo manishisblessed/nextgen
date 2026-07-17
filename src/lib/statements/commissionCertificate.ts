@@ -87,7 +87,7 @@ export async function generateCommissionCertificatePdf(
 
   center("NextGenPay", 22, bold, brand);
   y -= 20;
-  center("JMP NextGenPay Private Limited", 9, font, dim);
+  center("JMP NEXTGENPAY PRIVATE LIMITED", 9, font, dim);
   y -= 36;
 
   center("COMMISSION CERTIFICATE", 15, bold);

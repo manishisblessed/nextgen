@@ -6,7 +6,8 @@
  * Staff roles:   SUPPORT < ADMIN < MASTER_ADMIN
  *
  * Network roles onboard their immediate subordinate by default.
- * Staff roles (ADMIN, MASTER_ADMIN) can create any network role.
+ * MASTER_ADMIN can create any network role.
+ * ADMIN can only create SUPER_DISTRIBUTOR.
  */
 
 export type DbRole =
@@ -52,7 +53,8 @@ export const ONBOARD_CAPABLE_ROLES: DbRole[] = [
 /**
  * Can `creatorRole` onboard a user with `targetRole`?
  *
- * - MASTER_ADMIN / ADMIN can create ANY network role.
+ * - MASTER_ADMIN can create ANY network role.
+ * - ADMIN can ONLY create SUPER_DISTRIBUTOR.
  * - SUPER_DISTRIBUTOR can ONLY create MASTER_DISTRIBUTOR.
  * - MASTER_DISTRIBUTOR can ONLY create DISTRIBUTOR.
  * - DISTRIBUTOR can ONLY create RETAILER.
@@ -62,13 +64,32 @@ export function canOnboard(creatorRole: string, targetRole: string): boolean {
   const tRank = ROLE_RANK[targetRole as DbRole];
   if (cRank === undefined || tRank === undefined) return false;
 
-  if (STAFF_ROLES.includes(creatorRole as DbRole)) {
+  if (creatorRole === "MASTER_ADMIN") {
     return NETWORK_TIERS.includes(targetRole as DbRole);
+  }
+
+  if (creatorRole === "ADMIN") {
+    return targetRole === "SUPER_DISTRIBUTOR";
   }
 
   const cIdx = NETWORK_TIERS.indexOf(creatorRole as DbRole);
   const tIdx = NETWORK_TIERS.indexOf(targetRole as DbRole);
   return cIdx > 0 && tIdx >= 0 && cIdx === tIdx + 1;
+}
+
+/**
+ * Returns the list of network roles that `creatorRole` is allowed to invite.
+ * Used by the frontend to populate the role dropdown dynamically.
+ */
+export function allowedInviteRoles(creatorRole: string): DbRole[] {
+  if (creatorRole === "MASTER_ADMIN") {
+    return [...NETWORK_TIERS].reverse();
+  }
+  if (creatorRole === "ADMIN") {
+    return ["SUPER_DISTRIBUTOR"];
+  }
+  const child = defaultChildRole(creatorRole);
+  return child ? [child] : [];
 }
 
 /**
