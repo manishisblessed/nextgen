@@ -180,7 +180,7 @@ export function BbpsBillForm({
         return;
       }
       setBill(data as FetchedBill);
-      setAmount(String(data.amount ?? ""));
+      setAmount("");
     } catch {
       setError("Network error while fetching the bill");
     } finally {
@@ -247,7 +247,15 @@ export function BbpsBillForm({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (bill && amount) setPinOpen(true);
+          if (!bill || !amount) return;
+          const amt = Number(amount);
+          const maxAllowed = bill.maxAmount ?? 500000;
+          if (amt > maxAllowed) {
+            setError(`Amount exceeds the maximum payable limit of ${formatINR(maxAllowed)}`);
+            return;
+          }
+          setError(null);
+          setPinOpen(true);
         }}
         className="grid gap-4 rounded-2xl border border-ink-100 bg-white p-6 sm:grid-cols-2"
       >
@@ -334,7 +342,12 @@ export function BbpsBillForm({
                 {formatINR(bill.amount)}
               </p>
               {bill.minAmount !== undefined && (
-                <p className="mt-1 text-xs text-ink-600">Minimum due {formatINR(bill.minAmount)}</p>
+                <p className="mt-1 text-xs text-ink-600">
+                  Minimum due {formatINR(bill.minAmount)}
+                  {bill.maxAmount !== undefined && (
+                    <> · Max payable {formatINR(bill.maxAmount)}</>
+                  )}
+                </p>
               )}
             </div>
           )}

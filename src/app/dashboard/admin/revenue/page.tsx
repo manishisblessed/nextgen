@@ -41,12 +41,30 @@ type DailyRow = {
   platformRevenue: number;
 };
 
+type RevenueWalletTxn = {
+  id: string;
+  amount: number;
+  balanceAfter: number;
+  note: string | null;
+  refId: string | null;
+  createdAt: string;
+};
+
+type RevenueWallet = {
+  accountId: string | null;
+  accountName: string | null;
+  balance: number;
+  creditedInRange: number;
+  recent: RevenueWalletTxn[];
+};
+
 type RevenueData = {
   from: string;
   to: string;
   byService: ServiceRow[];
   byTier: TierRow[];
   byDay: DailyRow[];
+  wallet: RevenueWallet;
   totals: {
     txnCount: number;
     totalVolume: number;
@@ -214,6 +232,33 @@ export default function RevenuePage() {
     },
   ];
 
+  const walletColumns: Column<RevenueWalletTxn>[] = [
+    {
+      key: "createdAt",
+      header: "Date",
+      render: (r) => (
+        <span className="whitespace-nowrap text-xs text-ink-500">
+          {new Date(r.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+        </span>
+      ),
+    },
+    {
+      key: "note",
+      header: "Description",
+      render: (r) => <span className="text-ink-700">{r.note ?? "Platform revenue"}</span>,
+    },
+    {
+      key: "amount",
+      header: "Credited",
+      render: (r) => <span className="font-bold text-emerald-600">+{formatINR(r.amount)}</span>,
+    },
+    {
+      key: "balanceAfter",
+      header: "Balance after",
+      render: (r) => <span className="text-ink-600">{formatINR(r.balanceAfter)}</span>,
+    },
+  ];
+
   const csvServiceCols: ReportColumn<ServiceRow>[] = [
     { key: "service", header: "Service" },
     { key: "txnCount", header: "Transactions", format: "int" },
@@ -290,13 +335,39 @@ export default function RevenuePage() {
 
       {data && (
         <>
+          {/* Revenue wallet — the actual company earnings account */}
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-500 p-6 text-white shadow-lg">
+            <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
+                  Revenue Wallet
+                </p>
+                <p className="mt-2 font-display text-3xl font-bold">
+                  {formatINR(data.wallet.balance)}
+                </p>
+                <p className="mt-1 text-xs text-white/70">
+                  {data.wallet.accountName
+                    ? `Company earnings · ${data.wallet.accountName}`
+                    : "No revenue account configured"}
+                </p>
+              </div>
+              <div className="rounded-xl bg-white/15 p-3 text-right">
+                <p className="text-[11px] uppercase tracking-wider text-white/80">Credited this range</p>
+                <p className="mt-1 font-display text-xl font-bold">
+                  {formatINR(data.wallet.creditedInRange)}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Summary stats */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Stat label="Transactions" value={formatNumber(data.totals.txnCount)} />
             <Stat label="Total Volume" value={formatINR(data.totals.totalVolume)} />
             <Stat label="Charges Collected" value={formatINR(data.totals.totalCharge)} />
             <Stat
-              label="Platform Revenue"
+              label="Platform Revenue (range)"
               value={formatINR(data.totals.platformRevenue)}
               tone={data.totals.platformRevenue >= 0 ? "good" : "bad"}
             />
@@ -371,6 +442,20 @@ export default function RevenuePage() {
                 Daily breakdown
               </p>
               <DataTable columns={dailyColumns} data={data.byDay} loading={loading} />
+            </div>
+          )}
+
+          {/* Revenue wallet ledger — latest company earnings credits */}
+          {data.wallet.recent.length > 0 && (
+            <div>
+              <p className="mb-3 text-sm font-semibold text-ink-800">
+                Revenue wallet ledger (latest 50)
+              </p>
+              <DataTable
+                columns={walletColumns}
+                data={data.wallet.recent}
+                loading={loading}
+              />
             </div>
           )}
         </>

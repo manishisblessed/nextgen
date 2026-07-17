@@ -1,0 +1,2 @@
+-- AlterEnum: add PLATFORM_REVENUE to WalletReason
+ALTER TYPE "WalletReason" ADD VALUE IF NOT EXISTS 'PLATFORM_REVENUE';

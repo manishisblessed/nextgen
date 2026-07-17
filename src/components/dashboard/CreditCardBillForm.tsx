@@ -131,7 +131,7 @@ export function CreditCardBillForm() {
         return;
       }
       setBill(data as FetchedBill);
-      setAmount(String(data.amount ?? ""));
+      setAmount("");
     } catch {
       setError("Network error while fetching the bill");
     } finally {
@@ -142,6 +142,12 @@ export function CreditCardBillForm() {
   function pay(e: React.FormEvent) {
     e.preventDefault();
     if (!bill || !amount) return;
+    const amt = Number(amount);
+    const maxAllowed = bill.maxAmount ?? 500000;
+    if (amt > maxAllowed) {
+      setError(`Amount exceeds the maximum payable limit of ${formatINR(maxAllowed)}`);
+      return;
+    }
     setError(null);
     setPinOpen(true);
   }

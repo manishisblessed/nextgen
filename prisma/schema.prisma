@@ -468,6 +468,7 @@ enum WalletReason {
   POS_SETTLEMENT    // POS acquirer proceeds (instant or T+1)
   PARENT_PUSH       // Network parent crediting child
   PARENT_PULL       // Network parent debiting child
+  PLATFORM_REVENUE  // Company margin: service charge minus commissions paid to the chain
 }
 
 /// Which wallet book a ledger entry belongs to. PRIMARY = the main spendable

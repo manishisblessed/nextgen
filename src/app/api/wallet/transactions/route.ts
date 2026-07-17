@@ -18,18 +18,32 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const page = Math.max(1, Number(searchParams.get("page") ?? 1));
   const pageSize = Math.min(
-    100,
+    500,
     Math.max(1, Number(searchParams.get("pageSize") ?? 20))
   );
+  const direction = searchParams.get("direction"); // CREDIT | DEBIT
+  const reason = searchParams.get("reason");
+  const q = searchParams.get("q")?.trim();
+
+  const where: Record<string, unknown> = { userId: user.id };
+  if (direction === "CREDIT" || direction === "DEBIT") where.direction = direction;
+  if (reason) where.reason = reason;
+  if (q) {
+    where.OR = [
+      { note: { contains: q, mode: "insensitive" } },
+      { refId: { contains: q, mode: "insensitive" } },
+      { refType: { contains: q, mode: "insensitive" } },
+    ];
+  }
 
   const [txns, total] = await Promise.all([
     prisma.walletTxn.findMany({
-      where: { userId: user.id },
+      where,
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
-    prisma.walletTxn.count({ where: { userId: user.id } }),
+    prisma.walletTxn.count({ where }),
   ]);
 
   return NextResponse.json({

@@ -4,7 +4,8 @@ import { creditWallet } from "@/lib/ledger";
 import { resolvePricingChain } from "@/lib/scheme/resolver";
 import { resolveMdrChain, type MdrDimensions } from "@/lib/mdr/resolver";
 import type { MdrServiceKind } from "@prisma/client";
-import { gt, toNumber, dec, round, mul, sub, type Money } from "@/lib/money";
+import { gt, toNumber, dec, round, mul, sub, add, type Money } from "@/lib/money";
+import { creditPlatformRevenue } from "@/lib/commission/revenue";
 
 /**
  * Multi-tier commission distribution engine (cascade model).
@@ -146,7 +147,7 @@ export async function distributeCommission(
   const chain = await resolvePricingChain(userId, service, txnAmount, provider);
   if (!chain.ok) return [];
 
-  return creditChain(
+  const credits = await creditChain(
     txnId,
     service,
     txnAmount,
@@ -158,6 +159,14 @@ export async function distributeCommission(
     })),
     tx
   );
+
+  // Platform revenue = customer charge − Σ gross commissions distributed to the
+  // chain. Credited to the revenue account (MASTER_ADMIN wallet), idempotent.
+  let totalGross: Money = dec(0);
+  for (const m of chain.members) totalGross = add(totalGross, m.gross);
+  await creditPlatformRevenue(txnId, service, chain.userCharge, totalGross, tx);
+
+  return credits;
 }
 
 /**

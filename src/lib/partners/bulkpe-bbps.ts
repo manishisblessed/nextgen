@@ -71,6 +71,7 @@ type BulkpeFetchBillData = {
   billerId?: string;
   category?: string;
   minAmount?: number | string;
+  maxAmount?: number | string;
   amount?: number | string;
   status?: string;
   billDetails?: {
@@ -148,6 +149,7 @@ export function mapBulkpeBill(data: BulkpeFetchBillData): BbpsBill {
     billDate: d.billDate || undefined,
     billNumber: d.billNumber || undefined,
     minAmount: num(data.minAmount) ?? num(tag("Minimum Amount Due")),
+    maxAmount: num(data.maxAmount) ?? num(tag("Maximum Permissible Amount")),
     billFetchRef: data.fetchId,
   };
 }

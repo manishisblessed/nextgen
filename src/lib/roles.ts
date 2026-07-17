@@ -80,6 +80,7 @@ const services: NavItem[] = [
 const account: NavItem[] = [
   { href: "/dashboard/performance", label: "Performance", icon: Activity },
   { href: "/dashboard/transactions", label: "Transactions", icon: History },
+  { href: "/dashboard/ledger", label: "Wallet Ledger", icon: BookOpenCheck, badge: "New" },
   { href: "/dashboard/profile", label: "Profile", icon: User },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
   { href: "/dashboard/disputes", label: "Support Tickets", icon: LifeBuoy, badge: "New" }

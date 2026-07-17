@@ -2,6 +2,7 @@ import type { ServiceCode } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { add, dec, toNumber, type Money } from "@/lib/money";
 import { istDayBounds } from "./daily";
+import { getRevenueAccountId } from "@/lib/commission/revenue";
 
 export type ServiceRevenueRow = {
   service: ServiceCode;
@@ -33,12 +34,30 @@ export type DailyRevenueRow = {
   platformRevenue: number;
 };
 
+export type RevenueWalletTxn = {
+  id: string;
+  amount: number;
+  balanceAfter: number;
+  note: string | null;
+  refId: string | null;
+  createdAt: string;
+};
+
+export type RevenueWallet = {
+  accountId: string | null;
+  accountName: string | null;
+  balance: number;
+  creditedInRange: number;
+  recent: RevenueWalletTxn[];
+};
+
 export type RevenueReport = {
   from: string;
   to: string;
   byService: ServiceRevenueRow[];
   byTier: TierCommissionRow[];
   byDay: DailyRevenueRow[];
+  wallet: RevenueWallet;
   totals: {
     txnCount: number;
     totalVolume: number;
@@ -184,13 +203,61 @@ export async function getRevenueReport(
     platformRevenue: sumRound(byService.map((r) => r.platformRevenue)),
   };
 
+  const wallet = await getRevenueWallet(dateStart, dateEnd);
+
   return {
     from: fromBounds.ymd,
     to: toBounds.ymd,
     byService,
     byTier,
     byDay,
+    wallet,
     totals,
+  };
+}
+
+/**
+ * The actual revenue-account wallet: current balance, PLATFORM_REVENUE credited
+ * in the selected window, and the most recent revenue ledger entries.
+ */
+async function getRevenueWallet(from: Date, to: Date): Promise<RevenueWallet> {
+  const accountId = await getRevenueAccountId();
+  if (!accountId) {
+    return { accountId: null, accountName: null, balance: 0, creditedInRange: 0, recent: [] };
+  }
+
+  const [account, inRange, recent] = await Promise.all([
+    prisma.user.findUnique({ where: { id: accountId }, select: { name: true, walletBalance: true } }),
+    prisma.walletTxn.aggregate({
+      where: {
+        userId: accountId,
+        reason: "PLATFORM_REVENUE",
+        direction: "CREDIT",
+        createdAt: { gte: from, lte: to },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.walletTxn.findMany({
+      where: { userId: accountId, reason: "PLATFORM_REVENUE" },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { id: true, amount: true, balanceAfter: true, note: true, refId: true, createdAt: true },
+    }),
+  ]);
+
+  return {
+    accountId,
+    accountName: account?.name ?? null,
+    balance: toNumber(dec(account?.walletBalance ?? 0)),
+    creditedInRange: toNumber(dec(inRange._sum.amount ?? 0)),
+    recent: recent.map((t) => ({
+      id: t.id,
+      amount: toNumber(dec(t.amount)),
+      balanceAfter: toNumber(dec(t.balanceAfter)),
+      note: t.note,
+      refId: t.refId,
+      createdAt: t.createdAt.toISOString(),
+    })),
   };
 }
 

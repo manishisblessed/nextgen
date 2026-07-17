@@ -90,6 +90,7 @@ type FetchedBill = {
   dueDate?: string;
   billFetchRef?: string;
   minAmount?: number;
+  maxAmount?: number;
 };
 
 export default function BillsScreen() {
@@ -154,7 +155,7 @@ export default function BillsScreen() {
         idempotencyKey: generateRefId(`${m.refPrefix}F`),
       });
       setFetched(res);
-      setAmount(String(res.amount ?? ""));
+      setAmount("");
     } catch (e) {
       setFetched(null);
       setResultStatus("Failed");
@@ -167,6 +168,14 @@ export default function BillsScreen() {
 
   async function pay() {
     if (!fetched) return;
+    const amt = Number(amount);
+    const maxAllowed = fetched.maxAmount ?? 500000;
+    if (amt > maxAllowed) {
+      setResultStatus("Failed");
+      setResultMsg(`Amount exceeds the maximum payable limit of ₹${maxAllowed.toLocaleString("en-IN")}`);
+      setShowResult(true);
+      return;
+    }
     setPaying(true);
     try {
       const res = await api.post<{ refId: string; status: string }>("/api/services/bbps/pay", {
