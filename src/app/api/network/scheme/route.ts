@@ -51,17 +51,20 @@ export async function POST(req: Request) {
   if (!child)
     return NextResponse.json({ error: "User not found in your direct network" }, { status: 404 });
 
-  // Validate the scheme exists, is active, and is OWNED by the caller (a
-  // scheme they derived from their own — never someone else's pricing).
   if (schemeId) {
     const scheme = await prisma.scheme.findFirst({
-      where: { id: schemeId, active: true, ownerId: user.id },
-      select: { id: true },
+      where: { id: schemeId, ownerId: user.id },
+      select: { id: true, active: true },
     });
     if (!scheme)
       return NextResponse.json(
-        { error: "Scheme not found, inactive, or not one of your derived schemes" },
+        { error: "Scheme not found or not one of your derived schemes" },
         { status: 404 }
+      );
+    if (!scheme.active)
+      return NextResponse.json(
+        { error: "This scheme is inactive. Activate it in My Schemes before assigning it." },
+        { status: 400 }
       );
   }
 

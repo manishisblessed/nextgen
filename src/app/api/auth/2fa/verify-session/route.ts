@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import crypto from "crypto";
 import { prisma } from "@/lib/db";
+import { createSessionGrant } from "@/lib/auth-server";
 import {
   verifyTempToken,
   decryptSecret,
@@ -18,18 +18,6 @@ const Body = z.object({
   code: z.string().min(1).max(20),
   type: z.enum(["totp", "backup"]).default("totp"),
 });
-
-/**
- * Creates a short-lived session grant token (HMAC-signed, 30s TTL).
- * The token-login NextAuth provider verifies this server-side.
- */
-function createSessionGrant(userId: string): string {
-  const secret = process.env.NEXTAUTH_SECRET ?? "";
-  const exp = Math.floor(Date.now() / 1000) + 30;
-  const payload = `${userId}:${exp}`;
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  return `${Buffer.from(payload).toString("base64")}.${sig}`;
-}
 
 /**
  * POST /api/auth/2fa/verify-session

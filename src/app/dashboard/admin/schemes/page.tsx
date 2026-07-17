@@ -84,6 +84,13 @@ type MdrSlab = {
   active: boolean;
 };
 
+type AssignedUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
 type Meta = {
   providersByKind: Record<string, Array<{ provider: string; name: string }>>;
   posCompanies: string[];
@@ -252,6 +259,7 @@ function SchemeCard({
   const [expanded, setExpanded] = useState(false);
   const [slabs, setSlabs] = useState<Slab[] | null>(null);
   const [mdrSlabs, setMdrSlabs] = useState<MdrSlab[] | null>(null);
+  const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [slabModal, setSlabModal] = useState<{ family: ServiceFamily; editing: Slab | null } | null>(null);
   const [mdrModal, setMdrModal] = useState<{ editing: MdrSlab | null } | null>(null);
@@ -267,6 +275,7 @@ function SchemeCard({
       if (!res.ok) throw new Error(data?.error ?? "Failed to load slabs");
       setSlabs(data.scheme.slabs ?? []);
       setMdrSlabs(data.scheme.mdrSlabs ?? []);
+      setAssignedUsers(data.assignedUsers ?? []);
     } catch (e) {
       notify(e instanceof Error ? e.message : "Failed to load slabs", false);
     } finally {
@@ -580,6 +589,42 @@ function SchemeCard({
                                 </button>
                               </div>
                             </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Assigned users */}
+              {assignedUsers.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <Users className="h-4 w-4 text-violet-600" />
+                    <h4 className="text-sm font-semibold text-violet-600">
+                      Assigned Users ({assignedUsers.length})
+                    </h4>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+                    <table className="w-full min-w-max text-sm">
+                      <thead className="bg-ink-50/60 text-left text-[11px] uppercase tracking-wider text-ink-500">
+                        <tr>
+                          <th className="px-4 py-2 font-semibold">Name</th>
+                          <th className="px-4 py-2 font-semibold">Email</th>
+                          <th className="px-4 py-2 font-semibold">Role</th>
+                          <th className="px-4 py-2 font-semibold">User ID</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ink-100 text-ink-800">
+                        {assignedUsers.map((u) => (
+                          <tr key={u.id} className="hover:bg-violet-50/30">
+                            <td className="px-4 py-2.5 font-medium">{u.name}</td>
+                            <td className="px-4 py-2.5 text-ink-600">{u.email}</td>
+                            <td className="px-4 py-2.5">
+                              <Badge variant="brand">{u.role.replace(/_/g, " ")}</Badge>
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-xs text-ink-400">{u.id}</td>
                           </tr>
                         ))}
                       </tbody>

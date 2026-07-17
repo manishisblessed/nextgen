@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
@@ -10,7 +10,8 @@ import {
   ShieldCheck,
   Lock,
   ArrowRight,
-  AlertCircle
+  AlertCircle,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -33,6 +34,24 @@ function AdminLoginForm({ location }: { location: LocationData }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [cooldownSec, setCooldownSec] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startCooldown = useCallback((seconds: number) => {
+    setCooldownSec(seconds);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setCooldownSec((prev) => {
+        if (prev <= 1) { clearInterval(cooldownRef.current!); cooldownRef.current = null; return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  useEffect(() => { return () => { if (cooldownRef.current) clearInterval(cooldownRef.current); }; }, []);
+
+  const rateLimited = cooldownSec > 0;
+
   // 2FA state
   const [step, setStep] = useState<"credentials" | "2fa">("credentials");
   const [tempToken, setTempToken] = useState("");
@@ -40,6 +59,7 @@ function AdminLoginForm({ location }: { location: LocationData }) {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (rateLimited) return;
     setLoading(true);
     setError("");
 
@@ -57,6 +77,10 @@ function AdminLoginForm({ location }: { location: LocationData }) {
       const data = await res.json();
 
       if (!res.ok) {
+        if (res.status === 429) {
+          const retrySec = data.retryAfterSec ?? Math.ceil(parseInt(res.headers.get("Retry-After") || "60", 10));
+          startCooldown(retrySec);
+        }
         setError(data.error || "Invalid credentials.");
         setLoading(false);
         return;
@@ -71,9 +95,8 @@ function AdminLoginForm({ location }: { location: LocationData }) {
       }
 
       if (data.needsSetup) {
-        const result = await signIn("credentials", {
-          identifier: email.trim(),
-          password,
+        const result = await signIn("token-login", {
+          grant: data.grant,
           redirect: false,
         });
         if (result?.error) {
@@ -185,7 +208,19 @@ function AdminLoginForm({ location }: { location: LocationData }) {
         {error && (
           <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            {error}
+            <span>{error}</span>
+          </div>
+        )}
+
+        {rateLimited && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+            <Clock className="h-4 w-4 shrink-0 text-amber-600" />
+            <span>
+              Too many attempts. Try again in{" "}
+              <span className="font-bold tabular-nums">
+                {Math.floor(cooldownSec / 60)}:{String(cooldownSec % 60).padStart(2, "0")}
+              </span>
+            </span>
           </div>
         )}
 
@@ -235,14 +270,12 @@ function AdminLoginForm({ location }: { location: LocationData }) {
             </div>
           </div>
 
-          <Button type="submit" size="lg" className="w-full" disabled={loading}>
-            {loading ? (
-              "Verifying..."
-            ) : (
-              <>
-                Continue <ArrowRight className="h-4 w-4" />
-              </>
-            )}
+          <Button type="submit" size="lg" className="w-full" disabled={loading || rateLimited}>
+            {loading
+              ? "Verifying..."
+              : rateLimited
+                ? `Wait ${Math.floor(cooldownSec / 60)}:${String(cooldownSec % 60).padStart(2, "0")}`
+                : <>Continue <ArrowRight className="h-4 w-4" /></>}
           </Button>
 
           <p className="text-center text-xs text-ink-500">

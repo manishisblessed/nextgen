@@ -298,6 +298,19 @@ function base64url(buf: Buffer): string {
   return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
+/**
+ * Short-lived HMAC-signed grant for the token-login NextAuth provider.
+ * Used after 2FA verification and for needsSetup (no-2FA) logins so
+ * the frontend can establish a session without a second password check.
+ */
+export function createSessionGrant(userId: string): string {
+  const secret = process.env.NEXTAUTH_SECRET ?? "";
+  const exp = Math.floor(Date.now() / 1000) + 30;
+  const payload = `${userId}:${exp}`;
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return `${Buffer.from(payload).toString("base64")}.${sig}`;
+}
+
 export function createMobileToken(user: SessionUser, expiresInSec = 30 * 24 * 60 * 60): string {
   const header = base64url(Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })));
   const payload = base64url(Buffer.from(JSON.stringify({

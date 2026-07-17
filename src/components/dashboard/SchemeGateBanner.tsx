@@ -1,19 +1,8 @@
 "use client";
 
-import useSWR from "swr";
 import { AlertTriangle } from "lucide-react";
 import { schemeAssignerLabel } from "@/lib/scheme/constants";
-
-type SchemeStatus = {
-  applicable: boolean;
-  hasScheme: boolean;
-  hasMdrScheme: boolean;
-  schemeName: string | null;
-  mdrSchemeName: string | null;
-  role: string | null;
-};
-
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { useSchemeGate } from "@/lib/useSchemeGate";
 
 /**
  * Cascade-model gate banner: network users without an assigned active scheme
@@ -21,14 +10,11 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
  * by their parent (or admin, for super-distributors).
  */
 export function SchemeGateBanner() {
-  const { data } = useSWR<SchemeStatus>("/api/me/scheme-status", fetcher, {
-    revalidateOnFocus: false,
-    dedupingInterval: 60_000,
-  });
+  const { blocked, role } = useSchemeGate();
 
-  if (!data?.applicable || data.hasScheme) return null;
+  if (!blocked) return null;
 
-  const assigner = schemeAssignerLabel(data.role);
+  const assigner = schemeAssignerLabel(role);
 
   return (
     <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">

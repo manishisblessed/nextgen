@@ -459,15 +459,67 @@ function DerivedSchemeCard({
                 );
               })}
 
-              {mdrSlabs.length > 0 && (
-                <div>
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <Store className="h-4 w-4 text-orange-600" />
-                    <h5 className="text-sm font-semibold text-orange-600">POS MDR ({mdrSlabs.length})</h5>
+              {mdrSlabs.length > 0 && (() => {
+                const baseMdrMap = new Map<string, MdrSlab>();
+                for (const bs of base?.mdrSlabs ?? []) baseMdrMap.set(bs.id, bs);
+                return (
+                  <div>
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      <Store className="h-4 w-4 text-orange-600" />
+                      <h5 className="text-sm font-semibold text-orange-600">POS MDR ({mdrSlabs.length})</h5>
+                    </div>
+                    <div className="overflow-x-auto rounded-xl border border-ink-100">
+                      <table className="w-full min-w-max text-left text-sm">
+                        <thead className="bg-ink-50/60 text-[11px] uppercase tracking-wide text-ink-400">
+                          <tr>
+                            <th className="px-3 py-2">Rail</th>
+                            <th className="px-3 py-2">Company</th>
+                            <th className="px-3 py-2">Mode</th>
+                            <th className="px-3 py-2">Card / Brand</th>
+                            <th className="px-3 py-2 text-right">Child MDR T+1</th>
+                            <th className="px-3 py-2 text-right">Child MDR T+0</th>
+                            <th className="px-3 py-2 text-right">Margin T+1</th>
+                            <th className="px-3 py-2 text-right">Margin T+0</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mdrSlabs.map((s) => {
+                            const parent = s.parentSlabId ? baseMdrMap.get(s.parentSlabId) : undefined;
+                            const marginT1 = parent ? Math.max(0, s.mdrValue - parent.mdrValue) : 0;
+                            const marginT0 = parent
+                              ? Math.max(0, s.mdrValueT0 - (parent.mdrValueT0 > 0 ? parent.mdrValueT0 : parent.mdrValue))
+                              : 0;
+                            return (
+                              <tr key={s.id} className="border-t border-ink-50">
+                                <td className="px-3 py-2 font-medium text-ink-900">{s.serviceKind}</td>
+                                <td className="px-3 py-2 text-ink-600">{s.company ?? "All"}</td>
+                                <td className="px-3 py-2 text-ink-600">{s.paymentMode === "*" ? "Any" : s.paymentMode}</td>
+                                <td className="px-3 py-2 text-xs text-ink-600">
+                                  {[s.cardType, s.brandType, s.classification].filter(Boolean).join(" / ") || "Any"}
+                                </td>
+                                <td className="px-3 py-2 text-right text-ink-900">{fmtRate(s.mdrType, s.mdrValue)}</td>
+                                <td className="px-3 py-2 text-right text-ink-900">
+                                  {s.mdrValueT0 > 0 ? fmtRate(s.mdrType, s.mdrValueT0) : "= T+1"}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <span className={`font-semibold ${marginT1 > 0 ? "text-emerald-700" : "text-ink-400"}`}>
+                                    {parent ? fmtRate(s.mdrType, marginT1) : "—"}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <span className={`font-semibold ${marginT0 > 0 ? "text-emerald-700" : "text-ink-400"}`}>
+                                    {parent ? fmtRate(s.mdrType, marginT0) : "—"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <MdrTable slabs={mdrSlabs} valueLabel="Child MDR" />
-                </div>
-              )}
+                );
+              })()}
             </>
           )}
         </div>

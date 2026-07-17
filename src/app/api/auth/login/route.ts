@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { createMobileToken } from "@/lib/auth-server";
+import { createMobileToken, createSessionGrant } from "@/lib/auth-server";
 import { createTempToken } from "@/lib/two-factor";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import {
@@ -175,7 +175,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2FA NOT configured — issue a limited session for setup only.
+    // 2FA NOT configured — issue a session grant so the frontend can
+    // call signIn("token-login") without a second password check. Also
+    // include a mobile token for native clients.
     const sessionUser = {
       id: user.id,
       name: user.name,
@@ -190,12 +192,14 @@ export async function POST(req: Request) {
     };
 
     const token = createMobileToken(sessionUser);
+    const grant = createSessionGrant(user.id);
 
     return NextResponse.json({
       ok: true,
       needs2FA: false,
       needsSetup: true,
       token,
+      grant,
       user: sessionUser,
     });
   } catch (err) {
