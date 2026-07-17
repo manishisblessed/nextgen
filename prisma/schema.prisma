@@ -174,6 +174,10 @@ model User {
   posSettlements        PosSettlementEntry[]  @relation("PosSettlements")
   networkTransfersOut   NetworkWalletTransfer[] @relation("NetworkTransfersOut")
   networkTransfersIn    NetworkWalletTransfer[] @relation("NetworkTransfersIn")
+  transfersAsSubject    HierarchyTransfer[]     @relation("TransferSubject")
+  transfersAsOldParent  HierarchyTransfer[]     @relation("TransferOldParent")
+  transfersAsNewParent  HierarchyTransfer[]     @relation("TransferNewParent")
+  transfersInitiated    HierarchyTransfer[]     @relation("TransferInitiator")
 
   // POS acquirer settlement mode (admin-toggleable only).
   // true = proceeds credit instantly on webhook; false = T+1 cron.
@@ -2122,4 +2126,57 @@ model NetworkWalletTransfer {
 
   @@index([fromId, createdAt])
   @@index([toId, createdAt])
+}
+
+// ---------- Hierarchy Transfer (Parent Reassignment) ----------
+// When a network user (e.g. Retailer) needs to move under a different parent
+// (e.g. a different Distributor), Master Admin initiates a transfer. The new
+// parent must provide declaration approval (signature, selfie, GPS) before the
+// transfer is finalized — mirroring the onboarding responsibility chain.
+
+enum TransferStatus {
+  PENDING_DECLARATION
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+model HierarchyTransfer {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation("TransferSubject", fields: [userId], references: [id])
+
+  oldParentId   String
+  oldParent     User           @relation("TransferOldParent", fields: [oldParentId], references: [id])
+
+  newParentId   String
+  newParent     User           @relation("TransferNewParent", fields: [newParentId], references: [id])
+
+  initiatedById String
+  initiatedBy   User           @relation("TransferInitiator", fields: [initiatedById], references: [id])
+
+  status        TransferStatus @default(PENDING_DECLARATION)
+  reason        String?
+
+  // New parent's declaration evidence
+  declarationDocUrl    String?
+  approverSignatureUrl String?
+  approverSelfieUrl    String?
+  approvedAt           DateTime?
+  approvalIp           String?
+  approvalUserAgent    String?
+  approvalLatitude     Float?
+  approvalLongitude    Float?
+
+  rejectedAt     DateTime?
+  rejectedReason String?
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([newParentId, status])
+  @@index([status])
 }

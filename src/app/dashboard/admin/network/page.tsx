@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
@@ -24,6 +25,7 @@ import {
   AlertCircle,
   ShieldAlert,
   Sparkles,
+  GitBranch,
 } from "lucide-react";
 
 type NetworkUser = {
@@ -940,6 +942,9 @@ function UserDrawer({
           </div>
         </Section>
 
+        {/* Hierarchy Transfer (Master Admin only) */}
+        {user.parent && <TransferParentSection user={user} onChanged={onChanged} busy={busy} setBusy={setBusy} />}
+
         {/* Security */}
         <Section icon={KeyRound} title="Access">
           <div className="flex flex-wrap gap-2">
@@ -1001,6 +1006,253 @@ function Snapshot({ label, value, pulse }: { label: string; value: string; pulse
       </p>
     </div>
   );
+}
+
+/* ─── Transfer parent section (MA only) ───────────────────────────────────── */
+
+type ParentCandidate = { id: string; name: string; shopName: string | null; phone: string };
+
+function TransferParentSection({
+  user,
+  onChanged,
+  busy,
+  setBusy,
+}: {
+  user: NetworkUser;
+  onChanged: (msg: string, ok: boolean) => void;
+  busy: string | null;
+  setBusy: (v: string | null) => void;
+}) {
+  const { data: session } = useSession();
+  const isMasterAdmin = session?.user?.role === "MASTER_ADMIN";
+
+  const [open, setOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [candidates, setCandidates] = useState<ParentCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedParent, setSelectedParent] = useState<ParentCandidate | null>(null);
+  const [reason, setReason] = useState("");
+  const [transferHistory, setTransferHistory] = useState<any[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  // Only MASTER_ADMIN sees this section
+  if (!isMasterAdmin) return null;
+
+  const searchParents = async (query: string) => {
+    if (query.length < 2) {
+      setCandidates([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const parentRole = getParentRoleForTier(user.parent?.role ?? "");
+      const params = new URLSearchParams({
+        q: query,
+        tier: parentRole,
+        status: "all",
+        page: "1",
+        pageSize: "10",
+      });
+      const res = await fetch(`/api/admin/network?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        const results = (data.users ?? [])
+          .filter((u: any) => u.id !== user.parent?.id && u.status === "ACTIVE")
+          .map((u: any) => ({ id: u.id, name: u.name, shopName: u.shopName, phone: u.phone }));
+        setCandidates(results);
+      }
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    if (historyLoaded) return;
+    try {
+      const res = await fetch(`/api/admin/network/${user.id}/transfer`);
+      if (res.ok) {
+        const data = await res.json();
+        setTransferHistory(data.transfers ?? []);
+      }
+    } finally {
+      setHistoryLoaded(true);
+    }
+  };
+
+  const initiateTransfer = async () => {
+    if (!selectedParent) return;
+    setBusy("transfer");
+    try {
+      const res = await fetch(`/api/admin/network/${user.id}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newParentId: selectedParent.id, reason: reason || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Transfer failed");
+      onChanged(
+        `Transfer initiated — ${selectedParent.name} must approve the declaration within 7 days.`,
+        true
+      );
+      setOpen(false);
+      setSelectedParent(null);
+      setReason("");
+      setSearchQ("");
+      setCandidates([]);
+      setHistoryLoaded(false);
+    } catch (e) {
+      onChanged(e instanceof Error ? e.message : "Transfer failed", false);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Section icon={GitBranch} title="Transfer parent">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between rounded-xl border border-ink-100 px-3 py-2.5">
+          <div className="text-sm text-ink-700">
+            Current: <span className="font-semibold">{user.parent?.name ?? "None"}</span>
+            <span className="ml-1 text-xs text-ink-400">
+              ({user.parent?.role?.replace(/_/g, " ") ?? "—"})
+            </span>
+          </div>
+        </div>
+
+        {!open ? (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setOpen(true); loadHistory(); }}
+            >
+              Transfer to new parent
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/30 p-3">
+            <p className="text-xs font-semibold text-brand-700">
+              Reassign {user.name} under a new {user.parent?.role?.replace(/_/g, " ") ?? "parent"}
+            </p>
+
+            {/* Search for new parent */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder={`Search ${user.parent?.role?.replace(/_/g, " ").toLowerCase() ?? "parent"}...`}
+                value={searchQ}
+                onChange={(e) => {
+                  setSearchQ(e.target.value);
+                  searchParents(e.target.value);
+                }}
+                className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+              />
+              {searching && (
+                <div className="absolute right-3 top-2.5">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
+                </div>
+              )}
+            </div>
+
+            {/* Candidates list */}
+            {candidates.length > 0 && !selectedParent && (
+              <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-ink-100 bg-white p-1">
+                {candidates.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setSelectedParent(c); setCandidates([]); setSearchQ(c.name); }}
+                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm hover:bg-brand-50 transition"
+                  >
+                    <span className="font-medium text-ink-900">{c.name}</span>
+                    <span className="ml-2 text-xs text-ink-400">{c.shopName ?? c.phone}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Selected parent chip */}
+            {selectedParent && (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                <span className="flex-1 text-sm font-medium text-emerald-800">{selectedParent.name}</span>
+                <button
+                  onClick={() => { setSelectedParent(null); setSearchQ(""); }}
+                  className="text-emerald-400 hover:text-emerald-700"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Reason */}
+            <input
+              type="text"
+              placeholder="Reason for transfer (optional)"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            />
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={!selectedParent || busy === "transfer"}
+                onClick={initiateTransfer}
+              >
+                {busy === "transfer" ? "Initiating..." : "Initiate transfer"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setOpen(false); setSelectedParent(null); setSearchQ(""); }}>
+                Cancel
+              </Button>
+            </div>
+
+            <p className="text-[11px] text-ink-400">
+              The new parent must approve a responsibility declaration (signature + selfie + GPS) within 7 days. 
+              The user&apos;s scheme will be cleared on transfer.
+            </p>
+
+            {/* Transfer History */}
+            {transferHistory.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">Transfer history</p>
+                {transferHistory.map((t: any) => (
+                  <div key={t.id} className="rounded-lg border border-ink-100 bg-white px-2.5 py-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span>
+                        {t.oldParent?.name} → {t.newParent?.name}
+                      </span>
+                      <span
+                        className={`font-semibold ${
+                          t.status === "APPROVED"
+                            ? "text-emerald-600"
+                            : t.status === "REJECTED"
+                            ? "text-rose-600"
+                            : t.status === "PENDING_DECLARATION"
+                            ? "text-amber-600"
+                            : "text-ink-400"
+                        }`}
+                      >
+                        {t.status.replace(/_/g, " ")}
+                      </span>
+                    </div>
+                    <p className="text-ink-400">
+                      {new Date(t.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                      {t.reason && ` — ${t.reason}`}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function getParentRoleForTier(currentParentRole: string): string {
+  return currentParentRole || "DISTRIBUTOR";
 }
 
 function Section({

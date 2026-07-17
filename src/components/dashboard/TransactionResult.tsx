@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, X, Copy, Download } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 
 export type TxnResult = {
@@ -11,6 +11,29 @@ export type TxnResult = {
   customer?: string;
   meta?: Record<string, string | number>;
 } | null;
+
+function buildReceiptHtml(r: NonNullable<TxnResult>): string {
+  const date = new Date().toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const metaRows = r.meta
+    ? Object.entries(r.meta)
+        .map(
+          ([k, v]) =>
+            `<tr><td style="padding:6px 0;color:#666;font-size:13px">${k}</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${v}</td></tr>`
+        )
+        .join("")
+    : "";
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt — ${r.refId}</title>
+<style>@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}.r{max-width:400px;margin:24px auto;font-family:system-ui,sans-serif;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden}.hdr{background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:32px 24px;text-align:center}.hdr h2{margin:0 0 4px;font-size:18px;font-weight:600}.hdr .amt{font-size:28px;font-weight:700;margin:8px 0 2px}.hdr .svc{font-size:12px;opacity:.8}.body{padding:20px 24px}table{width:100%;border-collapse:collapse}tr+tr{border-top:1px solid #f3f4f6}.foot{text-align:center;padding:16px 24px;font-size:11px;color:#999;border-top:1px dashed #e5e7eb}</style></head>
+<body><div class="r"><div class="hdr"><h2>Transaction Successful</h2><div class="amt">₹${r.amount.toLocaleString("en-IN")}</div><div class="svc">${r.service}</div></div>
+<div class="body"><table><tr><td style="padding:6px 0;color:#666;font-size:13px">Reference ID</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px;font-family:monospace">${r.refId}</td></tr>
+${r.customer ? `<tr><td style="padding:6px 0;color:#666;font-size:13px">Customer</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${r.customer}</td></tr>` : ""}
+${metaRows}
+<tr><td style="padding:6px 0;color:#666;font-size:13px">Date</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${date}</td></tr></table></div>
+<div class="foot">NextGenPay — Powered by BBPS</div></div></body></html>`;
+}
 
 export function TransactionResult({
   result,
@@ -23,6 +46,16 @@ export function TransactionResult({
 
   useEffect(() => {
     if (!result) setCopied(false);
+  }, [result]);
+
+  const downloadReceipt = useCallback(() => {
+    if (!result) return;
+    const w = window.open("", "_blank", "width=460,height=650");
+    if (!w) return;
+    w.document.write(buildReceiptHtml(result));
+    w.document.close();
+    w.addEventListener("afterprint", () => w.close());
+    setTimeout(() => w.print(), 300);
   }, [result]);
 
   if (!result) return null;
@@ -108,7 +141,7 @@ export function TransactionResult({
             ))}
 
           <div className="flex gap-2 pt-2">
-            <Button variant="outline" className="flex-1">
+            <Button type="button" variant="outline" className="flex-1" onClick={downloadReceipt}>
               <Download className="h-4 w-4" />
               Receipt
             </Button>

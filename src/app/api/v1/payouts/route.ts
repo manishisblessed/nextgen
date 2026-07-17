@@ -15,6 +15,7 @@ import { assertLivenessReadyById } from "@/lib/security/livenessGate";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { quotePayoutForUser } from "@/lib/payout/charges";
+import { enqueuePayoutInitiate } from "@/lib/payout/service";
 import { requireActiveScheme } from "@/lib/scheme/gate";
 import { getSchemeLimit, PAYOUT_MODE_SERVICE } from "@/lib/scheme/resolver";
 import { dec, gt } from "@/lib/money";
@@ -180,6 +181,8 @@ export async function POST(req: Request) {
         const accountLast4 = handle.replace(/@.*/, "").slice(-4);
         const bulkpeReferenceId = `PO${nanoid(18).toUpperCase()}`;
 
+        const autoApprove = ctx.user.role === "RETAILER";
+
         const created = await prisma.$transaction(async (tx) => {
           await holdFunds({ userId, amount: quote.totalDebit }, tx);
           return tx.payoutRequest.create({
@@ -195,9 +198,10 @@ export async function POST(req: Request) {
               serviceCharge: quote.serviceCharge,
               gst: quote.gst,
               totalDebit: quote.totalDebit,
-              status: "PENDING_APPROVAL",
+              status: autoApprove ? "APPROVED" : "PENDING_APPROVAL",
               bulkpeReferenceId,
               remarks: body.remarks ? `[API] ${body.remarks}` : "[API]",
+              ...(autoApprove ? { approvedAt: new Date() } : {}),
             },
           });
         });
@@ -215,9 +219,14 @@ export async function POST(req: Request) {
               amount: toNumber(created.amount),
               totalDebit: toNumber(created.totalDebit),
               accountLast4: created.accountLast4,
+              ...(autoApprove ? { autoApproved: true } : {}),
             },
           },
         });
+
+        if (autoApprove) {
+          await enqueuePayoutInitiate(created.id);
+        }
 
         return serialize(created);
       }

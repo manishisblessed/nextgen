@@ -18,6 +18,7 @@ import { requireTxnPin, TxnPinError } from "@/lib/security/txnPin";
 import { assertTransactionRisk, RiskError } from "@/lib/risk/engine";
 import { clientIp } from "@/lib/security/audit";
 import { quotePayoutForUser } from "@/lib/payout/charges";
+import { enqueuePayoutInitiate } from "@/lib/payout/service";
 import { assertServiceEnabled, ServiceDisabledError } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { requireActiveScheme, NoSchemeError } from "@/lib/scheme/gate";
@@ -247,8 +248,9 @@ export async function POST(req: Request) {
         const accountLast4 = accountNumber.slice(-4);
         const bulkpeReferenceId = `PO${nanoid(18).toUpperCase()}`;
 
+        const autoApprove = user.role === "RETAILER";
+
         const created = await prisma.$transaction(async (tx) => {
-          // Reserve totalDebit from spendable — throws INSUFFICIENT_FUNDS if short.
           await holdFunds({ userId: user.id, amount: quote.totalDebit }, tx);
 
           return tx.payoutRequest.create({
@@ -264,8 +266,9 @@ export async function POST(req: Request) {
               serviceCharge: quote.serviceCharge,
               gst: quote.gst,
               totalDebit: quote.totalDebit,
-              status: "PENDING_APPROVAL",
+              status: autoApprove ? "APPROVED" : "PENDING_APPROVAL",
               bulkpeReferenceId,
+              ...(autoApprove ? { approvedAt: new Date() } : {}),
             },
           });
         });
@@ -281,9 +284,14 @@ export async function POST(req: Request) {
               amount: toNumber(created.amount),
               totalDebit: toNumber(created.totalDebit),
               accountLast4: created.accountLast4,
+              ...(autoApprove ? { autoApproved: true } : {}),
             },
           },
         });
+
+        if (autoApprove) {
+          await enqueuePayoutInitiate(created.id);
+        }
 
         return {
           id: created.id,

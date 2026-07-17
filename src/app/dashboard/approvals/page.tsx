@@ -13,6 +13,7 @@ import {
   RefreshCw,
   AlertTriangle,
   PenTool,
+  GitBranch,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -31,22 +32,45 @@ type Approval = {
   rejectedReason: string | null;
 };
 
-type ApprovalPhase = "list" | "reviewing";
+type TransferRequest = {
+  id: string;
+  status: string;
+  reason: string | null;
+  user: { id: string; name: string; role: string; phone: string; email: string; shopName: string | null };
+  oldParent: { id: string; name: string; role: string };
+  initiatedBy: { id: string; name: string };
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  rejectedReason: string | null;
+  expiresAt: string;
+  createdAt: string;
+};
+
+type ApprovalPhase = "list" | "reviewing" | "reviewingTransfer";
 
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [transfers, setTransfers] = useState<TransferRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<ApprovalPhase>("list");
   const [selected, setSelected] = useState<Approval | null>(null);
+  const [selectedTransfer, setSelectedTransfer] = useState<TransferRequest | null>(null);
 
   const fetchApprovals = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/declarations/pending");
-      if (res.ok) {
-        const data = await res.json();
+      const [declRes, transferRes] = await Promise.all([
+        fetch("/api/declarations/pending"),
+        fetch("/api/declarations/transfer/pending"),
+      ]);
+      if (declRes.ok) {
+        const data = await declRes.json();
         setApprovals(data.approvals);
+      }
+      if (transferRes.ok) {
+        const data = await transferRes.json();
+        setTransfers(data.transfers);
       }
     } catch {
       setError("Failed to load approvals");
@@ -58,16 +82,32 @@ export default function ApprovalsPage() {
 
   const pending = approvals.filter((a) => a.status === "PENDING");
   const completed = approvals.filter((a) => a.status !== "PENDING");
+  const pendingTransfers = transfers.filter((t) => t.status === "PENDING_DECLARATION");
+  const completedTransfers = transfers.filter((t) => t.status !== "PENDING_DECLARATION");
 
   function startReview(approval: Approval) {
     setSelected(approval);
     setPhase("reviewing");
   }
 
+  function startTransferReview(transfer: TransferRequest) {
+    setSelectedTransfer(transfer);
+    setPhase("reviewingTransfer");
+  }
+
   if (phase === "reviewing" && selected) {
     return (
       <ApprovalReviewPage
         approval={selected}
+        onBack={() => { setPhase("list"); fetchApprovals(); }}
+      />
+    );
+  }
+
+  if (phase === "reviewingTransfer" && selectedTransfer) {
+    return (
+      <TransferReviewPage
+        transfer={selectedTransfer}
         onBack={() => { setPhase("list"); fetchApprovals(); }}
       />
     );
@@ -119,6 +159,21 @@ export default function ApprovalsPage() {
             </div>
           )}
 
+          {/* Pending Transfer Approvals */}
+          {pendingTransfers.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-ink-900">
+                <GitBranch className="h-5 w-5 text-brand-600" />
+                Transfer Requests ({pendingTransfers.length})
+              </h2>
+              <div className="grid gap-4 md:grid-cols-2">
+                {pendingTransfers.map((t) => (
+                  <TransferCard key={t.id} transfer={t} onReview={() => startTransferReview(t)} />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Completed */}
           {completed.length > 0 && (
             <div className="space-y-3">
@@ -126,6 +181,21 @@ export default function ApprovalsPage() {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {completed.map((a) => (
                   <ApprovalCard key={a.id} approval={a} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Completed Transfers */}
+          {completedTransfers.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="flex items-center gap-2 text-lg font-bold text-ink-900">
+                <GitBranch className="h-5 w-5 text-ink-400" />
+                Transfer History
+              </h2>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {completedTransfers.map((t) => (
+                  <TransferCard key={t.id} transfer={t} />
                 ))}
               </div>
             </div>
@@ -776,6 +846,578 @@ function ApprovalReviewPage({ approval, onBack }: { approval: Approval; onBack: 
         >
           <CheckCircle2 className="h-4 w-4" />
           Approve Declaration
+        </Button>
+        {!showReject ? (
+          <Button variant="outline" onClick={() => setShowReject(true)} className="text-rose-600 border-rose-200 hover:bg-rose-50">
+            <XCircle className="h-4 w-4" /> Reject
+          </Button>
+        ) : (
+          <div className="flex-1 space-y-2">
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Reason for rejection (min 5 characters)..."
+              className="w-full rounded-lg border border-rose-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
+              rows={2}
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={handleReject}
+                isLoading={submitting}
+                disabled={rejectReason.length < 5}
+                className="text-rose-600 border-rose-200"
+              >
+                <XCircle className="h-4 w-4" />
+                Confirm Reject
+              </Button>
+              <Button variant="outline" onClick={() => setShowReject(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Transfer Approval Card ─────────────────────────────────────────────── */
+
+function TransferCard({ transfer, onReview }: { transfer: TransferRequest; onReview?: () => void }) {
+  const statusConfig = {
+    PENDING_DECLARATION: { color: "bg-amber-100 text-amber-800", icon: Clock, label: "Pending Approval" },
+    APPROVED: { color: "bg-emerald-100 text-emerald-800", icon: CheckCircle2, label: "Approved" },
+    REJECTED: { color: "bg-rose-100 text-rose-800", icon: XCircle, label: "Rejected" },
+    EXPIRED: { color: "bg-ink-100 text-ink-600", icon: Clock, label: "Expired" },
+    CANCELLED: { color: "bg-ink-100 text-ink-600", icon: XCircle, label: "Cancelled" },
+  }[transfer.status] ?? { color: "bg-ink-100 text-ink-600", icon: Clock, label: transfer.status };
+
+  const StatusIcon = statusConfig.icon;
+
+  return (
+    <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-soft">
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4 text-brand-600" />
+            <p className="font-semibold text-ink-900">{transfer.user.name}</p>
+          </div>
+          <p className="text-xs text-ink-500">{transfer.user.role.replace(/_/g, " ")} · Transfer Request</p>
+        </div>
+        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${statusConfig.color}`}>
+          <StatusIcon className="h-3 w-3" />
+          {statusConfig.label}
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <p className="text-ink-400 text-xs">Phone</p>
+          <p className="text-ink-700">{transfer.user.phone}</p>
+        </div>
+        <div>
+          <p className="text-ink-400 text-xs">Shop</p>
+          <p className="text-ink-700 truncate">{transfer.user.shopName ?? "—"}</p>
+        </div>
+        <div>
+          <p className="text-ink-400 text-xs">From (old parent)</p>
+          <p className="text-ink-700">{transfer.oldParent.name}</p>
+        </div>
+        <div>
+          <p className="text-ink-400 text-xs">Initiated by</p>
+          <p className="text-ink-700">{transfer.initiatedBy.name}</p>
+        </div>
+        <div>
+          <p className="text-ink-400 text-xs">Requested</p>
+          <p className="text-ink-700">{new Date(transfer.createdAt).toLocaleDateString("en-IN")}</p>
+        </div>
+        <div>
+          <p className="text-ink-400 text-xs">Expires</p>
+          <p className="text-ink-700">{new Date(transfer.expiresAt).toLocaleDateString("en-IN")}</p>
+        </div>
+      </div>
+      {transfer.reason && (
+        <p className="mt-2 text-xs text-ink-500">Reason: {transfer.reason}</p>
+      )}
+      {transfer.rejectedReason && (
+        <p className="mt-2 text-xs text-rose-600">Rejected: {transfer.rejectedReason}</p>
+      )}
+      {onReview && transfer.status === "PENDING_DECLARATION" && (
+        <Button className="mt-4 w-full" onClick={onReview}>
+          <FileSignature className="h-4 w-4" /> Review & Accept Transfer
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/* ─── Transfer Review Page ────────────────────────────────────────────────── */
+
+function TransferReviewPage({ transfer, onBack }: { transfer: TransferRequest; onBack: () => void }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [rejected, setRejected] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showReject, setShowReject] = useState(false);
+
+  // Signature
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const isDrawingRef = useRef(false);
+  const [hasSigned, setHasSigned] = useState(false);
+
+  // Selfie
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selfieDataUrl, setSelfieDataUrl] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+
+  // GPS
+  const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsError, setGpsError] = useState("");
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const setupCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }, []);
+
+  useEffect(() => {
+    setupCanvas();
+    const onResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const snapshot = canvas.toDataURL("image/png");
+      setupCanvas();
+      const img = new window.Image();
+      img.onload = () => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const rect = canvas.getBoundingClientRect();
+        ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      };
+      img.src = snapshot;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [setupCanvas]);
+
+  function getPos(e: React.MouseEvent | React.TouchEvent) {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    if ("touches" in e) {
+      const touch = e.touches[0];
+      return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    }
+    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top };
+  }
+
+  function startDraw(e: React.MouseEvent | React.TouchEvent) {
+    isDrawingRef.current = true;
+    lastPointRef.current = getPos(e);
+  }
+
+  function draw(e: React.MouseEvent | React.TouchEvent) {
+    if (!isDrawingRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!ctx) return;
+    const pos = getPos(e);
+    const last = lastPointRef.current ?? pos;
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    lastPointRef.current = pos;
+    setHasSigned(true);
+  }
+
+  function stopDraw() {
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+  }
+
+  function clearSignature() {
+    setupCanvas();
+    setHasSigned(false);
+  }
+
+  async function uploadSignature(): Promise<string | null> {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/png"));
+    if (!blob) return null;
+    const fd = new FormData();
+    fd.append("file", blob, "transfer-signature.png");
+    fd.append("folder", "nextgenpay/declarations/transfer");
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.url ?? data.secure_url ?? null;
+  }
+
+  async function uploadSelfie(): Promise<string | null> {
+    if (!selfieDataUrl) return null;
+    const blob = await fetch(selfieDataUrl).then((r) => r.blob());
+    const fd = new FormData();
+    fd.append("file", blob, "transfer-selfie.jpg");
+    fd.append("folder", "nextgenpay/declarations/transfer");
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.url ?? data.secure_url ?? null;
+  }
+
+  async function startCamera() {
+    setCameraStarting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setCameraOpen(true);
+    } catch {
+      setError("Camera access denied. Please allow camera permissions.");
+    } finally {
+      setCameraStarting(false);
+    }
+  }
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+
+  function capturePhoto() {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    setSelfieDataUrl(canvas.toDataURL("image/jpeg", 0.85));
+    stopCamera();
+    setCameraOpen(false);
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setSelfieDataUrl(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  function retakeSelfie() {
+    setSelfieDataUrl(null);
+  }
+
+  function getLocation() {
+    setGpsLoading(true);
+    setGpsError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGpsLoading(false);
+      },
+      (err) => {
+        setGpsError(err.message || "Failed to get location");
+        setGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+
+  async function handleApprove() {
+    if (!hasSigned || !selfieDataUrl || !gps) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const [signatureUrl, selfieUrl] = await Promise.all([uploadSignature(), uploadSelfie()]);
+      if (!signatureUrl || !selfieUrl) throw new Error("Failed to upload evidence");
+
+      const res = await fetch(`/api/declarations/transfer/${transfer.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signatureUrl,
+          selfieUrl,
+          latitude: gps.lat,
+          longitude: gps.lng,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Approval failed");
+      setSuccess(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Approval failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleReject() {
+    if (rejectReason.length < 5) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/declarations/transfer/${transfer.id}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Rejection failed");
+      setRejected(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rejection failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-12 text-center">
+          <CheckCircle2 className="mx-auto h-16 w-16 text-emerald-500" />
+          <h2 className="mt-4 text-2xl font-bold text-emerald-800">Transfer Approved!</h2>
+          <p className="mt-2 text-emerald-700">
+            {transfer.user.name} has been successfully transferred under your account.
+            Their previous scheme has been cleared — you can now assign them a new one.
+          </p>
+          <Button className="mt-6" onClick={onBack}>
+            Back to Approvals
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (rejected) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-12 text-center">
+          <XCircle className="mx-auto h-16 w-16 text-rose-500" />
+          <h2 className="mt-4 text-2xl font-bold text-rose-800">Transfer Rejected</h2>
+          <p className="mt-2 text-rose-700">
+            You have rejected the transfer of {transfer.user.name}. The Master Admin has been notified.
+          </p>
+          <Button className="mt-6" onClick={onBack}>
+            Back to Approvals
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Transfer Approval"
+        title={`Accept ${transfer.user.name}?`}
+        description={`Master Admin wants to transfer this ${transfer.user.role.replace(/_/g, " ")} under your account.`}
+        actions={
+          <Button variant="outline" onClick={onBack}>
+            Back to list
+          </Button>
+        }
+      />
+
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <AlertTriangle className="mr-2 inline h-4 w-4" /> {error}
+        </div>
+      )}
+
+      {/* Transfer Details */}
+      <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-soft">
+        <h3 className="font-bold text-ink-900 mb-3">Transfer Details</h3>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="text-ink-400 text-xs">User being transferred</p>
+            <p className="font-medium text-ink-900">{transfer.user.name}</p>
+          </div>
+          <div>
+            <p className="text-ink-400 text-xs">Role</p>
+            <p className="text-ink-700">{transfer.user.role.replace(/_/g, " ")}</p>
+          </div>
+          <div>
+            <p className="text-ink-400 text-xs">Phone</p>
+            <p className="text-ink-700">{transfer.user.phone}</p>
+          </div>
+          <div>
+            <p className="text-ink-400 text-xs">Email</p>
+            <p className="text-ink-700 truncate">{transfer.user.email}</p>
+          </div>
+          <div>
+            <p className="text-ink-400 text-xs">Shop</p>
+            <p className="text-ink-700">{transfer.user.shopName ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-ink-400 text-xs">Previous parent</p>
+            <p className="text-ink-700">{transfer.oldParent.name} ({transfer.oldParent.role.replace(/_/g, " ")})</p>
+          </div>
+          {transfer.reason && (
+            <div className="col-span-2">
+              <p className="text-ink-400 text-xs">Reason for transfer</p>
+              <p className="text-ink-700">{transfer.reason}</p>
+            </div>
+          )}
+        </div>
+        <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+          By approving, you accept responsibility for this user in your network. Their scheme 
+          will be cleared and you can assign a new one from your commission structure.
+        </div>
+      </div>
+
+      {/* Signature */}
+      <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-soft">
+        <div className="flex items-center gap-2 mb-3">
+          <PenTool className="h-5 w-5 text-brand-600" />
+          <h3 className="font-bold text-ink-900">Your Signature</h3>
+          {hasSigned && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+        </div>
+        <div className="rounded-xl border-2 border-dashed border-ink-200 bg-ink-50">
+          <canvas
+            ref={canvasRef}
+            className="w-full cursor-crosshair touch-none"
+            style={{ height: 160 }}
+            onMouseDown={startDraw}
+            onMouseMove={draw}
+            onMouseUp={stopDraw}
+            onMouseLeave={stopDraw}
+            onTouchStart={startDraw}
+            onTouchMove={draw}
+            onTouchEnd={stopDraw}
+          />
+        </div>
+        <button type="button" onClick={clearSignature} className="mt-2 text-xs text-brand-600 hover:underline">
+          Clear signature
+        </button>
+      </div>
+
+      {/* Selfie */}
+      <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-soft">
+        <div className="flex items-center gap-2 mb-3">
+          <Camera className="h-5 w-5 text-brand-600" />
+          <h3 className="font-bold text-ink-900">Selfie Verification</h3>
+          {selfieDataUrl && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+        </div>
+
+        {!selfieDataUrl && !cameraOpen && (
+          <div className="flex flex-col gap-2">
+            <Button variant="outline" onClick={startCamera} disabled={cameraStarting}>
+              {cameraStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+              {cameraStarting ? "Starting camera..." : "Take Selfie"}
+            </Button>
+            <input ref={fileInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handleFileUpload} />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
+            >
+              <Camera className="h-3.5 w-3.5" /> Upload from gallery
+            </button>
+          </div>
+        )}
+
+        {cameraOpen && (
+          <div className="space-y-3">
+            <div className="relative mx-auto max-w-sm overflow-hidden rounded-2xl border border-ink-200 bg-ink-900/90">
+              <video ref={videoRef} className="w-full -scale-x-100" muted playsInline autoPlay />
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Button className="w-full max-w-sm" onClick={capturePhoto}>
+                <Camera className="h-4 w-4" /> Capture Photo
+              </Button>
+              <button
+                type="button"
+                onClick={() => { stopCamera(); setCameraOpen(false); }}
+                className="text-xs text-ink-500 hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {selfieDataUrl && (
+          <div className="space-y-3">
+            <div className="mx-auto max-w-sm overflow-hidden rounded-2xl border border-emerald-200">
+              <img src={selfieDataUrl} alt="Approval selfie" className="w-full" />
+            </div>
+            <button type="button" onClick={retakeSelfie} className="text-xs text-brand-600 hover:underline">
+              Retake selfie
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* GPS */}
+      <div className="rounded-2xl border border-ink-100 bg-white p-5 shadow-soft">
+        <div className="flex items-center gap-2 mb-3">
+          <MapPin className="h-5 w-5 text-brand-600" />
+          <h3 className="font-bold text-ink-900">Location Verification</h3>
+          {gps && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+        </div>
+        {!gps && (
+          <div className="space-y-2">
+            <Button variant="outline" onClick={getLocation} disabled={gpsLoading}>
+              {gpsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+              {gpsLoading ? "Getting location..." : "Capture My Location"}
+            </Button>
+            {gpsError && <p className="text-xs text-rose-600">{gpsError}</p>}
+          </div>
+        )}
+        {gps && (
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm">
+            <p className="text-emerald-800">
+              Location captured: {gps.lat.toFixed(6)}, {gps.lng.toFixed(6)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-3">
+        <Button
+          onClick={handleApprove}
+          isLoading={submitting}
+          disabled={!hasSigned || !selfieDataUrl || !gps}
+          className="flex-1"
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          Accept Transfer
         </Button>
         {!showReject ? (
           <Button variant="outline" onClick={() => setShowReject(true)} className="text-rose-600 border-rose-200 hover:bg-rose-50">

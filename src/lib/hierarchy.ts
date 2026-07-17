@@ -116,3 +116,14 @@ export function defaultChildRole(creatorRole: string): DbRole {
 export function isStaffRole(role: string): boolean {
   return STAFF_ROLES.includes(role as DbRole);
 }
+
+/**
+ * Returns the role that must serve as the parent for a given network role.
+ * e.g. RETAILER → DISTRIBUTOR, DISTRIBUTOR → MASTER_DISTRIBUTOR, etc.
+ * Returns null for SUPER_DISTRIBUTOR (top of network tree, no required parent).
+ */
+export function getParentRole(role: string): DbRole | null {
+  const idx = NETWORK_TIERS.indexOf(role as DbRole);
+  if (idx < 0 || idx >= NETWORK_TIERS.length - 1) return null;
+  return NETWORK_TIERS[idx + 1];
+}

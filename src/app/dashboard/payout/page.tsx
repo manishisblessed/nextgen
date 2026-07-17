@@ -1164,7 +1164,7 @@ Date: ${new Date(result.createdAt).toLocaleString("en-IN")}`;
           {isSuccess ? "Payout submitted" : isFailed ? "Payout failed" : "Payout processing"}
         </h3>
         <p className="mt-1 text-sm text-white/80">
-          {result.status === "PENDING_APPROVAL" ? "Awaiting approval by the checker" : STATUS_LABEL[result.status]}
+          {result.status === "PENDING_APPROVAL" ? "Awaiting approval by the checker" : result.status === "APPROVED" ? "Processing your payout" : STATUS_LABEL[result.status]}
         </p>
         <p className="mt-3 font-display text-3xl font-bold">{inr2(result.amount)}</p>
       </div>
