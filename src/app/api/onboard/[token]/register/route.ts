@@ -39,6 +39,7 @@ const RegisterBody = z.object({
   gstin: z.string().length(15).optional(),
   msmeNumber: z.string().optional(),
   nameMismatch: z.boolean().default(false),
+  nameDeclarationAccepted: z.boolean().default(false),
   dob: z.string().optional(),
 });
 
@@ -264,6 +265,15 @@ export async function POST(
     }
   }
 
+  // When the applicant's Aadhaar/PAN/Bank names don't match, they must
+  // explicitly self-declare (via the onboarding popup) that all names belong to
+  // them. Without that acknowledgement we cannot accept the submission.
+  if (data.nameMismatch && !data.nameDeclarationAccepted) {
+    gateErrors.push(
+      "Please confirm the name declaration for your Aadhaar, PAN and bank records"
+    );
+  }
+
   if (gateErrors.length > 0) {
     return NextResponse.json(
       {
@@ -277,6 +287,14 @@ export async function POST(
 
   const allVerified = hasPan && hasAadhaar && hasBank && !data.nameMismatch && hasSelfie;
   const newStatus = allVerified ? "VERIFIED" : "REGISTERED";
+
+  // A declared name mismatch is a valid submission that simply needs manual
+  // admin approval — it must land in the KYC review queue (PENDING_REVIEW),
+  // not sit at NOT_STARTED where admins can't action it.
+  const nameDeclarationAccepted = data.nameMismatch && data.nameDeclarationAccepted;
+  const kycStatus =
+    allVerified || nameDeclarationAccepted ? "PENDING_REVIEW" : "NOT_STARTED";
+  const nameDeclarationAt = nameDeclarationAccepted ? new Date() : undefined;
 
   const result = await prisma.$transaction(async (tx) => {
     let user;
@@ -335,10 +353,12 @@ export async function POST(
         gstin: data.gstin?.toUpperCase(),
         msmeNumber: data.msmeNumber || undefined,
         nameMismatch: data.nameMismatch,
+        nameDeclarationAccepted,
+        nameDeclarationAt,
         dob: parseDob(data.dob),
     panVerifiedAt: hasPan ? new Date() : undefined,
     aadhaarVerifiedAt: hasAadhaar ? new Date() : undefined,
-    status: allVerified ? "PENDING_REVIEW" : "NOT_STARTED",
+    status: kycStatus,
     submittedAt: new Date(),
   },
   create: {
@@ -359,10 +379,12 @@ export async function POST(
     gstin: data.gstin?.toUpperCase(),
     msmeNumber: data.msmeNumber || undefined,
     nameMismatch: data.nameMismatch,
+    nameDeclarationAccepted,
+    nameDeclarationAt,
     dob: parseDob(data.dob),
         panVerifiedAt: hasPan ? new Date() : undefined,
         aadhaarVerifiedAt: hasAadhaar ? new Date() : undefined,
-        status: allVerified ? "PENDING_REVIEW" : "NOT_STARTED",
+        status: kycStatus,
         submittedAt: new Date(),
       },
     });
@@ -399,6 +421,7 @@ export async function POST(
         hasSelfie,
         allVerified,
         nameMismatch: data.nameMismatch,
+        nameDeclarationAccepted,
       },
     },
   });

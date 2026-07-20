@@ -274,6 +274,11 @@ model Kyc {
   gstin             String?   @unique
   msmeNumber        String?   @unique
   nameMismatch      Boolean   @default(false)
+  // Set when the applicant self-declares (via popup) that the differing
+  // Aadhaar/PAN/Bank names all belong to them. Such accounts always require
+  // manual admin approval before activation.
+  nameDeclarationAccepted Boolean   @default(false)
+  nameDeclarationAt       DateTime?
   dob               DateTime?
   rejectedReason    String?
   reviewedById      String?

@@ -189,6 +189,10 @@ function OnboardContent() {
       !namesMatch(bankRefName, bankResult.nameAtBank)
     );
 
+  // Name-mismatch self-declaration popup
+  const [showNameDeclaration, setShowNameDeclaration] = useState(false);
+  const [nameDeclarationChecked, setNameDeclarationChecked] = useState(false);
+
   // OTP state
   const [otpCode, setOtpCode] = useState("");
   const [otpSent, setOtpSent] = useState(false);
@@ -1033,6 +1037,19 @@ function OnboardContent() {
       return;
     }
 
+    // If the document names don't match, the applicant must first acknowledge
+    // (via the popup) that all names belong to them before we submit.
+    if (nameMismatch && !nameDeclarationChecked) {
+      setError("");
+      setShowNameDeclaration(true);
+      return;
+    }
+
+    await submitRegistration();
+  }
+
+  async function submitRegistration() {
+    setShowNameDeclaration(false);
     setVerifying(true);
     setError("");
     try {
@@ -1064,6 +1081,7 @@ function OnboardContent() {
           gstin: form.gstin.toUpperCase() || undefined,
           msmeNumber: form.msmeNumber || undefined,
           nameMismatch,
+          nameDeclarationAccepted: nameMismatch && nameDeclarationChecked,
           dob: form.dob || form.aadhaarDob || undefined,
         }),
       });
@@ -2676,6 +2694,123 @@ function OnboardContent() {
               </Button>
             )}
           </div>
+        </div>
+      </div>
+
+      {showNameDeclaration && (
+        <NameDeclarationModal
+          aadhaarName={aadhaarResult?.name || form.aadhaarName || null}
+          panName={panResult?.registered_name || null}
+          bankName={bankResult?.nameAtBank || form.bankName || null}
+          checked={nameDeclarationChecked}
+          onCheckedChange={setNameDeclarationChecked}
+          submitting={verifying}
+          onCancel={() => setShowNameDeclaration(false)}
+          onConfirm={submitRegistration}
+        />
+      )}
+    </div>
+  );
+}
+
+function NameDeclarationModal({
+  aadhaarName,
+  panName,
+  bankName,
+  checked,
+  onCheckedChange,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  aadhaarName: string | null;
+  panName: string | null;
+  bankName: string | null;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const rows: { label: string; value: string | null }[] = [
+    { label: "As per Aadhaar", value: aadhaarName },
+    { label: "As per PAN", value: panName },
+    { label: "As per Bank Account", value: bankName },
+  ].filter((r) => !!r.value);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-ink-900/50 px-4 py-6"
+      onClick={submitting ? undefined : onCancel}
+    >
+      <div
+        className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 border-b border-amber-100 bg-amber-50 px-6 py-5">
+          <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+          <div>
+            <h3 className="text-lg font-bold text-amber-900">
+              Name Difference Detected
+            </h3>
+            <p className="mt-1 text-sm text-amber-800">
+              The name on your documents does not match exactly. Please review
+              the names below and confirm they all belong to you.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-auto px-6 py-5">
+          {rows.map((r) => (
+            <div
+              key={r.label}
+              className="rounded-xl border border-ink-100 bg-ink-50/60 px-4 py-3"
+            >
+              <p className="text-[10px] font-bold uppercase tracking-widest text-ink-400">
+                {r.label}
+              </p>
+              <p className="mt-0.5 text-sm font-semibold text-ink-900 break-words">
+                {r.value}
+              </p>
+            </div>
+          ))}
+
+          <label className="mt-2 flex cursor-pointer items-start gap-3 rounded-xl border border-ink-200 bg-white px-4 py-3 hover:border-brand-300">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => onCheckedChange(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span className="text-sm text-ink-700">
+              I declare that all the names shown above belong to me and are
+              variations of my own legal name. I understand my account will be
+              submitted for manual verification and approval by the admin team.
+            </span>
+          </label>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-ink-100 bg-ink-50/40 px-6 py-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={onConfirm}
+            disabled={!checked || submitting}
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            Accept &amp; Submit
+          </Button>
         </div>
       </div>
     </div>

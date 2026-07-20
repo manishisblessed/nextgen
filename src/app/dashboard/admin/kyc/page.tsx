@@ -88,6 +88,8 @@ type KycRow = {
   gstTradeName: string | null;
   msmeNumber: string | null;
   nameMismatch: boolean;
+  nameDeclarationAccepted: boolean;
+  nameDeclarationAt: string | null;
   dob: string | null;
   rejectedReason: string | null;
   submittedAt: string | null;
@@ -515,7 +517,9 @@ function DetailDrawer({
                 {s?.label ?? kyc.status}
               </Badge>
               {kyc.nameMismatch && (
-                <Badge variant="warning">Name Mismatch</Badge>
+                <Badge variant="warning">
+                  Name Mismatch{kyc.nameDeclarationAccepted ? " · Self-declared" : ""}
+                </Badge>
               )}
             </div>
             <h3 className="mt-1 font-display text-xl font-bold text-ink-900 truncate">
@@ -682,6 +686,16 @@ function DetailsTab({ kyc }: { kyc: KycRow }) {
             <p className="mt-1 text-xs text-amber-700">
               The names across Aadhaar, PAN, and/or Bank records do not match exactly. Please compare them carefully before approving.
             </p>
+            {kyc.nameDeclarationAccepted && (
+              <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                Applicant self-declared that all names belong to them
+                {kyc.nameDeclarationAt
+                  ? ` on ${new Date(kyc.nameDeclarationAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`
+                  : ""}
+                .
+              </p>
+            )}
           </div>
         </div>
       )}

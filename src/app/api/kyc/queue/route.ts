@@ -167,6 +167,8 @@ export async function GET(req: Request) {
         gstTradeName: gstRes.trade_name_of_business ?? gstRes.trade_name ?? null,
         msmeNumber: k.msmeNumber,
         nameMismatch: k.nameMismatch,
+        nameDeclarationAccepted: k.nameDeclarationAccepted,
+        nameDeclarationAt: k.nameDeclarationAt?.toISOString() ?? null,
         dob: k.dob?.toISOString() ?? null,
         rejectedReason: k.rejectedReason,
         submittedAt: k.submittedAt?.toISOString() ?? null,
