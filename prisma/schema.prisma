@@ -34,6 +34,7 @@ enum UserStatus {
 
 model User {
   id                   String     @id @default(cuid())
+  userCode             String?    @unique
   name                 String
   email                String     @unique
   phone                String     @unique
@@ -112,11 +113,21 @@ model User {
   // in-flight operations (e.g. a pending payout). spendable = walletBalance - heldBalance.
   walletBalance Decimal @default(0) @db.Decimal(14, 2)
   heldBalance   Decimal @default(0) @db.Decimal(14, 2)
+  // lienBalance = funds frozen by an admin lien (chargeback / fraud recovery).
+  // Reduces spendable but is INVISIBLE to the user (not subtracted from the
+  // displayed balance). Recovered eagerly to the Company Suspense account.
+  // spendable = max(0, walletBalance - heldBalance - lienBalance).
+  lienBalance   Decimal @default(0) @db.Decimal(14, 2)
   // Secondary AEPS wallet — AEPS/Aadhaar-Pay proceeds settle here first and move
   // to the primary wallet (or a bank account) via an explicit settlement. Kept as
   // its own column so the ledger can maintain independent balanceAfter chains
   // per wallet (WalletTxn.walletType discriminates the two books).
   aepsBalance   Decimal @default(0) @db.Decimal(14, 2)
+  // Company revenue wallet — used ONLY on the platform revenue account. The MDR
+  // margin (serviceCharge − vendorCharge) of every POS/PG/QR txn is credited
+  // here, and upline (DT/MD/SD) commissions are debited from here. Discriminated
+  // by WalletTxn.walletType = REVENUE with its own balanceAfter chain.
+  revenueBalance Decimal @default(0) @db.Decimal(14, 2)
 
   // login location tracking
   lastLoginLat Float?
@@ -158,9 +169,12 @@ model User {
   staticQrsCreated      StaticQr[]            @relation("StaticQrCreator")
   qrClaims              QrClaim[]             @relation("QrClaimOwner")
   qrClaimsReviewed      QrClaim[]             @relation("QrClaimReviewer")
+  qrClaimsFirstApproved QrClaim[]             @relation("QrClaimFirstApprover")
   walletOpsPerformed    WalletOperation[]     @relation("WalletOpActor")
   walletOpsReceived     WalletOperation[]     @relation("WalletOpTarget")
   walletOpsApproved     WalletOperation[]     @relation("WalletOpApprover")
+  liensPlaced           WalletLien[]          @relation("WalletLienActor")
+  liensReceived         WalletLien[]          @relation("WalletLienTarget")
   userLimit             UserLimit?
   reversalsCreated      Reversal[]            @relation("ReversalActor")
   reversalsReceived     Reversal[]            @relation("ReversalTarget")
@@ -171,6 +185,7 @@ model User {
   aepsSettlementAccounts AepsSettlementAccount[] @relation("AepsAccountOwner")
   aepsSettlements       AepsSettlement[]      @relation("AepsSettlementOwner")
   commissionCredits     CommissionCredit[]    @relation("CommissionCredits")
+  tdsEntries            TdsLedgerEntry[]      @relation("TdsPayee")
   posSettlements        PosSettlementEntry[]  @relation("PosSettlements")
   networkTransfersOut   NetworkWalletTransfer[] @relation("NetworkTransfersOut")
   networkTransfersIn    NetworkWalletTransfer[] @relation("NetworkTransfersIn")
@@ -478,6 +493,10 @@ enum WalletReason {
   PARENT_PUSH       // Network parent crediting child
   PARENT_PULL       // Network parent debiting child
   PLATFORM_REVENUE  // Company margin: service charge minus commissions paid to the chain
+  MDR_MARGIN        // MDR spread (serviceCharge − vendorCharge) credited to the revenue wallet per txn
+  COMMISSION_PAYOUT // Debit from the revenue wallet to fund an upline (DT/MD/SD) commission
+  TDS_WITHHELD      // TDS withheld from a commission (moved to the TDS liability ledger)
+  LIEN              // Admin lien recovery: funds swept from a user to the Company Suspense account
 }
 
 /// Which wallet book a ledger entry belongs to. PRIMARY = the main spendable
@@ -486,6 +505,7 @@ enum WalletReason {
 enum WalletType {
   PRIMARY
   AEPS
+  REVENUE
 }
 
 model WalletTxn {
@@ -1430,9 +1450,11 @@ model Slider {
 enum QrClaimStatus {
   PENDING // filed by retailer, awaiting admin review
   AWAITING_SECOND_APPROVAL // large amount: first admin approved, needs a different second admin
-  APPROVED // credited to the retailer wallet
+  APPROVED // LEGACY: credited-on-approval (pre settlement-split). Retained for old rows.
+  SETTLEABLE // approved + portal-verified; funds NOT yet paid out — retailer may instant-settle (T0) or let the T+1 cron settle (T1)
+  SETTLED // net (gross − scheme MDR) credited to the retailer wallet
   REJECTED // refused by admin (note required)
-  CLAWED_BACK // approved but provider settlement never matched — credit reversed
+  CLAWED_BACK // settled but provider settlement never matched — credit reversed
 }
 
 model StaticQr {
@@ -1530,6 +1552,60 @@ model WalletOperation {
   @@index([status, createdAt])
 }
 
+// ---------- Wallet lien (chargeback / fraud recovery hold) ----------
+// An admin-placed lien freezes funds so a user cannot spend them, then recovers
+// the money EAGERLY into the Company Suspense account. The lien is invisible to
+// the user (never subtracted from the displayed balance) — only the reduced
+// spendable enforces it. When the debt exceeds the current balance, the shortfall
+// keeps accruing and ALL incoming credits are auto-swept toward the lien until
+// `recoveredAmount == amount`, at which point the lien auto-closes.
+
+enum WalletLienStatus {
+  ACTIVE   // freezing/recovering funds; incoming credits auto-swept toward it
+  RECOVERED // fully recovered (recoveredAmount == amount) — wallet behaves normally again
+  RELEASED // lifted by an admin (false alarm) — any frozen funds returned to spendable
+}
+
+model WalletLien {
+  id String @id @default(cuid())
+
+  targetUserId String
+  targetUser   User   @relation("WalletLienTarget", fields: [targetUserId], references: [id])
+
+  actorId String // admin who placed the lien
+  actor   User   @relation("WalletLienActor", fields: [actorId], references: [id])
+
+  // amount          = total debt to recover from the user.
+  // recoveredAmount = already swept to the Company Suspense account.
+  // outstanding     = amount - recoveredAmount (derived); this is what still
+  //                   burdens the user's spendable balance (User.lienBalance is
+  //                   the sum of outstanding across a user's ACTIVE liens).
+  amount          Decimal @db.Decimal(14, 2)
+  recoveredAmount Decimal @default(0) @db.Decimal(14, 2)
+
+  reasonCode String // CHARGEBACK | FRAUD | DISPUTE | INVESTIGATION | OTHER
+  remarks    String // mandatory human explanation
+
+  status WalletLienStatus @default(ACTIVE)
+
+  // What this lien is against — auto-linked when placed from a transaction.
+  refType String? // "Transaction" | etc
+  refId   String?
+
+  // Lifecycle bookkeeping.
+  releasedById String?
+  releasedAt   DateTime?
+  closedAt     DateTime? // set when RECOVERED or RELEASED
+
+  ip        String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([targetUserId, status])
+  @@index([status, createdAt])
+  @@index([refType, refId])
+}
+
 // ---------- A3: MDR (merchant discount rate) rows ----------
 // MDR pricing for acquiring-style rails (POS / PG / QR / UPI) now lives on the
 // SAME Scheme as the service charge/commission slabs (unified model). A slab
@@ -1568,6 +1644,13 @@ model MdrSlab {
   mdrType    RateType @default(PERCENT)
   mdrValue   Decimal  @default(0) @db.Decimal(14, 4)
   mdrValueT0 Decimal  @default(0) @db.Decimal(14, 4)
+
+  // Vendor/acquirer cost the company pays upstream (e.g. SameDay) for this band.
+  // Company revenue margin per txn = mdrValue − vendorCharge. Uses the same
+  // RateType as the MDR (mdrType). vendorChargeT0 applies to instant (T+0)
+  // settlement and falls back to vendorCharge when zero/unset.
+  vendorCharge   Decimal @default(0) @db.Decimal(14, 4)
+  vendorChargeT0 Decimal @default(0) @db.Decimal(14, 4)
 
   // Commission share distributed up the chain (same RateType semantics).
   commissionType             RateType @default(PERCENT)
@@ -1973,7 +2056,10 @@ model QrClaim {
 
   // Maker-checker: for amounts above the threshold the FIRST approval only
   // stages the claim; a DIFFERENT admin must confirm before money moves.
+  // firstApprovedBy is kept as a relation (not just an id) so reconciliation
+  // can name the maker alongside the checker without a second lookup.
   firstApprovedById String?
+  firstApprovedBy   User?     @relation("QrClaimFirstApprover", fields: [firstApprovedById], references: [id])
   firstApprovedAt   DateTime?
 
   reviewedById String?
@@ -1983,6 +2069,19 @@ model QrClaim {
   // Admin attestation that the UTR was found in the provider's merchant portal.
   portalVerified Boolean @default(false)
 
+  // ── Settlement (scheme-assigned MDR; button-driven instant or T+1 cron) ──
+  // A claim becomes SETTLEABLE on approval (no money moves). At settlement the
+  // scheme's QR MDR is resolved (T0 for instant, T1 for the daily sweep), the
+  // MDR is deducted, and the NET is credited to the retailer wallet.
+  settleableAt DateTime? // when the claim became SETTLEABLE (T+1 is measured from here)
+  mdrAmount    Decimal?  @db.Decimal(14, 2) // scheme MDR deducted at settlement
+  netAmount    Decimal?  @db.Decimal(14, 2) // gross − MDR credited to the wallet
+  settledAt    DateTime?
+  settledVia   String?   // INSTANT_BUTTON | T1_CRON
+  walletTxnId  String?   // credit WalletTxn ref
+  settlementSchemeId String? // scheme the MDR was resolved from (audit)
+  mdrSlabId          String? // MdrSlab the MDR was resolved from (audit)
+
   // Phase-2 reconciliation hooks (provider settlement file matching).
   settlementBatchId String?
   reconciledAt      DateTime?
@@ -1991,6 +2090,7 @@ model QrClaim {
 
   @@index([userId, status])
   @@index([status, createdAt])
+  @@index([status, settleableAt])
   @@index([reconciledAt])
 }
 
@@ -2021,6 +2121,32 @@ model CommissionCredit {
   @@index([userId, service, createdAt])
 }
 
+// ---------- TDS liability ledger ----------
+// Every commission payout withholds 2% TDS (Section 194H style). The withheld
+// amount is recorded here as a company liability, separate from the wallet
+// ledger, so it can be reconciled and remitted independently.
+
+model TdsLedgerEntry {
+  id                 String      @id @default(cuid())
+  userId             String      // payee the TDS was withheld from (DT/MD/SD)
+  user               User        @relation("TdsPayee", fields: [userId], references: [id])
+  transactionId      String?
+  commissionCreditId String?
+  service            ServiceCode
+  tier               String      // DISTRIBUTOR | MASTER | SUPER
+  grossAmount        Decimal     @db.Decimal(14, 2) // gross commission the TDS was computed on
+  tdsRate            Decimal     @default(0.02) @db.Decimal(6, 4)
+  tdsAmount          Decimal     @db.Decimal(14, 2)
+  // Idempotency guard — one TDS entry per (txn, payee), so replays never
+  // double-record the liability.
+  idempotencyKey     String?     @unique
+  createdAt          DateTime    @default(now())
+
+  @@index([userId, createdAt])
+  @@index([transactionId])
+  @@index([service, createdAt])
+}
+
 // ---------- POS acquirer settlement ----------
 // Tracks POS transaction proceeds — credited instantly (on webhook) or via
 // T+1 cron depending on the user's instantSettlement flag.
@@ -2037,6 +2163,11 @@ model PosSettlementEntry {
   mode           String   // INSTANT | T1
   status         String   @default("PENDING") // PENDING | SETTLED | FAILED
   settledAt      DateTime?
+  // How the entry was settled (audit / reporting):
+  //   INSTANT_AUTO   — auto-instant at capture (per-user / per-brand / global flag)
+  //   INSTANT_BUTTON — retailer pressed "Instant settle" on the dashboard (T0 rate)
+  //   T1_CRON        — swept by the next-day T+1 settlement cron (T1 rate)
+  settledVia     String?
   walletTxnId    String?  // ref to the credit WalletTxn
   paymentMode    String?  // CARD | UPI | NFC | BHARATQR
 
@@ -2184,4 +2315,36 @@ model HierarchyTransfer {
   @@index([userId])
   @@index([newParentId, status])
   @@index([status])
+}
+
+// ---------- Company MDR Floor ----------
+// Platform-wide minimum MDR rates for acquiring rails (POS/PG/QR).
+// No scheme or brand rate may set an MDR below these values.
+
+model CompanyMdrFloor {
+  id          String         @id @default(cuid())
+  serviceKind MdrServiceKind // POS | PG | QR
+  paymentMode String         @default("*") // CARD | UPI | NFC | * (wildcard)
+  minAmount   Decimal        @db.Decimal(14, 2)
+  maxAmount   Decimal        @db.Decimal(14, 2)
+  mdrType     RateType       @default(PERCENT)
+  mdrValue    Decimal        @default(0) @db.Decimal(14, 4) // T+1 floor
+  mdrValueT0  Decimal        @default(0) @db.Decimal(14, 4) // T+0 floor
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([serviceKind, paymentMode, active])
+}
+
+// ---------- Card BIN Cache ----------
+
+model CardBinCache {
+  bin         String   @id
+  cardNetwork String
+  cardType    String
+  cardLevel   String
+  country     String
+  issuerBank  String
+  createdAt   DateTime @default(now())
 }

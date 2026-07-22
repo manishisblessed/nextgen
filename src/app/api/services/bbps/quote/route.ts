@@ -35,6 +35,7 @@ export async function GET(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (user.role !== "RETAILER") throw new AuthError("BBPS is available for retailers only", 403);
     await requireActiveScheme(user.id);
     await enforceRateLimit(`bbps:quote:${user.id}`, RATE_LIMITS.default);
   } catch (e) {
@@ -57,7 +58,7 @@ export async function GET(req: Request) {
   const gst = rate.chargeGstInclusive ? 0 : toNumber(gstBreakdown.gst);
   const totalCharge = rate.chargeGstInclusive ? serviceCharge : toNumber(gstBreakdown.total);
   const totalDebit = toNumber(add(amount, rate.chargeGstInclusive ? rate.charge : gstBreakdown.total));
-  const commission = toNumber(rate.commissionOwn);
+  const commission = toNumber(rate.commission);
 
   return NextResponse.json({
     amount,

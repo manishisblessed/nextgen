@@ -44,6 +44,8 @@ type DailyRow = {
 type RevenueWalletTxn = {
   id: string;
   amount: number;
+  direction: "CREDIT" | "DEBIT";
+  reason: string;
   balanceAfter: number;
   note: string | null;
   refId: string | null;
@@ -55,6 +57,7 @@ type RevenueWallet = {
   accountName: string | null;
   balance: number;
   creditedInRange: number;
+  commissionPaidInRange: number;
   recent: RevenueWalletTxn[];
 };
 
@@ -245,12 +248,17 @@ export default function RevenuePage() {
     {
       key: "note",
       header: "Description",
-      render: (r) => <span className="text-ink-700">{r.note ?? "Platform revenue"}</span>,
+      render: (r) => <span className="text-ink-700">{r.note ?? "Revenue movement"}</span>,
     },
     {
       key: "amount",
-      header: "Credited",
-      render: (r) => <span className="font-bold text-emerald-600">+{formatINR(r.amount)}</span>,
+      header: "Amount",
+      render: (r) =>
+        r.direction === "CREDIT" ? (
+          <span className="font-bold text-emerald-600">+{formatINR(r.amount)}</span>
+        ) : (
+          <span className="font-bold text-rose-600">−{formatINR(r.amount)}</span>
+        ),
     },
     {
       key: "balanceAfter",
@@ -275,8 +283,8 @@ export default function RevenuePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Revenue & Commission Report"
-        description="Platform revenue, commission distribution by service and tier, and daily trend — admin-only view."
+        title="Company Earnings & Revenue Wallet"
+        description="Company earnings from the MDR margin (service − vendor) credited to the Revenue Wallet, with upline commissions paid out of it — admin-only view."
         actions={
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-xs text-ink-500">
@@ -352,11 +360,19 @@ export default function RevenuePage() {
                     : "No revenue account configured"}
                 </p>
               </div>
-              <div className="rounded-xl bg-white/15 p-3 text-right">
-                <p className="text-[11px] uppercase tracking-wider text-white/80">Credited this range</p>
-                <p className="mt-1 font-display text-xl font-bold">
-                  {formatINR(data.wallet.creditedInRange)}
-                </p>
+              <div className="flex gap-2">
+                <div className="rounded-xl bg-white/15 p-3 text-right">
+                  <p className="text-[11px] uppercase tracking-wider text-white/80">Margin in (range)</p>
+                  <p className="mt-1 font-display text-xl font-bold">
+                    +{formatINR(data.wallet.creditedInRange)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white/15 p-3 text-right">
+                  <p className="text-[11px] uppercase tracking-wider text-white/80">Commission out (range)</p>
+                  <p className="mt-1 font-display text-xl font-bold">
+                    −{formatINR(data.wallet.commissionPaidInRange)}
+                  </p>
+                </div>
               </div>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { handlePosCapture } from "@/lib/settlement/pos";
 import { prisma } from "@/lib/db";
+import { lookupBin } from "@/lib/pos/binLookup";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -49,11 +50,25 @@ export async function POST(req: Request) {
   // Card dimensions (optional in the payload) drive company/card-wise MDR.
   const cardType = String(txnData.card_type ?? txnData.cardType ?? "").toUpperCase() || undefined;
   const brandType = String(txnData.brand_type ?? txnData.card_brand ?? txnData.brand ?? "").toUpperCase() || undefined;
-  const classification = String(txnData.card_classification ?? txnData.classification ?? "").toUpperCase() || undefined;
+  let classification = String(txnData.card_classification ?? txnData.classification ?? "").toUpperCase() || undefined;
   // Acquiring / service provider (RAZORPAY | PAYTM | PINELAB | ...) that handled
   // the swipe. Falls back to the machine's configured provider in the engine.
   const providerRaw = String(txnData.provider ?? txnData.acquirer ?? txnData.gateway ?? "").trim();
   const provider = providerRaw ? providerRaw.toUpperCase() : undefined;
+
+  // BIN enrichment: when the acquirer (e.g. Teachway/Razorpay) doesn't provide
+  // card classification, look it up via eKYC Hub so MDR can be priced accurately.
+  const cardNumber = String(txnData.card_number ?? txnData.cardNumber ?? "").replace(/\D/g, "");
+  if (!classification && cardNumber.length >= 6 && paymentMode === "CARD") {
+    try {
+      const binData = await lookupBin(cardNumber);
+      if (binData) {
+        classification = binData.cardLevel.toUpperCase() || binData.cardType.toUpperCase() || undefined;
+      }
+    } catch {
+      // Non-blocking: settle without classification if BIN lookup fails
+    }
+  }
 
   const result = await handlePosCapture({
     transactionRef,

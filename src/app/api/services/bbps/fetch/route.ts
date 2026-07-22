@@ -7,6 +7,7 @@ import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { bbpsServiceKey } from "@/lib/services/bbpsKey";
+import { AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -22,6 +23,7 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (user.role !== "RETAILER") throw new AuthError("BBPS is available for retailers only", 403);
     await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
     await enforceRateLimit(`bbps:fetch:${user.id}`, RATE_LIMITS.txnCreate);
   } catch (e) {

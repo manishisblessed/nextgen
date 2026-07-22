@@ -15,6 +15,9 @@ import { logger } from "@/lib/logger";
  *   3. HELD_VS_INFLIGHT    — heldBalance must equal Σ(totalDebit) of payouts
  *                            still holding funds (PENDING_APPROVAL, APPROVED,
  *                            PROCESSING).
+ *   4. LIEN_VS_ACTIVE      — lienBalance must equal Σ(amount − recoveredAmount)
+ *                            over the user's ACTIVE liens (the outstanding
+ *                            chargeback/fraud freeze).
  *
  * Any mismatch means money silently appeared or disappeared — a critical
  * incident. Findings are persisted to AuditLog (action recon.ledger_mismatch)
@@ -26,7 +29,7 @@ import { logger } from "@/lib/logger";
 
 export type IntegrityFinding = {
   userId: string;
-  check: "BALANCE_VS_LEDGER" | "PASSBOOK_CONTINUITY" | "HELD_VS_INFLIGHT";
+  check: "BALANCE_VS_LEDGER" | "PASSBOOK_CONTINUITY" | "HELD_VS_INFLIGHT" | "LIEN_VS_ACTIVE";
   expected: string;
   actual: string;
 };
@@ -77,6 +80,21 @@ async function heldByUser(): Promise<Map<string, Money>> {
   return map;
 }
 
+/** Σ(amount − recoveredAmount) of ACTIVE liens per user (the outstanding freeze). */
+async function activeLienByUser(): Promise<Map<string, Money>> {
+  const liens = await prisma.walletLien.findMany({
+    where: { status: "ACTIVE" },
+    select: { targetUserId: true, amount: true, recoveredAmount: true },
+  });
+  const map = new Map<string, Money>();
+  for (const l of liens) {
+    const outstanding = dec(l.amount).sub(dec(l.recoveredAmount));
+    const add = outstanding.gt(0) ? outstanding : dec(0);
+    map.set(l.targetUserId, (map.get(l.targetUserId) ?? dec(0)).add(add));
+  }
+  return map;
+}
+
 /**
  * Run the full integrity audit. Read-only; safe to run any time. Persists a
  * summary AuditLog row (recon.ledger_audit) plus one row per mismatch.
@@ -84,14 +102,15 @@ async function heldByUser(): Promise<Map<string, Money>> {
 export async function runLedgerIntegrityAudit(): Promise<IntegrityReport> {
   const ranAt = new Date().toISOString();
 
-  const [users, ledgerNet, lastBalanceAfter, held] = await Promise.all([
+  const [users, ledgerNet, lastBalanceAfter, held, activeLien] = await Promise.all([
     prisma.user.findMany({
       where: { deletedAt: null },
-      select: { id: true, walletBalance: true, heldBalance: true },
+      select: { id: true, walletBalance: true, heldBalance: true, lienBalance: true },
     }),
     ledgerNetByUser(),
     latestBalanceAfterByUser(),
     heldByUser(),
+    activeLienByUser(),
   ]);
 
   const findings: IntegrityFinding[] = [];
@@ -127,6 +146,17 @@ export async function runLedgerIntegrityAudit(): Promise<IntegrityReport> {
         check: "HELD_VS_INFLIGHT",
         expected: toFixedString(expectedHeld),
         actual: toFixedString(heldBalance),
+      });
+    }
+
+    const lienBalance = dec(user.lienBalance);
+    const expectedLien = activeLien.get(user.id) ?? dec(0);
+    if (!eq(lienBalance, expectedLien)) {
+      findings.push({
+        userId: user.id,
+        check: "LIEN_VS_ACTIVE",
+        expected: toFixedString(expectedLien),
+        actual: toFixedString(lienBalance),
       });
     }
   }

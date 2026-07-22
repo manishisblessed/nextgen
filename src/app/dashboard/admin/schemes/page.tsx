@@ -4,12 +4,10 @@
  * Scheme Management (unified) — every scheme is a single expandable card with
  * an icon strip: one colored icon per service family (BBPS, Payout) that opens
  * an "add slab" modal, plus a POS MDR icon that adds a merchant-discount-rate
- * row. One scheme therefore prices BBPS + Payout commission AND POS settlement
- * MDR, and is assigned once (to super-distributors).
+ * row. One scheme prices charges, commission values, and POS settlement MDR.
  *
- * Cascade model: admin schemes carry CHARGES only — no commission. Each network
- * parent earns the margin between their derived scheme and their child's, so the
- * admin slab modal never asks for a commission.
+ * Flat model: admin assigns schemes directly to any user. Commission values
+ * defined in the scheme are credited to the user on PG/POS/QR transactions.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -81,6 +79,12 @@ type MdrSlab = {
   mdrType: RateType;
   mdrValue: number;
   mdrValueT0: number;
+  vendorCharge: number;
+  vendorChargeT0: number;
+  commissionType: RateType;
+  commissionDistributor: number;
+  commissionMaster: number;
+  commissionSuperDistributor: number;
   active: boolean;
 };
 
@@ -176,7 +180,7 @@ export default function SchemeManagementPage() {
       <PageHeader
         eyebrow="Admin"
         title="Scheme Management"
-        description="One scheme prices every rail: BBPS + Payout charges and POS settlement MDR. Admin schemes carry charges only (no commission) and are assigned to super-distributors."
+        description="Create and manage schemes with charges, MDR rates, and commission values. Assign any scheme directly to any user. Commissions apply only to PG/POS/QR transactions."
         actions={
           <>
             <Button variant="outline" onClick={load} disabled={loading}>
@@ -549,9 +553,12 @@ function SchemeCard({
                           <th className="px-4 py-2 font-semibold">Mode</th>
                           <th className="px-4 py-2 font-semibold">Card</th>
                           <th className="px-4 py-2 font-semibold">Brand</th>
-                          <th className="px-4 py-2 font-semibold">Class</th>
-                          <th className="px-4 py-2 text-right font-semibold">MDR T+1</th>
-                          <th className="px-4 py-2 text-right font-semibold">MDR T+0</th>
+                          <th className="px-4 py-2 text-right font-semibold">Service (MDR)</th>
+                          <th className="px-4 py-2 text-right font-semibold">Vendor</th>
+                          <th className="px-4 py-2 text-right font-semibold">Margin</th>
+                          <th className="px-4 py-2 text-right font-semibold">DIST</th>
+                          <th className="px-4 py-2 text-right font-semibold">M.DIST</th>
+                          <th className="px-4 py-2 text-right font-semibold">S.DIST</th>
                           <th className="px-4 py-2 text-center font-semibold">Status</th>
                           <th className="px-4 py-2" />
                         </tr>
@@ -563,11 +570,14 @@ function SchemeCard({
                             <td className="px-4 py-2.5">{s.paymentMode === "*" ? "Any" : s.paymentMode}</td>
                             <td className="px-4 py-2.5">{s.cardType ?? "Any"}</td>
                             <td className="px-4 py-2.5">{s.brandType ?? "Any"}</td>
-                            <td className="px-4 py-2.5">{s.classification ?? "Any"}</td>
                             <td className="px-4 py-2.5 text-right font-semibold">{fmtRate(s.mdrType, s.mdrValue)}</td>
-                            <td className="px-4 py-2.5 text-right">
-                              {s.mdrValueT0 > 0 ? fmtRate(s.mdrType, s.mdrValueT0) : "= T+1"}
+                            <td className="px-4 py-2.5 text-right text-ink-500">{fmtRate(s.mdrType, s.vendorCharge)}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">
+                              {fmtRate(s.mdrType, Math.max(0, s.mdrValue - s.vendorCharge))}
                             </td>
+                            <td className="px-4 py-2.5 text-right">{fmtRate(s.commissionType, s.commissionDistributor)}</td>
+                            <td className="px-4 py-2.5 text-right">{fmtRate(s.commissionType, s.commissionMaster)}</td>
+                            <td className="px-4 py-2.5 text-right">{fmtRate(s.commissionType, s.commissionSuperDistributor)}</td>
                             <td className="px-4 py-2.5 text-center">
                               <Badge variant={s.active ? "success" : "danger"}>{s.active ? "On" : "Off"}</Badge>
                             </td>
@@ -914,6 +924,7 @@ function MdrRateModal({
   onSaved: (msg: string) => void;
 }) {
   const isEdit = !!editing;
+  const [serviceKind, setServiceKind] = useState(editing?.serviceKind ?? "POS");
   const [company, setCompany] = useState(editing?.company ?? "");
   const [paymentMode, setPaymentMode] = useState(editing?.paymentMode ?? "CARD");
   const [cardType, setCardType] = useState(editing?.cardType ?? "");
@@ -926,6 +937,22 @@ function MdrRateModal({
   );
   const [mdrT0, setMdrT0] = useState(
     String(editing ? (editing.mdrType === "PERCENT" ? editing.mdrValueT0 * 100 : editing.mdrValueT0) : 0)
+  );
+  const [vendorT1, setVendorT1] = useState(
+    String(editing ? (editing.mdrType === "PERCENT" ? editing.vendorCharge * 100 : editing.vendorCharge) : 0)
+  );
+  const [vendorT0, setVendorT0] = useState(
+    String(editing ? (editing.mdrType === "PERCENT" ? editing.vendorChargeT0 * 100 : editing.vendorChargeT0) : 0)
+  );
+  const [commissionType, setCommissionType] = useState<RateType>(editing?.commissionType ?? "PERCENT");
+  const [commDist, setCommDist] = useState(
+    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionDistributor * 100 : editing.commissionDistributor) : 0)
+  );
+  const [commMaster, setCommMaster] = useState(
+    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionMaster * 100 : editing.commissionMaster) : 0)
+  );
+  const [commSuper, setCommSuper] = useState(
+    String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionSuperDistributor * 100 : editing.commissionSuperDistributor) : 0)
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -949,14 +976,20 @@ function MdrRateModal({
       mdrType,
       mdrValue: toStored(mdrType, mdrT1),
       mdrValueT0: toStored(mdrType, mdrT0),
+      vendorCharge: toStored(mdrType, vendorT1),
+      vendorChargeT0: toStored(mdrType, vendorT0),
+      commissionType,
+      commissionDistributor: toStored(commissionType, commDist),
+      commissionMaster: toStored(commissionType, commMaster),
+      commissionSuperDistributor: toStored(commissionType, commSuper),
     };
 
     try {
       const res = await fetch(`/api/admin/schemes/${schemeId}/mdr-slabs`, {
         method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        // serviceKind is POS — the settlement rail priced by this MDR row.
-        body: JSON.stringify(isEdit ? { slabId: editing!.id, ...dims } : { serviceKind: "POS", ...dims }),
+        // serviceKind = the acquiring rail (POS/PG/QR/UPI) priced by this row.
+        body: JSON.stringify(isEdit ? { slabId: editing!.id, ...dims } : { serviceKind, ...dims }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Save failed");
@@ -985,6 +1018,16 @@ function MdrRateModal({
         </div>
         <div className="space-y-4 p-5">
           {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
+
+          <div>
+            <Label>Rail</Label>
+            <Select value={serviceKind} onChange={(e) => setServiceKind(e.target.value)} disabled={isEdit}>
+              <option value="POS">POS</option>
+              <option value="PG">Payment Gateway (PG)</option>
+              <option value="QR">QR</option>
+              <option value="UPI">UPI</option>
+            </Select>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1056,6 +1099,7 @@ function MdrRateModal({
           </div>
 
           <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-3">
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">Service charge & vendor cost</p>
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>Type</Label>
@@ -1065,19 +1109,59 @@ function MdrRateModal({
                 </Select>
               </div>
               <div>
-                <Label>{mdrType === "PERCENT" ? "MDR T+1 (%)" : "MDR T+1 (₹)"}</Label>
+                <Label>{mdrType === "PERCENT" ? "Service T+1 (%)" : "Service T+1 (₹)"}</Label>
                 <Input type="number" min={0} step="0.0001" value={mdrT1} onChange={(e) => setMdrT1(e.target.value)} />
               </div>
               <div>
-                <Label>{mdrType === "PERCENT" ? "MDR T+0 (%)" : "MDR T+0 (₹)"}</Label>
+                <Label>{mdrType === "PERCENT" ? "Service T+0 (%)" : "Service T+0 (₹)"}</Label>
                 <Input type="number" min={0} step="0.0001" value={mdrT0} onChange={(e) => setMdrT0(e.target.value)} />
               </div>
             </div>
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div />
+              <div>
+                <Label>{mdrType === "PERCENT" ? "Vendor T+1 (%)" : "Vendor T+1 (₹)"}</Label>
+                <Input type="number" min={0} step="0.0001" value={vendorT1} onChange={(e) => setVendorT1(e.target.value)} />
+              </div>
+              <div>
+                <Label>{mdrType === "PERCENT" ? "Vendor T+0 (%)" : "Vendor T+0 (₹)"}</Label>
+                <Input type="number" min={0} step="0.0001" value={vendorT0} onChange={(e) => setVendorT0(e.target.value)} />
+              </div>
+            </div>
             <p className="mt-2 text-xs text-ink-500">
-              When a POS transaction is received, this MDR is deducted from the gross amount before crediting the
-              retailer&apos;s wallet. For example, on a ₹10,000 swipe with 2% MDR, the retailer receives ₹9,800.
-              T+0 applies to instant settlement; leave 0 to use the T+1 rate. A rate pinned to a company/card wins
-              over &quot;Any&quot;.
+              The service charge (MDR) is deducted from the gross before crediting the retailer. The vendor charge
+              is the acquirer cost the company pays upstream. Company revenue per txn = service − vendor, credited to
+              the Revenue Wallet. T+0 applies to instant settlement; leave 0 to use the T+1 rate.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-500">Commission (from Revenue Wallet)</p>
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <Label>Type</Label>
+                <Select value={commissionType} onChange={(e) => setCommissionType(e.target.value as RateType)}>
+                  <option value="PERCENT">Percent (%)</option>
+                  <option value="FLAT">Flat (₹)</option>
+                </Select>
+              </div>
+              <div>
+                <Label>DIST</Label>
+                <Input type="number" min={0} step="0.0001" value={commDist} onChange={(e) => setCommDist(e.target.value)} />
+              </div>
+              <div>
+                <Label>M.DIST</Label>
+                <Input type="number" min={0} step="0.0001" value={commMaster} onChange={(e) => setCommMaster(e.target.value)} />
+              </div>
+              <div>
+                <Label>S.DIST</Label>
+                <Input type="number" min={0} step="0.0001" value={commSuper} onChange={(e) => setCommSuper(e.target.value)} />
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-ink-500">
+              Commission paid up the chain per transaction — DIST → distributor, M.DIST → master distributor,
+              S.DIST → super distributor. Paid out of the Revenue Wallet, net of 2% TDS. Total must not exceed the
+              company margin (service − vendor). The transacting retailer earns no commission.
             </p>
           </div>
         </div>
@@ -1110,30 +1194,32 @@ function AssignModal({
   onError: (msg: string) => void;
 }) {
   const [assigning, setAssigning] = useState(false);
-  const [sdList, setSdList] = useState<{ id: string; name: string; email: string; shopName: string | null }[]>([]);
-  const [loadingSd, setLoadingSd] = useState(true);
+  const [userList, setUserList] = useState<{ id: string; name: string; email: string; role: string; shopName: string | null }[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
   const [assigned, setAssigned] = useState<{ id: string; name: string; email: string; role: string }[]>([]);
   const [loadingAssigned, setLoadingAssigned] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const assignedIds = useMemo(() => new Set(assigned.map((u) => u.id)), [assigned]);
 
   const loadData = useCallback(async () => {
     setLoadingAssigned(true);
-    setLoadingSd(true);
+    setLoadingUsers(true);
     try {
       const [schemeRes, usersRes] = await Promise.all([
         fetch(`/api/admin/schemes/${schemeId}`),
-        fetch("/api/admin/users?role=super-distributor&pageSize=200"),
+        fetch("/api/admin/users?pageSize=500"),
       ]);
       const schemeData = await schemeRes.json();
       const usersData = await usersRes.json();
       if (schemeRes.ok) setAssigned(schemeData.assignedUsers ?? []);
       if (usersRes.ok)
-        setSdList(
-          (usersData.users ?? []).map((u: { id: string; name: string; email: string; shopName: string | null }) => ({
+        setUserList(
+          (usersData.users ?? []).map((u: { id: string; name: string; email: string; role: string; shopName: string | null }) => ({
             id: u.id,
             name: u.name,
             email: u.email,
+            role: u.role,
             shopName: u.shopName,
           }))
         );
@@ -1141,7 +1227,7 @@ function AssignModal({
       /* silent */
     } finally {
       setLoadingAssigned(false);
-      setLoadingSd(false);
+      setLoadingUsers(false);
     }
   }, [schemeId]);
 
@@ -1152,14 +1238,16 @@ function AssignModal({
   async function assignAll() {
     setAssigning(true);
     try {
+      const ids = unassigned.map((u) => u.id);
+      if (ids.length === 0) return;
       const res = await fetch("/api/admin/schemes/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schemeId, role: "SUPER_DISTRIBUTOR" }),
+        body: JSON.stringify({ schemeId, userIds: ids }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Assign failed");
-      onChanged(`Assigned to ${data.updated} super distributor(s).`);
+      onChanged(`Assigned to ${data.updated} user(s).`);
       loadData();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
@@ -1177,7 +1265,7 @@ function AssignModal({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Assign failed");
-      onChanged("Super distributor assigned to scheme.");
+      onChanged("User assigned to scheme.");
       loadData();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
@@ -1200,7 +1288,19 @@ function AssignModal({
     }
   }
 
-  const unassigned = sdList.filter((u) => !assignedIds.has(u.id));
+  const unassigned = useMemo(() => {
+    const list = userList.filter((u) => !assignedIds.has(u.id));
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.trim().toLowerCase();
+    return list.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.shopName ?? "").toLowerCase().includes(q));
+  }, [userList, assignedIds, searchQuery]);
+
+  const ROLE_BADGE: Record<string, string> = {
+    RETAILER: "RT",
+    DISTRIBUTOR: "DT",
+    MASTER_DISTRIBUTOR: "MD",
+    SUPER_DISTRIBUTOR: "SD",
+  };
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -1218,33 +1318,38 @@ function AssignModal({
         </div>
         <div className="space-y-4 p-5">
           <p className="text-xs text-ink-400">
-            Cascade model: schemes are assigned to super distributors only. Lower tiers receive schemes derived by their parent.
+            Assign this scheme to any user. The user will receive the charges and commission defined in this scheme.
           </p>
 
-          {/* Available super distributors */}
+          <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search users…" />
+
+          {/* Available users */}
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
-                Available super distributors ({unassigned.length})
+                Available users ({unassigned.length})
               </p>
-              {unassigned.length > 0 && (
+              {unassigned.length > 0 && unassigned.length <= 100 && (
                 <Button size="sm" onClick={assignAll} disabled={assigning}>
                   {assigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />} Assign all
                 </Button>
               )}
             </div>
-            {loadingSd ? (
+            {loadingUsers ? (
               <p className="py-4 text-center text-sm text-ink-400">Loading…</p>
             ) : unassigned.length === 0 ? (
               <p className="rounded-xl border border-dashed border-ink-200 px-3 py-4 text-center text-sm text-ink-500">
-                All super distributors are assigned to this scheme.
+                All users are assigned to this scheme.
               </p>
             ) : (
               <ul className="max-h-48 divide-y divide-ink-100 overflow-y-auto rounded-xl border border-ink-100">
-                {unassigned.map((u) => (
+                {unassigned.slice(0, 100).map((u) => (
                   <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <span className="min-w-0">
-                      <span className="block truncate font-medium text-ink-900">{u.name}</span>
+                      <span className="block truncate font-medium text-ink-900">
+                        {u.name}
+                        <span className="ml-1.5 inline-block rounded bg-ink-100 px-1 py-0.5 text-[10px] font-semibold text-ink-600">{ROLE_BADGE[u.role] ?? u.role}</span>
+                      </span>
                       <span className="block truncate text-xs text-ink-400">{u.shopName ?? u.email}</span>
                     </span>
                     <button
@@ -1268,14 +1373,17 @@ function AssignModal({
               <p className="py-4 text-center text-sm text-ink-400">Loading…</p>
             ) : assigned.length === 0 ? (
               <p className="rounded-xl border border-dashed border-ink-200 px-3 py-4 text-center text-sm text-ink-500">
-                No super distributors assigned yet.
+                No users assigned yet.
               </p>
             ) : (
               <ul className="max-h-48 divide-y divide-ink-100 overflow-y-auto rounded-xl border border-ink-100">
                 {assigned.map((u) => (
                   <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <span className="min-w-0">
-                      <span className="block truncate font-medium text-ink-900">{u.name}</span>
+                      <span className="block truncate font-medium text-ink-900">
+                        {u.name}
+                        <span className="ml-1.5 inline-block rounded bg-ink-100 px-1 py-0.5 text-[10px] font-semibold text-ink-600">{ROLE_BADGE[u.role] ?? u.role}</span>
+                      </span>
                       <span className="block truncate text-xs text-ink-400">{u.email}</span>
                     </span>
                     <button

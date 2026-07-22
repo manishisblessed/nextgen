@@ -4,7 +4,14 @@ import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { getPartner } from "@/lib/partners";
-import { canOnboard, defaultChildRole, ONBOARD_CAPABLE_ROLES } from "@/lib/hierarchy";
+import {
+  canOnboard,
+  defaultChildRole,
+  ONBOARD_CAPABLE_ROLES,
+  uplineInclude,
+  flattenUpline,
+  type UplineNode,
+} from "@/lib/hierarchy";
 import { env } from "@/lib/env";
 import { renderInviteEmail } from "@/lib/email/templates";
 
@@ -202,5 +209,63 @@ export async function GET(req: Request) {
     prisma.invite.count({ where }),
   ]);
 
-  return NextResponse.json({ invites, total, page, limit });
+  // Resolve each invite's upline chain (DT → MD → SD). Once an invitee has
+  // registered we walk the real User (invite.userId); otherwise we fall back
+  // to the immediate parent chosen at invite time (invite.parentId).
+  const anchorIds = [
+    ...new Set(
+      invites
+        .map((i) => i.userId ?? i.parentId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+
+  const anchors = anchorIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: anchorIds } },
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          userCode: true,
+          shopName: true,
+          ...uplineInclude,
+        },
+      })
+    : [];
+  const anchorMap = new Map(anchors.map((a) => [a.id, a]));
+
+  const invitesOut = invites.map((inv) => {
+    const anchorId = inv.userId ?? inv.parentId;
+    const anchor = anchorId ? anchorMap.get(anchorId) : null;
+    let upline: UplineNode[] = [];
+    if (anchor) {
+      if (inv.userId) {
+        // Anchor is the registered invitee — its ancestors are the upline.
+        upline = flattenUpline(anchor);
+      } else {
+        // Anchor is the immediate parent — include it plus its ancestors.
+        upline = [
+          {
+            id: anchor.id,
+            name: anchor.name,
+            role: anchor.role as UplineNode["role"],
+            userCode: anchor.userCode ?? null,
+            shopName: anchor.shopName ?? null,
+          },
+          ...flattenUpline(anchor),
+        ];
+      }
+    }
+    return {
+      ...inv,
+      upline: upline.map((n) => ({
+        role: n.role,
+        name: n.name,
+        userCode: n.userCode,
+      })),
+    };
+  });
+
+  return NextResponse.json({ invites: invitesOut, total, page, limit });
 }

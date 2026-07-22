@@ -16,6 +16,12 @@ export function serializeMdrSlab(s: MdrSlab) {
     mdrType: s.mdrType,
     mdrValue: Number(s.mdrValue),
     mdrValueT0: Number(s.mdrValueT0),
+    vendorCharge: Number(s.vendorCharge),
+    vendorChargeT0: Number(s.vendorChargeT0),
+    commissionType: s.commissionType,
+    commissionDistributor: Number(s.commissionDistributor),
+    commissionMaster: Number(s.commissionMaster),
+    commissionSuperDistributor: Number(s.commissionSuperDistributor),
     parentSlabId: s.parentSlabId,
     active: s.active,
   };

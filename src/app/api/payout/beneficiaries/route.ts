@@ -98,11 +98,14 @@ function toPublic(b: {
   };
 }
 
+const NETWORK_ROLES = new Set(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]);
+
 // ---------- GET: list current user's saved beneficiaries ----------
 export async function GET() {
   let user;
   try {
     user = await requireAuth();
+    if (!NETWORK_ROLES.has(user.role)) throw new AuthError("Payout is available for network users only", 403);
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
     throw e;
@@ -144,6 +147,7 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (!NETWORK_ROLES.has(user.role)) throw new AuthError("Payout is available for network users only", 403);
     await assertAccountActive(user.id);
     await assertLivenessReady(user);
     await assertKycCurrent(user);
@@ -287,6 +291,7 @@ export async function PATCH(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (!NETWORK_ROLES.has(user.role)) throw new AuthError("Payout is available for network users only", 403);
     await assertAccountActive(user.id);
     await enforceRateLimit(`payout:bene:recheck:${user.id}`, RATE_LIMITS.payoutCreate);
   } catch (e) {
@@ -344,6 +349,7 @@ export async function DELETE(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (!NETWORK_ROLES.has(user.role)) throw new AuthError("Payout is available for network users only", 403);
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.statusCode });
     throw e;

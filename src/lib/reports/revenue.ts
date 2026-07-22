@@ -37,6 +37,8 @@ export type DailyRevenueRow = {
 export type RevenueWalletTxn = {
   id: string;
   amount: number;
+  direction: "CREDIT" | "DEBIT";
+  reason: string;
   balanceAfter: number;
   note: string | null;
   refId: string | null;
@@ -48,6 +50,7 @@ export type RevenueWallet = {
   accountName: string | null;
   balance: number;
   creditedInRange: number;
+  commissionPaidInRange: number;
   recent: RevenueWalletTxn[];
 };
 
@@ -223,36 +226,66 @@ export async function getRevenueReport(
 async function getRevenueWallet(from: Date, to: Date): Promise<RevenueWallet> {
   const accountId = await getRevenueAccountId();
   if (!accountId) {
-    return { accountId: null, accountName: null, balance: 0, creditedInRange: 0, recent: [] };
+    return {
+      accountId: null,
+      accountName: null,
+      balance: 0,
+      creditedInRange: 0,
+      commissionPaidInRange: 0,
+      recent: [],
+    };
   }
 
-  const [account, inRange, recent] = await Promise.all([
-    prisma.user.findUnique({ where: { id: accountId }, select: { name: true, walletBalance: true } }),
+  const [account, marginIn, commissionOut, recent] = await Promise.all([
+    prisma.user.findUnique({ where: { id: accountId }, select: { name: true, revenueBalance: true } }),
     prisma.walletTxn.aggregate({
       where: {
         userId: accountId,
-        reason: "PLATFORM_REVENUE",
+        walletType: "REVENUE",
         direction: "CREDIT",
+        reason: "MDR_MARGIN",
+        createdAt: { gte: from, lte: to },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.walletTxn.aggregate({
+      where: {
+        userId: accountId,
+        walletType: "REVENUE",
+        direction: "DEBIT",
+        reason: "COMMISSION_PAYOUT",
         createdAt: { gte: from, lte: to },
       },
       _sum: { amount: true },
     }),
     prisma.walletTxn.findMany({
-      where: { userId: accountId, reason: "PLATFORM_REVENUE" },
+      where: { userId: accountId, walletType: "REVENUE" },
       orderBy: { createdAt: "desc" },
       take: 50,
-      select: { id: true, amount: true, balanceAfter: true, note: true, refId: true, createdAt: true },
+      select: {
+        id: true,
+        amount: true,
+        direction: true,
+        reason: true,
+        balanceAfter: true,
+        note: true,
+        refId: true,
+        createdAt: true,
+      },
     }),
   ]);
 
   return {
     accountId,
     accountName: account?.name ?? null,
-    balance: toNumber(dec(account?.walletBalance ?? 0)),
-    creditedInRange: toNumber(dec(inRange._sum.amount ?? 0)),
+    balance: toNumber(dec(account?.revenueBalance ?? 0)),
+    creditedInRange: toNumber(dec(marginIn._sum.amount ?? 0)),
+    commissionPaidInRange: toNumber(dec(commissionOut._sum.amount ?? 0)),
     recent: recent.map((t) => ({
       id: t.id,
       amount: toNumber(dec(t.amount)),
+      direction: t.direction,
+      reason: t.reason,
       balanceAfter: toNumber(dec(t.balanceAfter)),
       note: t.note,
       refId: t.refId,

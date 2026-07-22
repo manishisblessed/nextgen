@@ -25,6 +25,7 @@ export type TierBalance = {
   primary: number;
   aeps: number;
   held: number;
+  lien: number;
   total: number;
 };
 
@@ -33,6 +34,7 @@ export type CumulativeBalances = {
   primaryTotal: number;
   aepsTotal: number;
   heldTotal: number;
+  lienTotal: number;
   walletCount: number;
   tiers: TierBalance[];
   asOf: string;
@@ -44,13 +46,14 @@ export async function getCumulativeBalances(): Promise<CumulativeBalances> {
     by: ["role"],
     where: { role: { in: [...BALANCE_TIERS] }, deletedAt: null },
     _count: true,
-    _sum: { walletBalance: true, aepsBalance: true, heldBalance: true },
+    _sum: { walletBalance: true, aepsBalance: true, heldBalance: true, lienBalance: true },
   });
 
   const byRole = new Map(groups.map((g) => [g.role, g]));
   let primaryTotal: Money = dec(0);
   let aepsTotal: Money = dec(0);
   let heldTotal: Money = dec(0);
+  let lienTotal: Money = dec(0);
   let walletCount = 0;
 
   const tiers: TierBalance[] = BALANCE_TIERS.map((role) => {
@@ -58,9 +61,11 @@ export async function getCumulativeBalances(): Promise<CumulativeBalances> {
     const primary = dec(g?._sum.walletBalance ?? 0);
     const aeps = dec(g?._sum.aepsBalance ?? 0);
     const held = dec(g?._sum.heldBalance ?? 0);
+    const lien = dec(g?._sum.lienBalance ?? 0);
     primaryTotal = add(primaryTotal, primary);
     aepsTotal = add(aepsTotal, aeps);
     heldTotal = add(heldTotal, held);
+    lienTotal = add(lienTotal, lien);
     walletCount += g?._count ?? 0;
     return {
       role,
@@ -68,6 +73,7 @@ export async function getCumulativeBalances(): Promise<CumulativeBalances> {
       primary: toNumber(primary),
       aeps: toNumber(aeps),
       held: toNumber(held),
+      lien: toNumber(lien),
       total: toNumber(add(primary, aeps)),
     };
   });
@@ -77,6 +83,7 @@ export async function getCumulativeBalances(): Promise<CumulativeBalances> {
     primaryTotal: toNumber(primaryTotal),
     aepsTotal: toNumber(aepsTotal),
     heldTotal: toNumber(heldTotal),
+    lienTotal: toNumber(lienTotal),
     walletCount,
     tiers,
     asOf: new Date().toISOString(),
@@ -93,6 +100,7 @@ export type UserBalanceRow = {
   primary: number;
   aeps: number;
   held: number;
+  lien: number;
   total: number;
 };
 
@@ -146,6 +154,7 @@ export async function getUserWiseBalances(params: {
         walletBalance: true,
         aepsBalance: true,
         heldBalance: true,
+        lienBalance: true,
       },
       orderBy: { walletBalance: "desc" },
       skip: (page - 1) * pageSize,
@@ -172,6 +181,7 @@ export async function getUserWiseBalances(params: {
       primary: toNumber(dec(u.walletBalance)),
       aeps: toNumber(dec(u.aepsBalance)),
       held: toNumber(dec(u.heldBalance)),
+      lien: toNumber(dec(u.lienBalance)),
       total: toNumber(add(u.walletBalance, u.aepsBalance)),
     })),
     total,

@@ -16,6 +16,8 @@ import {
   ArrowDownCircle,
   Wallet,
   ShieldCheck,
+  Lock,
+  ShieldAlert,
 } from "lucide-react";
 
 /* ---------------------------------------------------------------- types */
@@ -34,6 +36,7 @@ type Cumulative = {
   primaryTotal: number;
   aepsTotal: number;
   heldTotal: number;
+  lienTotal: number;
   walletCount: number;
   tiers: TierBalance[];
 };
@@ -48,7 +51,23 @@ type UserRow = {
   primary: number;
   aeps: number;
   held: number;
+  lien: number;
   total: number;
+};
+
+type Lien = {
+  id: string;
+  amount: number;
+  recoveredAmount: number;
+  outstanding: number;
+  reasonCode: string;
+  remarks: string;
+  status: "ACTIVE" | "RECOVERED" | "RELEASED";
+  refType: string | null;
+  refId: string | null;
+  createdAt: string;
+  targetUser?: { name: string; email: string; shopName: string | null; role: string };
+  actor?: { name: string; email: string };
 };
 
 type Operation = {
@@ -83,13 +102,21 @@ const REASON_CODES = [
   "OTHER",
 ] as const;
 
+const LIEN_REASON_CODES = [
+  "CHARGEBACK",
+  "FRAUD",
+  "DISPUTE",
+  "INVESTIGATION",
+  "OTHER",
+] as const;
+
 const inputCls =
   "w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 
 /* ---------------------------------------------------------------- page */
 
 export default function WalletOpsPage() {
-  const [tab, setTab] = useState<"balances" | "operate" | "history">("balances");
+  const [tab, setTab] = useState<"balances" | "operate" | "liens" | "history">("balances");
   const [masked, setMasked] = useState(false);
   const [cumulative, setCumulative] = useState<Cumulative | null>(null);
   const notify = useCallback((text: string, ok: boolean) => {
@@ -150,6 +177,7 @@ export default function WalletOpsPage() {
         <MiniStat label="Primary wallets" value={money(cumulative?.primaryTotal ?? 0)} />
         <MiniStat label="AEPS wallets" value={money(cumulative?.aepsTotal ?? 0)} />
         <MiniStat label="On hold (in-flight)" value={money(cumulative?.heldTotal ?? 0)} />
+        <MiniStat label="Frozen (liens)" value={money(cumulative?.lienTotal ?? 0)} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -175,6 +203,7 @@ export default function WalletOpsPage() {
           [
             ["balances", "User-wise balances"],
             ["operate", "Push / Pull"],
+            ["liens", "Liens"],
             ["history", "Operations history"],
           ] as const
         ).map(([key, label]) => (
@@ -195,6 +224,15 @@ export default function WalletOpsPage() {
       {tab === "balances" && <UserBalancesTab money={money} />}
       {tab === "operate" && (
         <OperateTab
+          onDone={(msg, ok) => {
+            notify(msg, ok);
+            loadCumulative();
+          }}
+        />
+      )}
+      {tab === "liens" && (
+        <LiensTab
+          money={money}
           onDone={(msg, ok) => {
             notify(msg, ok);
             loadCumulative();
@@ -281,6 +319,17 @@ function UserBalancesTab({ money }: { money: (n: number) => string }) {
       { key: "primary", header: "Primary", align: "right", render: (r) => money(r.primary) },
       { key: "aeps", header: "AEPS", align: "right", render: (r) => money(r.aeps) },
       { key: "held", header: "Held", align: "right", render: (r) => money(r.held) },
+      {
+        key: "lien",
+        header: "Lien",
+        align: "right",
+        render: (r) =>
+          r.lien > 0 ? (
+            <span className="font-semibold text-rose-600">{money(r.lien)}</span>
+          ) : (
+            <span className="text-ink-300">—</span>
+          ),
+      },
       {
         key: "total",
         header: "Total",
@@ -605,7 +654,7 @@ function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) 
           />
         </div>
 
-        <Button onClick={submit} disabled={busy} className="w-full" isLoading={busy}>
+        <Button onClick={submit} disabled={busy} className={`w-full ${type === "PUSH" ? "from-emerald-600 to-emerald-500 hover:shadow-emerald-200" : "from-rose-600 to-rose-500 hover:shadow-rose-200"}`} isLoading={busy}>
           <Wallet className="h-4 w-4" />
           {type === "PUSH" ? "Credit user wallet" : "Debit user wallet"}
         </Button>
@@ -808,6 +857,426 @@ function HistoryTab({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- liens tab */
+
+function LiensTab({
+  money,
+  onDone,
+}: {
+  money: (n: number) => string;
+  onDone: (msg: string, ok: boolean) => void;
+}) {
+  // Place-lien form state.
+  const [filterRole, setFilterRole] = useState("");
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<UserHit[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [selected, setSelected] = useState<UserHit | null>(null);
+  const [amount, setAmount] = useState("");
+  const [reasonCode, setReasonCode] = useState<string>("CHARGEBACK");
+  const [txnId, setTxnId] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Liens list state.
+  const [liens, setLiens] = useState<Lien[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState("ACTIVE");
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState<string | null>(null);
+  const pageSize = 25;
+
+  useEffect(() => {
+    if (selected) {
+      setHits([]);
+      return;
+    }
+    if (!filterRole && (!q || q.length < 2)) {
+      setHits([]);
+      return;
+    }
+    setLoadingUsers(true);
+    const t = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ pageSize: "20" });
+        if (filterRole) params.set("role", filterRole);
+        if (q && q.length >= 2) params.set("q", q);
+        const res = await fetch(`/api/admin/users?${params}`);
+        const data = await res.json();
+        if (res.ok) setHits(data.users ?? []);
+      } catch {
+        setHits([]);
+      } finally {
+        setLoadingUsers(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, filterRole, selected]);
+
+  const loadLiens = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        status,
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      const res = await fetch(`/api/admin/wallet/liens?${params}`);
+      const data = await res.json();
+      if (res.ok) {
+        setLiens(data.liens);
+        setTotal(data.total);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [status, page]);
+
+  useEffect(() => {
+    loadLiens();
+  }, [loadLiens]);
+
+  const submit = async () => {
+    if (!selected) return onDone("Pick a target user first.", false);
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return onDone("Enter a valid amount.", false);
+    if (remarks.trim().length < 3) return onDone("Remarks are mandatory (min 3 chars).", false);
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/wallet/liens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetUserId: selected.id,
+          amount: amt,
+          reasonCode,
+          remarks: remarks.trim(),
+          ...(txnId.trim() ? { refType: "Transaction", refId: txnId.trim() } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Failed to place lien");
+      const lien = data.lien;
+      const recovered = lien?.recoveredAmount ?? 0;
+      onDone(
+        recovered > 0
+          ? `Lien placed on ${selected.name} — ${formatINR(recovered)} recovered immediately, ${formatINR(lien.outstanding)} pending against future credits.`
+          : `Lien of ${formatINR(amt)} placed on ${selected.name} — will recover from incoming funds.`,
+        true
+      );
+      setAmount("");
+      setRemarks("");
+      setTxnId("");
+      setSelected(null);
+      setQ("");
+      loadLiens();
+    } catch (e) {
+      onDone(e instanceof Error ? e.message : "Failed to place lien", false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (id: string, action: "recover" | "release") => {
+    setActing(id);
+    try {
+      const res = await fetch(`/api/admin/wallet/liens/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Action failed");
+      onDone(action === "recover" ? "Recovery sweep run." : "Lien released.", true);
+      loadLiens();
+    } catch (e) {
+      onDone(e instanceof Error ? e.message : "Action failed", false);
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const columns: Column<Lien>[] = [
+    {
+      key: "createdAt",
+      header: "Placed",
+      render: (r) =>
+        new Date(r.createdAt).toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+    },
+    {
+      key: "targetUser",
+      header: "User",
+      render: (r) => (
+        <div>
+          <p className="font-semibold text-ink-900">{r.targetUser?.name ?? "—"}</p>
+          <p className="text-[11px] text-ink-500">{r.targetUser?.shopName ?? r.targetUser?.email}</p>
+        </div>
+      ),
+    },
+    { key: "reasonCode", header: "Reason", render: (r) => r.reasonCode.replace(/_/g, " ") },
+    { key: "amount", header: "Amount", align: "right", render: (r) => money(r.amount) },
+    {
+      key: "recoveredAmount",
+      header: "Recovered",
+      align: "right",
+      render: (r) => <span className="text-emerald-600">{money(r.recoveredAmount)}</span>,
+    },
+    {
+      key: "outstanding",
+      header: "Outstanding",
+      align: "right",
+      render: (r) =>
+        r.outstanding > 0 ? (
+          <span className="font-semibold text-rose-600">{money(r.outstanding)}</span>
+        ) : (
+          <span className="text-ink-300">—</span>
+        ),
+    },
+    {
+      key: "ref",
+      header: "Ref",
+      render: (r) =>
+        r.refId ? (
+          <span className="text-[11px] text-ink-500">
+            {r.refType === "Transaction" ? "Txn " : ""}
+            {r.refId.slice(0, 10)}…
+          </span>
+        ) : (
+          <span className="text-ink-300">—</span>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => (
+        <Badge
+          variant={
+            r.status === "RECOVERED"
+              ? "success"
+              : r.status === "ACTIVE"
+              ? "warning"
+              : "danger"
+          }
+        >
+          {r.status}
+        </Badge>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (r) =>
+        r.status === "ACTIVE" ? (
+          <div className="flex gap-1.5">
+            <Button size="sm" disabled={acting === r.id} onClick={() => act(r.id, "recover")}>
+              Recover
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={acting === r.id}
+              onClick={() => act(r.id, "release")}
+            >
+              Release
+            </Button>
+          </div>
+        ) : null,
+    },
+  ];
+
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="space-y-4 rounded-2xl border border-ink-100 bg-white p-5 lg:col-span-3">
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+              Target user
+            </label>
+            {selected ? (
+              <div className="mt-1.5 flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5">
+                <div>
+                  <p className="text-sm font-semibold text-ink-900">{selected.name}</p>
+                  <p className="text-[11px] text-ink-500">
+                    {selected.shop} · {selected.role} · Wallet {formatINR(selected.walletBalance)}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => { setSelected(null); setQ(""); }}>
+                  Change
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2 mt-1.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={filterRole}
+                    onChange={(e) => { setFilterRole(e.target.value); setQ(""); }}
+                    className={inputCls}
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-400" />
+                    <input
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder="Search name / shop…"
+                      className={`${inputCls} pl-9`}
+                    />
+                  </div>
+                </div>
+                {loadingUsers && (
+                  <p className="py-2 text-center text-xs text-ink-400">Loading users…</p>
+                )}
+                {!loadingUsers && hits.length > 0 && (
+                  <div className="max-h-52 overflow-y-auto rounded-xl border border-ink-100 bg-white">
+                    {hits.map((h) => (
+                      <button
+                        key={h.id}
+                        onClick={() => { setSelected(h); setHits([]); }}
+                        className="flex w-full items-center justify-between border-b border-ink-50 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-brand-50"
+                      >
+                        <span>
+                          <span className="font-semibold text-ink-900">{h.name}</span>{" "}
+                          <span className="text-ink-500">· {h.shop}</span>
+                        </span>
+                        <span className="shrink-0 ml-2 text-[11px] text-ink-500">{h.role} · {formatINR(h.walletBalance)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+                Lien amount (₹)
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                className={`${inputCls} mt-1.5`}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+                Reason code
+              </label>
+              <select
+                value={reasonCode}
+                onChange={(e) => setReasonCode(e.target.value)}
+                className={`${inputCls} mt-1.5`}
+              >
+                {LIEN_REASON_CODES.map((c) => (
+                  <option key={c} value={c}>{c.replace(/_/g, " ")}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+              Transaction ID (optional — links the lien to a transaction)
+            </label>
+            <input
+              value={txnId}
+              onChange={(e) => setTxnId(e.target.value)}
+              placeholder="Transaction id this lien is against"
+              className={`${inputCls} mt-1.5`}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+              Remarks (mandatory, audit-logged)
+            </label>
+            <textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              rows={2}
+              placeholder="Why is this lien being placed?"
+              className={`${inputCls} mt-1.5 resize-none`}
+            />
+          </div>
+
+          <Button
+            onClick={submit}
+            disabled={busy}
+            isLoading={busy}
+            className="w-full from-rose-600 to-rose-500 hover:shadow-rose-200"
+          >
+            <Lock className="h-4 w-4" /> Place lien &amp; recover
+          </Button>
+        </div>
+
+        <div className="space-y-3 lg:col-span-2">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-amber-600" />
+              <p className="text-sm font-bold text-amber-800">How liens work</p>
+            </div>
+            <ul className="mt-2 space-y-1.5 text-[13px] leading-relaxed text-amber-800">
+              <li>• Funds are frozen instantly and cannot be spent — spendable can never go negative.</li>
+              <li>• The freeze is invisible to the user; only the recovery debit (&ldquo;Recovery against txn #…&rdquo;) shows.</li>
+              <li>• Recovery is eager: available funds and every future credit are swept to the Company Suspense account until fully recovered.</li>
+              <li>• Release returns any still-outstanding amount to the user; already-recovered money stays with the company.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* Liens list */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={status}
+            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+            className={`${inputCls} w-auto`}
+          >
+            <option value="all">All statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="RECOVERED">Recovered</option>
+            <option value="RELEASED">Released</option>
+          </select>
+          <Button variant="outline" size="sm" onClick={loadLiens} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+
+        <DataTable columns={columns} data={liens} loading={loading} />
+
+        {pages > 1 && (
+          <div className="flex items-center justify-end gap-2 text-sm">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <span className="text-ink-500">Page {page} / {pages}</span>
+            <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

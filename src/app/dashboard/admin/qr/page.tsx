@@ -26,6 +26,8 @@ type Overview = {
   pendingAmount: number;
   awaitingSecondCount: number;
   awaitingSecondAmount: number;
+  settleableCount: number;
+  settleableAmount: number;
   outstandingReceivableCount: number;
   outstandingReceivable: number;
 };
@@ -38,10 +40,15 @@ type ClaimRow = {
   amount: number;
   utr: string;
   paidAt: string;
-  status: "PENDING" | "AWAITING_SECOND_APPROVAL" | "APPROVED" | "REJECTED" | "CLAWED_BACK";
-  firstApprovedById: string | null;
+  status: "PENDING" | "AWAITING_SECOND_APPROVAL" | "APPROVED" | "SETTLEABLE" | "SETTLED" | "REJECTED" | "CLAWED_BACK";
   reviewNote: string | null;
+  firstApprovedById: string | null;
+  firstApprovedBy: string | null;
+  firstApprovedByCode: string | null;
+  firstApprovedAt: string | null;
+  reviewedById: string | null;
   reviewedBy: string | null;
+  reviewedByCode: string | null;
   reviewedAt: string | null;
   createdAt: string;
   screenshotUrl: string;
@@ -123,8 +130,10 @@ function ReviewQueueTab() {
         toast.error(typeof d.error === "string" ? d.error : "Action failed");
         return;
       }
-      if (d.status === "APPROVED") {
-        toast.success(`Approved — ${formatINR(selected.amount)} credited to ${selected.retailer.name}'s wallet.`);
+      if (d.status === "SETTLEABLE") {
+        toast.success(
+          `Approved — ${formatINR(selected.amount)} is now settleable to ${selected.retailer.name}. They receive it (net of MDR) on instant settle or T+1.`
+        );
       } else if (d.status === "AWAITING_SECOND_APPROVAL") {
         toast.warning(
           `First approval recorded — a DIFFERENT admin must approve this ${formatINR(selected.amount)} claim before money moves.`
@@ -174,24 +183,66 @@ function ReviewQueueTab() {
     {
       key: "status",
       header: "Status",
-      render: (r) => (
-        <div>
-          <Badge
-            variant={
-              r.status === "APPROVED"
-                ? "success"
-                : r.status === "PENDING"
-                  ? "warning"
-                  : r.status === "AWAITING_SECOND_APPROVAL"
-                    ? "brand"
-                    : "danger"
-            }
-          >
-            {r.status === "AWAITING_SECOND_APPROVAL" ? "NEEDS 2ND APPROVAL" : r.status}
-          </Badge>
-          {r.reviewedBy && <div className="mt-1 text-xs text-ink-500">by {r.reviewedBy}</div>}
-        </div>
-      ),
+      render: (r) => {
+        const variant =
+          r.status === "SETTLED" || r.status === "APPROVED"
+            ? "success"
+            : r.status === "SETTLEABLE"
+              ? "accent"
+              : r.status === "PENDING"
+                ? "warning"
+                : r.status === "AWAITING_SECOND_APPROVAL"
+                  ? "brand"
+                  : "danger";
+        const label =
+          r.status === "AWAITING_SECOND_APPROVAL"
+            ? "NEEDS 2ND APPROVAL"
+            : r.status === "SETTLEABLE"
+              ? "READY TO SETTLE"
+              : r.status;
+        return (
+          <div>
+            <Badge variant={variant as "success" | "warning" | "danger" | "brand" | "accent"}>{label}</Badge>
+          </div>
+        );
+      },
+    },
+    {
+      key: "reviewedById",
+      header: "Approved by",
+      render: (r) => {
+        const hasChecker = Boolean(r.reviewedBy || r.reviewedById);
+        const hasMaker = Boolean(r.firstApprovedBy || r.firstApprovedById);
+        if (!hasChecker && !hasMaker) return <span className="text-xs text-ink-400">—</span>;
+        return (
+          <div className="space-y-1 text-xs">
+            {hasMaker && (
+              <div>
+                <span className="text-ink-400">1st: </span>
+                <span className="font-medium text-ink-700">{r.firstApprovedBy ?? "—"}</span>
+                {r.firstApprovedByCode && <span className="ml-1 font-mono text-ink-500">({r.firstApprovedByCode})</span>}
+                {r.firstApprovedAt && (
+                  <span className="ml-1 text-ink-400">
+                    {new Date(r.firstApprovedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                )}
+              </div>
+            )}
+            {hasChecker && (
+              <div>
+                {hasMaker && <span className="text-ink-400">2nd: </span>}
+                <span className="font-medium text-ink-700">{r.reviewedBy ?? "—"}</span>
+                {r.reviewedByCode && <span className="ml-1 font-mono text-ink-500">({r.reviewedByCode})</span>}
+                {r.reviewedAt && (
+                  <span className="ml-1 text-ink-400">
+                    {new Date(r.reviewedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "id",
@@ -253,7 +304,11 @@ function ReviewQueueTab() {
               </p>
               {selected.status === "AWAITING_SECOND_APPROVAL" && (
                 <p className="mt-2 rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">
-                  Second approval — must be a different admin than the first approver.
+                  Second approval — must be a different admin than the first approver
+                  {selected.firstApprovedBy
+                    ? ` (${selected.firstApprovedBy}${selected.firstApprovedByCode ? ` · ${selected.firstApprovedByCode}` : ""})`
+                    : ""}
+                  .
                 </p>
               )}
             </div>
@@ -304,7 +359,7 @@ function ReviewQueueTab() {
                   ? "Working…"
                   : selected.amount > threshold && selected.status === "PENDING"
                     ? "Approve (stage for 2nd admin)"
-                    : `Approve & credit ${formatINR(selected.amount)}`}
+                    : `Approve ${formatINR(selected.amount)}`}
               </Button>
               <Button variant="outline" onClick={() => act("reject")} disabled={busy}>
                 <XCircle className="mr-1 h-4 w-4" />

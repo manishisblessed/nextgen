@@ -25,7 +25,7 @@ const Body = z
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   let admin;
   try {
-    admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
     await enforceRateLimit(`qr:review:${admin.id}`, RATE_LIMITS.sensitiveWrite);
   } catch (e) {
     return toErrorResponse(e);

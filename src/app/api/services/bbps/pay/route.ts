@@ -13,6 +13,7 @@ import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { bbpsServiceKey } from "@/lib/services/bbpsKey";
 import { getEffectiveRate, withGst } from "@/lib/scheme/resolver";
 import { toNumber } from "@/lib/money";
+import { AuthError } from "@/lib/auth-server";
 
 const Body = z.object({
   billerCode: z.string().min(2),
@@ -39,9 +40,8 @@ export async function POST(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (user.role !== "RETAILER") throw new AuthError("BBPS is available for retailers only", 403);
     await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
-    // will re-check per-category below after body parse
-    // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);
     await enforceRateLimit(`txn:create:${user.id}`, RATE_LIMITS.txnCreate);
     // Transaction PIN — required on every money-moving action (x-txn-pin header).
@@ -62,9 +62,8 @@ export async function POST(req: Request) {
 
   const bbps = getPartner("bbps");
   try {
-    // Scheme-driven pricing (cascade model): the user's assigned scheme slab
-    // sets the charge (fee) and their own commission; ancestors earn margins
-    // via distributeCommission after success. No hardcoded rates.
+    // Scheme-driven pricing: the user's assigned scheme slab
+    // sets the charge (fee). BBPS does not earn commission.
     const service = SERVICE[parsed.data.category];
     // Provider-scoped slabs: a slab pinned to this BBPS partner wins over the
     // any-provider slab for the same band.
@@ -78,7 +77,7 @@ export async function POST(req: Request) {
       service,
       amount: parsed.data.amount,
       fee,
-      commission: toNumber(rate.commissionOwn),
+      commission: toNumber(rate.commission),
       idempotencyKey: parsed.data.idempotencyKey,
       customer: Object.values(parsed.data.customerParams)[0],
       operator: parsed.data.billerCode,

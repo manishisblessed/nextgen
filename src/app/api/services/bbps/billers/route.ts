@@ -8,6 +8,7 @@ import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { bbpsServiceKey } from "@/lib/services/bbpsKey";
+import { AuthError } from "@/lib/auth-server";
 
 /**
  * GET /api/services/bbps/billers?category=CREDIT_CARD
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
   let user;
   try {
     user = await requireAuth();
+    if (user.role !== "RETAILER") throw new AuthError("BBPS is available for retailers only", 403);
     await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
     const catKey = bbpsServiceKey(url.searchParams.get("category") ?? "CREDIT_CARD");
     if (catKey) await assertServiceEnabled(catKey, { name: "Bill Payments", userId: user.id, role: user.role });

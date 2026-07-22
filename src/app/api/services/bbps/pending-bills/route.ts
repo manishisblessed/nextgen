@@ -4,6 +4,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled, isServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
+import { AuthError } from "@/lib/auth-server";
 import { bulkpeBbpsPendingBills } from "@/lib/partners/bulkpe-bbps";
 import { flags } from "@/lib/env";
 
@@ -20,6 +21,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     const user = await requireAuth();
+    if (user.role !== "RETAILER") throw new AuthError("BBPS is available for retailers only", 403);
     await assertServiceEnabled(SERVICE_KEYS.BBPS, { name: "Bill Payments", userId: user.id, role: user.role });
     await enforceRateLimit(`bbps:pending:${user.id}`, RATE_LIMITS.default);
   } catch (e) {

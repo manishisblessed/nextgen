@@ -9,12 +9,15 @@ import {
   CheckCircle2,
   UploadCloud,
   RefreshCw,
+  Zap,
+  Banknote,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
 import { formatINR } from "@/lib/utils";
 
@@ -32,16 +35,33 @@ type Claim = {
   amount: number;
   utr: string;
   paidAt: string;
-  status: "PENDING" | "AWAITING_SECOND_APPROVAL" | "APPROVED" | "REJECTED" | "CLAWED_BACK";
+  status: "PENDING" | "AWAITING_SECOND_APPROVAL" | "APPROVED" | "SETTLEABLE" | "SETTLED" | "REJECTED" | "CLAWED_BACK";
+  netAmount: number | null;
+  mdrAmount: number | null;
+  settledVia: string | null;
+  settledAt: string | null;
   reviewNote: string | null;
   createdAt: string;
   reviewedAt: string | null;
 };
 
-const STATUS_BADGE: Record<Claim["status"], { label: string; variant: "success" | "warning" | "danger" | "brand" }> = {
+type SettleableClaim = {
+  id: string;
+  qrLabel: string;
+  amount: number;
+  utr: string;
+  paidAt: string;
+  settleableAt: string | null;
+  instant: { mdrAmount: number; netAmount: number } | null;
+  t1: { mdrAmount: number; netAmount: number } | null;
+};
+
+const STATUS_BADGE: Record<Claim["status"], { label: string; variant: "success" | "warning" | "danger" | "brand" | "accent" }> = {
   PENDING: { label: "Under review", variant: "warning" },
   AWAITING_SECOND_APPROVAL: { label: "Under review", variant: "warning" },
   APPROVED: { label: "Credited", variant: "success" },
+  SETTLEABLE: { label: "Ready to settle", variant: "accent" },
+  SETTLED: { label: "Settled", variant: "success" },
   REJECTED: { label: "Rejected", variant: "danger" },
   CLAWED_BACK: { label: "Reversed", variant: "danger" },
 };
@@ -49,6 +69,8 @@ const STATUS_BADGE: Record<Claim["status"], { label: string; variant: "success" 
 export default function QrCollectionsPage() {
   const [qr, setQr] = useState<ActiveQr | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
+  const [settleable, setSettleable] = useState<SettleableClaim[]>([]);
+  const [instantEnabled, setInstantEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Claim form
@@ -59,12 +81,26 @@ export default function QrCollectionsPage() {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Instant-settle selection
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [settling, setSettling] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [qrRes, clRes] = await Promise.all([fetch("/api/qr/active"), fetch("/api/qr/claims")]);
+      const [qrRes, clRes, stRes] = await Promise.all([
+        fetch("/api/qr/active"),
+        fetch("/api/qr/claims"),
+        fetch("/api/qr/settlement/pending"),
+      ]);
       if (qrRes.ok) setQr((await qrRes.json()).qr);
       if (clRes.ok) setClaims((await clRes.json()).claims ?? []);
+      if (stRes.ok) {
+        const st = await stRes.json();
+        setSettleable(st.claims ?? []);
+        setInstantEnabled(Boolean(st.instantEnabled));
+      }
     } catch {
       toast.error("Could not load QR data — check your connection.");
     } finally {
@@ -132,8 +168,101 @@ export default function QrCollectionsPage() {
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
   const creditedThisMonth = claims
-    .filter((c) => c.status === "APPROVED" && c.reviewedAt && new Date(c.reviewedAt) >= monthStart)
-    .reduce((s, c) => s + c.amount, 0);
+    .filter((c) => c.status === "SETTLED" && c.settledAt && new Date(c.settledAt) >= monthStart)
+    .reduce((s, c) => s + (c.netAmount ?? c.amount), 0);
+
+  // ── Instant settlement ──
+  const readySettleable = settleable.filter((c) => c.instant !== null);
+  const selectedClaims = readySettleable.filter((c) => selected[c.id]);
+  const allSelected = readySettleable.length > 0 && selectedClaims.length === readySettleable.length;
+  const settleableTotal = settleable.reduce((s, c) => s + c.amount, 0);
+  const instantNet = selectedClaims.reduce((s, c) => s + (c.instant?.netAmount ?? 0), 0);
+  const instantFee = selectedClaims.reduce((s, c) => s + (c.instant?.mdrAmount ?? 0), 0);
+
+  function toggleSel(id: string) {
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+  function toggleAllSel() {
+    if (allSelected) {
+      setSelected({});
+    } else {
+      const next: Record<string, boolean> = {};
+      for (const c of readySettleable) next[c.id] = true;
+      setSelected(next);
+    }
+  }
+
+  async function runInstantSettle() {
+    const ids = selectedClaims.map((c) => c.id);
+    if (ids.length === 0) return;
+    setSettling(true);
+    try {
+      const res = await fetch("/api/qr/settlement/instant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claimIds: ids }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(typeof d.error === "string" ? d.error : "Instant settlement failed");
+        return;
+      }
+      toast.success(
+        `Settled ${d.settled} claim${d.settled === 1 ? "" : "s"} · ${formatINR(d.totalAmount)} credited to your wallet.`
+      );
+      if (d.failed > 0) toast.warning(`${d.failed} could not be settled and will auto-settle T+1.`);
+      setSelected({});
+      refresh();
+    } catch {
+      toast.error("Network error — refresh before retrying to avoid duplicates.");
+    } finally {
+      setSettling(false);
+      setConfirmOpen(false);
+    }
+  }
+
+  const settleCols: Column<SettleableClaim>[] = [
+    {
+      key: "id",
+      header: "",
+      render: (r) =>
+        instantEnabled && r.instant ? (
+          <input type="checkbox" checked={!!selected[r.id]} onChange={() => toggleSel(r.id)} className="h-4 w-4 accent-brand-600" />
+        ) : (
+          <span title="Will auto-settle T+1" className="text-ink-300">—</span>
+        ),
+    },
+    { key: "utr", header: "UTR", render: (r) => <span className="font-mono text-xs">{r.utr}</span> },
+    { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
+    {
+      key: "instant",
+      header: "Instant (now)",
+      align: "right",
+      render: (r) =>
+        r.instant ? (
+          <div>
+            <div className="font-semibold text-emerald-700">{formatINR(r.instant.netAmount)}</div>
+            <div className="text-[10px] text-ink-500">fee {formatINR(r.instant.mdrAmount)}</div>
+          </div>
+        ) : (
+          <span className="text-xs text-ink-400">—</span>
+        ),
+    },
+    {
+      key: "t1",
+      header: "T+1 (tomorrow)",
+      align: "right",
+      render: (r) =>
+        r.t1 ? (
+          <div>
+            <div className="font-medium text-ink-700">{formatINR(r.t1.netAmount)}</div>
+            <div className="text-[10px] text-ink-500">fee {formatINR(r.t1.mdrAmount)}</div>
+          </div>
+        ) : (
+          <span className="text-xs text-ink-400">—</span>
+        ),
+    },
+  ];
 
   const cols: Column<Claim>[] = [
     { key: "utr", header: "UTR", render: (r) => <span className="font-mono text-xs">{r.utr}</span> },
@@ -141,7 +270,17 @@ export default function QrCollectionsPage() {
       key: "amount",
       header: "Amount",
       align: "right",
-      render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span>,
+      render: (r) => (
+        <div>
+          <span className="font-semibold">{formatINR(r.amount)}</span>
+          {r.status === "SETTLED" && r.netAmount != null && (
+            <div className="text-[10px] text-emerald-600">
+              net {formatINR(r.netAmount)}
+              {r.settledVia === "INSTANT_BUTTON" ? " · instant" : r.settledVia === "T1_CRON" ? " · T+1" : ""}
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       key: "paidAt",
@@ -179,10 +318,74 @@ export default function QrCollectionsPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Under review" value={formatINR(pendingAmount)} icon={Clock} accent="accent" />
-        <StatCard label="Credited this month" value={formatINR(creditedThisMonth)} icon={CheckCircle2} accent="emerald" />
-        <StatCard label="Total claims" value={String(claims.length)} icon={IndianRupee} accent="brand" />
+        <StatCard label="Ready to settle" value={formatINR(settleableTotal)} icon={Banknote} accent="brand" />
+        <StatCard label="Settled this month" value={formatINR(creditedThisMonth)} icon={CheckCircle2} accent="emerald" />
         <StatCard label="Active QR" value={qr ? "Live" : "—"} icon={QrCode} accent="violet" />
       </div>
+
+      {/* Ready to settle — instant or auto T+1 */}
+      {settleable.length > 0 && (
+        <div className="space-y-3 rounded-2xl border border-brand-100 bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-display text-base font-semibold text-ink-900">Ready to settle</h3>
+              <p className="text-xs text-ink-500">
+                {instantEnabled ? (
+                  <>
+                    Approved payments awaiting settlement. Instant-settle the ones you need now (at your scheme&apos;s
+                    instant rate); the rest settle automatically on the next day (T+1). Each is settled only once.
+                  </>
+                ) : (
+                  <>
+                    Approved payments awaiting settlement. These settle automatically on the next day (T+1) at your
+                    standard rate — no action needed.
+                  </>
+                )}
+              </p>
+            </div>
+            {instantEnabled && (
+              <div className="flex items-center gap-3">
+                {readySettleable.length > 0 && (
+                  <button type="button" onClick={toggleAllSel} className="text-xs font-semibold text-brand-700">
+                    {allSelected ? "Clear" : "Select all"}
+                  </button>
+                )}
+                {selectedClaims.length > 0 && (
+                  <span className="text-xs text-ink-600">
+                    fee {formatINR(instantFee)} · you get{" "}
+                    <span className="font-semibold text-emerald-700">{formatINR(instantNet)}</span>
+                  </span>
+                )}
+                <Button size="sm" disabled={selectedClaims.length === 0 || settling} onClick={() => setConfirmOpen(true)}>
+                  <Zap className="h-4 w-4" /> Instant settle
+                </Button>
+              </div>
+            )}
+          </div>
+          <DataTable
+            columns={settleCols}
+            data={settleable}
+            loading={loading}
+            empty="Nothing awaiting settlement."
+          />
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        busy={settling}
+        title={`Instant settle ${selectedClaims.length} claim${selectedClaims.length === 1 ? "" : "s"}?`}
+        description={
+          <>
+            <span className="font-semibold text-ink-900">{formatINR(instantNet)}</span> will be credited to your
+            wallet now (instant fee {formatINR(instantFee)}). This cannot be undone, and these claims will not
+            settle again on T+1.
+          </>
+        }
+        confirmLabel="Settle now"
+        onConfirm={runInstantSettle}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* The QR to collect on */}

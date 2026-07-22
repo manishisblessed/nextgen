@@ -8,6 +8,7 @@ import { assertCaptcha } from "@/lib/security/captcha";
 import { assertPasswordNotBreached } from "@/lib/security/breachedPassword";
 import { logSecurityEvent, clientIp } from "@/lib/security/audit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
+import { generateNextUserCode } from "@/lib/userCode";
 
 const Body = z.object({
   name: z.string().min(2).max(100),
@@ -61,6 +62,8 @@ export async function POST(req: Request) {
   // makes the account non-transaction-capable: the liveness gate blocks all
   // money movement and the dashboard routes them to /dashboard/liveness to
   // record their 10-second video before they can transact. Login/read stay open.
+  const userCode = await generateNextUserCode(role);
+
   const user = await prisma.user.create({
     data: {
       name,
@@ -69,6 +72,7 @@ export async function POST(req: Request) {
       passwordHash,
       role,
       status: "PENDING_KYC",
+      userCode,
     },
   });
 

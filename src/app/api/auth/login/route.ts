@@ -180,6 +180,7 @@ export async function POST(req: Request) {
     // include a mobile token for native clients.
     const sessionUser = {
       id: user.id,
+      userCode: (user as { userCode?: string | null }).userCode ?? null,
       name: user.name,
       email: user.email,
       phone: user.phone,

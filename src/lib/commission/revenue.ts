@@ -1,6 +1,6 @@
 import type { Prisma, ServiceCode } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { creditWallet } from "@/lib/ledger";
+import { creditWallet, debitWallet } from "@/lib/ledger";
 import { dec, gt, sub, round, toNumber, type Money } from "@/lib/money";
 
 /**
@@ -87,4 +87,70 @@ export async function creditPlatformRevenue(
   }
 
   return toNumber(revenue);
+}
+
+/**
+ * Credit the company's MDR margin (serviceCharge − vendorCharge) for a
+ * transaction to the platform Revenue Wallet (the REVENUE book on the revenue
+ * account). This is the pool from which upline (DT/MD/SD) commissions are then
+ * paid out. Idempotency-keyed (`revenue-margin:{txnId}`) so replays/duplicate
+ * webhook deliveries never double-credit.
+ *
+ * @returns the revenue account id when credited (needed to fund commissions),
+ *          or null when there is no revenue account / nothing to credit.
+ */
+export async function creditMdrMargin(
+  txnId: string,
+  service: ServiceCode,
+  margin: Money | number,
+  tx?: Prisma.TransactionClient
+): Promise<string | null> {
+  const accountId = await getRevenueAccountId(tx);
+  if (!accountId) return null;
+  if (!gt(dec(margin), 0)) return accountId;
+
+  await creditWallet(
+    {
+      userId: accountId,
+      amount: round(margin),
+      reason: "MDR_MARGIN",
+      walletType: "REVENUE",
+      refType: "Transaction",
+      refId: txnId,
+      note: `MDR margin on ${service}`,
+      idempotencyKey: `revenue-margin:${txnId}`,
+    },
+    tx
+  );
+  return accountId;
+}
+
+/**
+ * Debit a gross commission from the Revenue Wallet to fund an upline payout.
+ * Idempotency-keyed per (txn, recipient) so replays never double-debit. The
+ * commission is always funded from the same-transaction margin credited by
+ * `creditMdrMargin`, so the revenue wallet can never go negative.
+ */
+export async function debitRevenueForCommission(
+  accountId: string,
+  txnId: string,
+  recipientUserId: string,
+  gross: Money | number,
+  service: ServiceCode,
+  tx?: Prisma.TransactionClient
+): Promise<void> {
+  if (!gt(dec(gross), 0)) return;
+  await debitWallet(
+    {
+      userId: accountId,
+      amount: round(gross),
+      reason: "COMMISSION_PAYOUT",
+      walletType: "REVENUE",
+      refType: "Transaction",
+      refId: txnId,
+      note: `Commission payout funding on ${service} → ${recipientUserId}`,
+      idempotencyKey: `revenue-comm-debit:${txnId}:${recipientUserId}`,
+    },
+    tx
+  );
 }

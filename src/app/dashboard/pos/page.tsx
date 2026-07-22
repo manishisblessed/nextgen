@@ -17,6 +17,12 @@ import {
   AlertCircle,
   Wrench,
   RotateCcw,
+  Banknote,
+  Zap,
+  Clock,
+  Gift,
+  Trophy,
+  PartyPopper,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -104,10 +110,22 @@ function fmtTime(iso: string) {
   });
 }
 
-type Tab = "machines" | "transactions";
+type Tab = "machines" | "transactions" | "settlements" | "free-rent";
 
 export default function PosPage() {
+  const { data: authSession } = useSession();
+  const isRetailer = (authSession?.user as { role?: string } | undefined)?.role === "RETAILER";
   const [activeTab, setActiveTab] = useState<Tab>("transactions");
+
+  const tabs = useMemo(() => {
+    const base: { id: Tab; label: string; icon: typeof ArrowLeftRight }[] = [
+      { id: "transactions", label: "Live Transactions", icon: ArrowLeftRight },
+      { id: "settlements", label: "Instant Settlement", icon: Banknote },
+      { id: "machines", label: "POS Machines", icon: Monitor },
+    ];
+    if (isRetailer) base.push({ id: "free-rent", label: "Free Rent Target", icon: Gift });
+    return base;
+  }, [isRetailer]);
 
   return (
     <div className="space-y-6">
@@ -124,27 +142,184 @@ export default function PosPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
-        {(["transactions", "machines"] as const).map((tab) => (
+        {tabs.map(({ id, label, icon: Icon }) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+            key={id}
+            onClick={() => setActiveTab(id)}
             className={cn(
               "flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all",
-              activeTab === tab
+              activeTab === id
                 ? "bg-white text-ink-900 shadow-sm"
                 : "text-ink-500 hover:text-ink-700"
             )}
           >
-            {tab === "transactions" ? (
-              <span className="flex items-center justify-center gap-2"><ArrowLeftRight className="h-4 w-4" /> Live Transactions</span>
-            ) : (
-              <span className="flex items-center justify-center gap-2"><Monitor className="h-4 w-4" /> POS Machines</span>
-            )}
+            <span className="flex items-center justify-center gap-2"><Icon className="h-4 w-4" /> {label}</span>
           </button>
         ))}
       </div>
 
-      {activeTab === "transactions" ? <TransactionsTab /> : <MachinesTab />}
+      {activeTab === "transactions" ? (
+        <TransactionsTab />
+      ) : activeTab === "settlements" ? (
+        <SettlementsTab />
+      ) : activeTab === "free-rent" ? (
+        <FreeRentTab />
+      ) : (
+        <MachinesTab />
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// FREE RENT TARGET TAB — per-machine progress toward waived rent (retailer)
+// ═══════════════════════════════════════════════════════════════════════
+
+type RentalTargetMachine = {
+  subscriptionId: string;
+  machine: { id: string; serial: string | null; tid: string | null; model: string | null };
+  planName: string;
+  billingDay: number;
+  rent: number;
+  businessDone: number;
+  target: number;
+  remaining: number;
+  achieved: boolean;
+  progress: number;
+  cycleStart: string;
+  nextBilling: string;
+};
+
+type RentalTargetResponse = {
+  enabled: boolean;
+  target: number;
+  machines: RentalTargetMachine[];
+};
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function FreeRentTab() {
+  const { data, error, isLoading, mutate } = useSWR<RentalTargetResponse>(
+    "/api/pos/rental-target",
+    fetcher,
+    { revalidateOnFocus: false, refreshInterval: 30000 }
+  );
+
+  const machines = data?.machines ?? [];
+  const enabled = data?.enabled ?? false;
+  const achievedCount = machines.filter((m) => m.achieved).length;
+  const totalSaved = machines.filter((m) => m.achieved).reduce((s, m) => s + m.rent, 0);
+
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Machines on target" value={`${achievedCount}/${machines.length}`} icon={Trophy} accent="emerald" />
+        <StatCard label="Rent waived this cycle" value={formatINR(totalSaved)} icon={Gift} accent="brand" />
+        <StatCard label="Target per machine" value={data ? formatINR(data.target) : "..."} icon={IndianRupee} accent="violet" />
+        <StatCard label="Your machines" value={String(machines.length)} icon={Monitor} accent="accent" />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button variant="outline" size="sm" onClick={() => mutate()} title="Refresh">
+          <RefreshCw className="h-4 w-4" /> Refresh
+        </Button>
+      </div>
+
+      {!enabled && (
+        <div className="flex items-center gap-2 rounded-2xl border border-ink-200 bg-ink-50 p-4 text-sm text-ink-600">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          The free-rent programme is currently paused. Your progress is still tracked and shown below.
+        </div>
+      )}
+
+      {error ? (
+        <ErrorBanner message={error instanceof Error ? error.message : "Failed to load your rent target."} />
+      ) : isLoading ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-ink-100 bg-white p-6 text-sm text-ink-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading your machines...
+        </div>
+      ) : machines.length === 0 ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-ink-200 bg-ink-50 p-4 text-sm text-ink-600">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          You have no active POS rental subscriptions yet.
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {machines.map((m) => (
+            <RentTargetCard key={m.subscriptionId} m={m} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function RentTargetCard({ m }: { m: RentalTargetMachine }) {
+  const label = m.machine.tid ? `TID ${m.machine.tid}` : m.machine.serial ?? m.machine.id.slice(0, 8);
+  const pct = Math.round(m.progress * 100);
+
+  if (m.achieved) {
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-xs font-semibold text-ink-700">{label}</p>
+            <p className="text-[11px] text-ink-400">{m.machine.model ?? m.planName}</p>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white">
+            <PartyPopper className="h-3.5 w-3.5" /> Rent FREE
+          </span>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 text-emerald-700">
+          <Trophy className="h-5 w-5" />
+          <p className="text-sm font-bold">Congratulations — target achieved!</p>
+        </div>
+        <p className="mt-1 text-xs text-ink-600">
+          This machine did <span className="font-semibold text-ink-900">{formatINR(m.businessDone)}</span> of business
+          this cycle. Its <span className="font-semibold text-ink-900">{formatINR(m.rent)}</span> rent is waived —
+          nothing will be debited on {fmtDate(m.nextBilling)}.
+        </p>
+
+        <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-emerald-100">
+          <div className="h-full rounded-full bg-emerald-500" style={{ width: "100%" }} />
+        </div>
+        <div className="mt-1.5 flex justify-between text-[11px] text-ink-500">
+          <span>{formatINR(m.businessDone)}</span>
+          <span>Target {formatINR(m.target)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-ink-100 bg-white p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-mono text-xs font-semibold text-ink-700">{label}</p>
+          <p className="text-[11px] text-ink-400">{m.machine.model ?? m.planName}</p>
+        </div>
+        <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-semibold text-ink-600">{pct}%</span>
+      </div>
+
+      <p className="mt-4 text-sm text-ink-700">
+        Do <span className="font-bold text-brand-700">{formatINR(m.remaining)}</span> more business before{" "}
+        <span className="font-semibold text-ink-900">{fmtDate(m.nextBilling)}</span> to get this machine&apos;s{" "}
+        <span className="font-semibold text-ink-900">{formatINR(m.rent)}</span> rent free.
+      </p>
+
+      <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-ink-100">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all"
+          style={{ width: `${Math.max(2, pct)}%` }}
+        />
+      </div>
+      <div className="mt-1.5 flex justify-between text-[11px] text-ink-500">
+        <span>{formatINR(m.businessDone)} done</span>
+        <span>Target {formatINR(m.target)}</span>
+      </div>
     </div>
   );
 }
@@ -509,8 +684,27 @@ function TransactionsTab() {
         const res = await fetch(`/api/pos/export-status/${jobId}`);
         const d = await res.json();
         if (d.data?.job?.status === "COMPLETED" && d.data.job.file_url) {
-          window.open(d.data.job.file_url, "_blank");
-          toast.success("Export ready — download opened in a new tab.");
+          const fileUrl = d.data.job.file_url;
+          try {
+            const blob = await fetch(fileUrl).then((r) => r.blob());
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `pos-export-${jobId}.${fileUrl.includes(".xlsx") ? "xlsx" : fileUrl.includes(".pdf") ? "pdf" : "csv"}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch {
+            const a = document.createElement("a");
+            a.href = fileUrl;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+          toast.success("Export ready — download started.");
           setExporting(false);
           return;
         }
@@ -530,6 +724,7 @@ function TransactionsTab() {
     { key: "terminal_id", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.terminal_id}</span> },
     { key: "payment_mode", header: "Mode", render: (r) => <Badge variant="default">{r.payment_mode}</Badge> },
     { key: "card_brand", header: "Card", render: (r) => r.payment_mode === "CARD" ? `${r.card_brand} ${r.card_type}` : "—" },
+    { key: "card_classification", header: "Classification", render: (r) => r.card_classification ? <Badge variant="accent">{r.card_classification}</Badge> : "—" },
     { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold text-ink-900">{formatINR(parseFloat(r.amount))}</span> },
     { key: "status", header: "Status", render: (r) => statusBadge(r.status) },
     { key: "customer_name", header: "Customer", render: (r) => <span className="max-w-[140px] truncate block text-xs">{cleanName(r.customer_name)}</span> },
@@ -703,6 +898,220 @@ function TransactionsTab() {
           hasPrev={pagination.has_prev} hasNext={pagination.has_next}
           onPrev={() => setPage((p) => Math.max(1, p - 1))} onNext={() => setPage((p) => p + 1)} />
       )}
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SETTLEMENTS TAB — instant-settle chosen captures now; rest auto-settle T+1
+// ═══════════════════════════════════════════════════════════════════════
+
+type PendingSettlement = {
+  id: string;
+  transactionRef: string;
+  grossAmount: number;
+  paymentMode: string | null;
+  capturedAt: string;
+  t1: { mdrAmount: number; netAmount: number };
+  instant: { mdrAmount: number; netAmount: number } | null;
+};
+
+function SettlementsTab() {
+  const { data, error, isLoading, mutate } = useSWR<{ entries: PendingSettlement[]; instantEnabled?: boolean }>(
+    "/api/pos/settlement/pending",
+    fetcher,
+    { revalidateOnFocus: false, refreshInterval: 15000 }
+  );
+
+  const entries = useMemo(() => data?.entries ?? [], [data]);
+  const instantEnabled = data?.instantEnabled ?? false;
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Only entries with a resolvable instant quote can be instantly settled.
+  const settleable = useMemo(() => entries.filter((e) => e.instant !== null), [entries]);
+  const selectedEntries = useMemo(
+    () => settleable.filter((e) => selected[e.id]),
+    [settleable, selected]
+  );
+  const allSelected = settleable.length > 0 && selectedEntries.length === settleable.length;
+
+  const totalInstantNet = selectedEntries.reduce((s, e) => s + (e.instant?.netAmount ?? 0), 0);
+  const totalInstantFee = selectedEntries.reduce(
+    (s, e) => s + (e.instant ? e.instant.mdrAmount : 0),
+    0
+  );
+
+  function toggle(id: string) {
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+  function toggleAll() {
+    if (allSelected) {
+      setSelected({});
+    } else {
+      const next: Record<string, boolean> = {};
+      for (const e of settleable) next[e.id] = true;
+      setSelected(next);
+    }
+  }
+
+  async function runInstantSettle() {
+    const ids = selectedEntries.map((e) => e.id);
+    if (ids.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/pos/settlement/instant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryIds: ids }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(typeof d.error === "string" ? d.error : "Instant settlement failed");
+        return;
+      }
+      toast.success(
+        `Settled ${d.settled} transaction${d.settled === 1 ? "" : "s"} · ${formatINR(d.totalAmount)} credited to your wallet.`
+      );
+      if (d.failed > 0) toast.warning(`${d.failed} could not be settled and will auto-settle T+1.`);
+      setSelected({});
+      mutate();
+    } catch {
+      toast.error("Network error — refresh before retrying to avoid duplicates.");
+    } finally {
+      setBusy(false);
+      setConfirmOpen(false);
+    }
+  }
+
+  const cols: Column<PendingSettlement>[] = [
+    {
+      key: "id",
+      header: allSelected ? "✓" : "",
+      render: (r) =>
+        instantEnabled && r.instant ? (
+          <input
+            type="checkbox"
+            checked={!!selected[r.id]}
+            onChange={() => toggle(r.id)}
+            className="h-4 w-4 accent-brand-600"
+          />
+        ) : (
+          <span title="Will auto-settle T+1" className="text-ink-300">—</span>
+        ),
+    },
+    { key: "capturedAt", header: "Captured", render: (r) => <span className="text-xs">{fmtTime(r.capturedAt)}</span> },
+    { key: "transactionRef", header: "Ref", render: (r) => <span className="font-mono text-xs">{r.transactionRef.slice(-12)}</span> },
+    { key: "paymentMode", header: "Mode", render: (r) => <Badge variant="default">{r.paymentMode ?? "—"}</Badge> },
+    { key: "grossAmount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.grossAmount)}</span> },
+    {
+      key: "instant",
+      header: "Instant (now)",
+      align: "right",
+      render: (r) =>
+        r.instant ? (
+          <div>
+            <div className="font-semibold text-emerald-700">{formatINR(r.instant.netAmount)}</div>
+            <div className="text-[10px] text-ink-500">fee {formatINR(r.instant.mdrAmount)}</div>
+          </div>
+        ) : (
+          <span className="text-xs text-ink-400">—</span>
+        ),
+    },
+    {
+      key: "t1",
+      header: "T+1 (tomorrow)",
+      align: "right",
+      render: (r) => (
+        <div>
+          <div className="font-medium text-ink-700">{formatINR(r.t1.netAmount)}</div>
+          <div className="text-[10px] text-ink-500">fee {formatINR(r.t1.mdrAmount)}</div>
+        </div>
+      ),
+    },
+  ];
+
+  const pendingTotal = entries.reduce((s, e) => s + e.grossAmount, 0);
+
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Unsettled transactions" value={String(entries.length)} icon={Clock} accent="accent" />
+        <StatCard label="Unsettled amount" value={formatINR(pendingTotal)} icon={IndianRupee} accent="brand" />
+        <StatCard label="Selected" value={String(selectedEntries.length)} icon={Zap} accent="violet" />
+        <StatCard label="Instant payout (selected)" value={formatINR(totalInstantNet)} icon={Banknote} accent="emerald" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="outline" size="sm" onClick={() => mutate()} title="Refresh">
+          <RefreshCw className="h-4 w-4" /> Refresh
+        </Button>
+        {instantEnabled && settleable.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={toggleAll}>
+            {allSelected ? "Clear selection" : "Select all"}
+          </Button>
+        )}
+        {instantEnabled && (
+          <div className="ml-auto flex items-center gap-3">
+            {selectedEntries.length > 0 && (
+              <span className="text-xs text-ink-600">
+                {selectedEntries.length} selected · fee {formatINR(totalInstantFee)} · you get{" "}
+                <span className="font-semibold text-emerald-700">{formatINR(totalInstantNet)}</span>
+              </span>
+            )}
+            <Button
+              size="sm"
+              disabled={selectedEntries.length === 0 || busy}
+              onClick={() => setConfirmOpen(true)}
+            >
+              <Zap className="h-4 w-4" /> Instant settle
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {instantEnabled ? (
+        <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3 text-xs text-ink-600">
+          Pick the transactions you want paid out <strong>now</strong> — they&apos;re credited instantly at your
+          scheme&apos;s instant rate. Everything you leave unselected settles automatically on the next day (T+1)
+          at your standard rate. A transaction is only ever settled once.
+        </div>
+      ) : (
+        <div className="rounded-xl border border-ink-100 bg-ink-50/60 p-3 text-xs text-ink-600">
+          Instant settlement is currently <strong>disabled</strong>. Your captured transactions settle automatically
+          on the next day (T+1) at your standard rate — no action needed.
+        </div>
+      )}
+
+      {error ? (
+        <ErrorBanner message={error instanceof Error ? error.message : "Failed to load settlements."} />
+      ) : (
+        <DataTable
+          title="Unsettled POS proceeds"
+          description="Captured transactions awaiting settlement to your wallet."
+          columns={cols}
+          data={entries}
+          loading={isLoading}
+          empty="Nothing to settle — all your captured transactions are settled."
+        />
+      )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        busy={busy}
+        title={`Instant settle ${selectedEntries.length} transaction${selectedEntries.length === 1 ? "" : "s"}?`}
+        description={
+          <>
+            <span className="font-semibold text-ink-900">{formatINR(totalInstantNet)}</span> will be credited to
+            your wallet now (instant fee {formatINR(totalInstantFee)}). This cannot be undone, and these
+            transactions will not settle again on T+1.
+          </>
+        }
+        confirmLabel="Settle now"
+        onConfirm={runInstantSettle}
+      />
     </>
   );
 }

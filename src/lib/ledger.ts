@@ -1,6 +1,7 @@
 import { Prisma, type WalletReason, type WalletTxn, type WalletType } from "@prisma/client";
 import { prisma } from "./db";
-import { add, sub, gte, dec, type Money } from "./money";
+import { add, sub, gte, gt, lt, dec, type Money } from "./money";
+import { getSuspenseAccountId } from "./wallet/suspense";
 
 /**
  * Canonical wallet ledger.
@@ -17,11 +18,17 @@ import { add, sub, gte, dec, type Money } from "./money";
  * Balance model (authorization-hold style):
  *   - walletBalance  = total funds owned by the user
  *   - heldBalance    = funds reserved for in-flight operations (pending payout)
- *   - spendable      = walletBalance - heldBalance
+ *   - lienBalance    = outstanding admin lien (chargeback/fraud) debt still owed;
+ *                      invisible to the user but frozen from spending
+ *   - spendable      = max(0, walletBalance - heldBalance - lienBalance)
  *
  * Holds/releases are *reservations* and do NOT create a WalletTxn (they are not
  * real money movements). The actual DEBIT lands on `captureHold` when the
  * operation is confirmed, so the passbook reflects only settled movements.
+ *
+ * Liens recover EAGERLY: any PRIMARY credit that lands for a user with an active
+ * lien is immediately swept toward the Company Suspense account (see
+ * `sweepLiensForUser`), so recovered money never becomes spendable.
  */
 
 export type LedgerErrorCode =
@@ -53,10 +60,49 @@ async function lockUser(tx: Tx, userId: string) {
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
   const user = await tx.user.findUnique({
     where: { id: userId },
-    select: { id: true, walletBalance: true, heldBalance: true, aepsBalance: true },
+    select: {
+      id: true,
+      walletBalance: true,
+      heldBalance: true,
+      lienBalance: true,
+      aepsBalance: true,
+      revenueBalance: true,
+    },
   });
   if (!user) throw new LedgerError("INVALID_AMOUNT", "User not found");
   return user;
+}
+
+/**
+ * Spendable balance on the PRIMARY book: total minus in-flight holds minus the
+ * outstanding lien, floored at zero so a lien larger than the balance can never
+ * produce a negative spendable.
+ */
+function primarySpendable(user: {
+  walletBalance: Money;
+  heldBalance: Money;
+  lienBalance?: Money | null;
+}): Money {
+  const lien = user.lienBalance ?? dec(0);
+  const s = sub(sub(user.walletBalance, user.heldBalance), lien);
+  return gt(s, 0) ? s : dec(0);
+}
+
+/** The balance column backing a wallet book. */
+function bookBalance(
+  user: { walletBalance: Money; aepsBalance: Money; revenueBalance: Money },
+  walletType: WalletType
+): Money {
+  if (walletType === "AEPS") return user.aepsBalance;
+  if (walletType === "REVENUE") return user.revenueBalance;
+  return user.walletBalance;
+}
+
+/** The Prisma update payload that writes a wallet book's new balance. */
+function bookUpdate(walletType: WalletType, newBalance: Money) {
+  if (walletType === "AEPS") return { aepsBalance: newBalance };
+  if (walletType === "REVENUE") return { revenueBalance: newBalance };
+  return { walletBalance: newBalance };
 }
 
 function assertPositive(amount: Money | string | number) {
@@ -85,23 +131,30 @@ export type WalletMovement = {
   walletType?: WalletType;
 };
 
-/** Credit (add) funds to a user's wallet (PRIMARY or AEPS book). */
+/**
+ * Credit (add) funds to a user's wallet (PRIMARY / AEPS / REVENUE book).
+ *
+ * If the credit lands on the PRIMARY book and the user has an active lien, the
+ * newly-credited funds are immediately swept toward recovery (see
+ * `sweepLiensForUser`) inside the same transaction — so money owed under a lien
+ * never becomes spendable, no matter which rail credited it.
+ */
 export async function creditWallet(m: WalletMovement, tx?: Tx): Promise<WalletTxn> {
   assertPositive(m.amount);
   const walletType: WalletType = m.walletType ?? "PRIMARY";
   return withTx(tx, async (t) => {
     if (m.idempotencyKey) {
       const existing = await findByIdempotencyKey(t, m.idempotencyKey);
-      if (existing) return existing;
+      if (existing) return existing; // already applied — do not re-sweep
     }
     const user = await lockUser(t, m.userId);
-    const current = walletType === "AEPS" ? user.aepsBalance : user.walletBalance;
+    const current = bookBalance(user, walletType);
     const newBalance = add(current, m.amount);
     await t.user.update({
       where: { id: m.userId },
-      data: walletType === "AEPS" ? { aepsBalance: newBalance } : { walletBalance: newBalance },
+      data: bookUpdate(walletType, newBalance),
     });
-    return t.walletTxn.create({
+    const txn = await t.walletTxn.create({
       data: {
         userId: m.userId,
         walletType,
@@ -115,6 +168,12 @@ export async function creditWallet(m: WalletMovement, tx?: Tx): Promise<WalletTx
         idempotencyKey: m.idempotencyKey,
       },
     });
+    // Eager lien recovery — only the PRIMARY book carries liens. Guarded so the
+    // suspense account's own recovery credit never recurses back into a sweep.
+    if (walletType === "PRIMARY" && user.lienBalance && gt(user.lienBalance, 0)) {
+      await sweepLiensForUser(t, m.userId);
+    }
+    return txn;
   });
 }
 
@@ -128,17 +187,17 @@ export async function debitWallet(m: WalletMovement, tx?: Tx): Promise<WalletTxn
       if (existing) return existing;
     }
     const user = await lockUser(t, m.userId);
-    // AEPS book has no holds — the whole balance is spendable.
+    // Only the PRIMARY book has holds/liens; AEPS/REVENUE books are fully spendable.
     const spendable =
-      walletType === "AEPS" ? user.aepsBalance : sub(user.walletBalance, user.heldBalance);
+      walletType === "PRIMARY" ? primarySpendable(user) : bookBalance(user, walletType);
     if (!gte(spendable, m.amount)) {
       throw new LedgerError("INSUFFICIENT_FUNDS");
     }
-    const current = walletType === "AEPS" ? user.aepsBalance : user.walletBalance;
+    const current = bookBalance(user, walletType);
     const newBalance = sub(current, m.amount);
     await t.user.update({
       where: { id: m.userId },
-      data: walletType === "AEPS" ? { aepsBalance: newBalance } : { walletBalance: newBalance },
+      data: bookUpdate(walletType, newBalance),
     });
     return t.walletTxn.create({
       data: {
@@ -172,7 +231,7 @@ export async function holdFunds(m: HoldInput, tx?: Tx): Promise<{ heldBalance: M
   assertPositive(m.amount);
   return withTx(tx, async (t) => {
     const user = await lockUser(t, m.userId);
-    const spendable = sub(user.walletBalance, user.heldBalance);
+    const spendable = primarySpendable(user);
     if (!gte(spendable, m.amount)) {
       throw new LedgerError("INSUFFICIENT_FUNDS");
     }
@@ -240,17 +299,156 @@ export async function captureHold(m: WalletMovement, tx?: Tx): Promise<WalletTxn
   });
 }
 
+/**
+ * Eagerly recover a user's active liens from their currently-available funds
+ * (walletBalance − heldBalance), oldest lien first. Each swept rupee moves via
+ * real double-entry: a user PRIMARY DEBIT (reason LIEN, note "Recovery against
+ * txn #…") and a matching CREDIT into the Company Suspense account. Recovered
+ * amounts reduce both the user's walletBalance and their lienBalance in lock-step
+ * (so spendable is unaffected — the money was never spendable), and a lien that
+ * reaches its full amount is closed (status RECOVERED).
+ *
+ * MUST be called inside a transaction. Held funds are never touched. Safe to run
+ * repeatedly — it only ever moves outstanding, currently-available money.
+ */
+export async function sweepLiensForUser(tx: Tx, userId: string): Promise<void> {
+  const suspenseId = await getSuspenseAccountId();
+  if (suspenseId === userId) return; // never sweep the suspense account itself
+
+  const liens = await tx.walletLien.findMany({
+    where: { targetUserId: userId, status: "ACTIVE" },
+    orderBy: { createdAt: "asc" },
+  });
+  if (liens.length === 0) return;
+
+  const user = await lockUser(tx, userId);
+  let available: Money = sub(user.walletBalance, user.heldBalance);
+  if (!gt(available, 0)) return;
+
+  let userBalance = user.walletBalance as Money;
+  let lienBalance = user.lienBalance as Money;
+  let suspenseBalance: Money = dec(0);
+  let suspenseLocked = false;
+  let moved = false;
+
+  for (const lien of liens) {
+    const outstanding = sub(lien.amount, lien.recoveredAmount);
+    if (!gt(outstanding, 0)) continue;
+    const s = lt(outstanding, available) ? outstanding : available; // min(outstanding, available)
+    if (!gt(s, 0)) break;
+
+    if (!suspenseLocked) {
+      const suspense = await lockUser(tx, suspenseId);
+      suspenseBalance = suspense.walletBalance as Money;
+      suspenseLocked = true;
+    }
+
+    userBalance = sub(userBalance, s);
+    lienBalance = sub(lienBalance, s);
+    suspenseBalance = add(suspenseBalance, s);
+    const newRecovered = add(lien.recoveredAmount, s);
+    const fullyRecovered = gte(newRecovered, lien.amount);
+    const noteRef = lien.refType === "Transaction" && lien.refId ? lien.refId : lien.id;
+
+    await tx.walletTxn.create({
+      data: {
+        userId,
+        walletType: "PRIMARY",
+        direction: "DEBIT",
+        reason: "LIEN",
+        amount: new Prisma.Decimal(s),
+        balanceAfter: new Prisma.Decimal(userBalance),
+        refType: "WalletLien",
+        refId: lien.id,
+        note: `Recovery against txn #${noteRef}`,
+      },
+    });
+    await tx.walletTxn.create({
+      data: {
+        userId: suspenseId,
+        walletType: "PRIMARY",
+        direction: "CREDIT",
+        reason: "LIEN",
+        amount: new Prisma.Decimal(s),
+        balanceAfter: new Prisma.Decimal(suspenseBalance),
+        refType: "WalletLien",
+        refId: lien.id,
+        note: `Lien recovery from ${userId} (txn #${noteRef})`,
+      },
+    });
+    await tx.walletLien.update({
+      where: { id: lien.id },
+      data: {
+        recoveredAmount: new Prisma.Decimal(newRecovered),
+        ...(fullyRecovered ? { status: "RECOVERED", closedAt: new Date() } : {}),
+      },
+    });
+
+    moved = true;
+    available = sub(available, s);
+    if (!gt(available, 0)) break;
+  }
+
+  if (!moved) return;
+  await tx.user.update({
+    where: { id: userId },
+    data: { walletBalance: userBalance, lienBalance },
+  });
+  await tx.user.update({
+    where: { id: suspenseId },
+    data: { walletBalance: suspenseBalance },
+  });
+}
+
+/**
+ * Place a lien hold of `amount` on a user (adds to lienBalance → reduces
+ * spendable) and immediately sweep whatever is currently available toward it.
+ * The caller MUST have created the ACTIVE WalletLien row first, in the same
+ * transaction, so the sweep can see it. MUST run inside a transaction.
+ */
+export async function placeLienHold(userId: string, amount: Money | string | number, tx: Tx): Promise<void> {
+  assertPositive(amount);
+  const user = await lockUser(tx, userId);
+  await tx.user.update({
+    where: { id: userId },
+    data: { lienBalance: add(user.lienBalance, amount) },
+  });
+  await sweepLiensForUser(tx, userId);
+}
+
+/**
+ * Release a lien's still-outstanding portion back to the user's spendable
+ * balance (no money moves — already-recovered funds stay with the company).
+ * MUST run inside a transaction.
+ */
+export async function releaseLienHold(userId: string, remaining: Money | string | number, tx: Tx): Promise<void> {
+  const user = await lockUser(tx, userId);
+  const next = sub(user.lienBalance, remaining);
+  await tx.user.update({
+    where: { id: userId },
+    data: { lienBalance: gt(next, 0) ? next : dec(0) },
+  });
+}
+
 /** Read-only snapshot of a user's balances. */
 export async function getBalances(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { walletBalance: true, heldBalance: true, aepsBalance: true },
+    select: {
+      walletBalance: true,
+      heldBalance: true,
+      lienBalance: true,
+      aepsBalance: true,
+      revenueBalance: true,
+    },
   });
   if (!user) throw new LedgerError("INVALID_AMOUNT", "User not found");
   return {
     walletBalance: user.walletBalance as Money,
     heldBalance: user.heldBalance as Money,
+    lienBalance: user.lienBalance as Money,
     aepsBalance: user.aepsBalance as Money,
-    spendable: sub(user.walletBalance, user.heldBalance),
+    revenueBalance: user.revenueBalance as Money,
+    spendable: primarySpendable(user),
   };
 }

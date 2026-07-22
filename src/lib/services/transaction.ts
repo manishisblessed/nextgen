@@ -7,7 +7,7 @@ import { assertTransactionRisk } from "../risk/engine";
 import { assertAccountActive } from "../security/accountGate";
 import { requireActiveScheme } from "../scheme/gate";
 import { emitWebhookEvent } from "../platform/webhooks";
-import { distributeCommission } from "../commission/distribute";
+import { distributeCommission, distributeMdrCommission, mdrKindForService } from "../commission/distribute";
 import type { PartnerResult } from "../partners/types";
 
 /**
@@ -174,27 +174,40 @@ export async function runTransaction<TIn, TOut>(
         },
       });
 
-      // Multi-tier commission distribution (cascade model): the transacting
-      // user earns their scheme's own commission and each ancestor earns the
-      // margin between their child's scheme and their own — all net of 2%
-      // TDS. Commission comes ONLY from the scheme chain (no hardcoded
-      // fallback); the txn row records the user's actual net credit.
+      // Commission distribution: the engine only credits for PG/POS/QR
+      // services. Service transactions (BBPS, Payout, etc.) return empty.
+      //   - PG/POS/QR/UPI_COLLECT: MDR chain model — the company MDR margin is
+      //     credited to the Revenue Wallet and upline (DT/MD/SD) commissions
+      //     are paid out of it, net of 2% TDS (TDS → separate ledger). The
+      //     transacting retailer earns no commission here.
+      //   - everything else: legacy flat model via getEffectiveRate.
       try {
-        const credits = await distributeCommission(
-          txn.id,
-          input.userId,
-          input.service,
-          input.amount,
-          tx,
-          input.partner
-        );
+        const mdrKind = mdrKindForService(input.service);
+        const credits = mdrKind
+          ? await distributeMdrCommission(
+              txn.id,
+              input.userId,
+              mdrKind,
+              input.amount,
+              input.service,
+              {},
+              tx
+            )
+          : await distributeCommission(
+              txn.id,
+              input.userId,
+              input.service,
+              input.amount,
+              tx,
+              input.partner
+            );
         const own = credits.find((c) => c.userId === input.userId);
         await tx.transaction.update({
           where: { id: txn.id },
           data: { commission: new Prisma.Decimal(round(own?.amount ?? 0)) },
         });
       } catch {
-        // Scheme lookup or chain walk failed — commission stays uncredited;
+        // Scheme lookup failed — commission stays uncredited;
         // the recon sweep / support can replay distribution idempotently.
       }
 

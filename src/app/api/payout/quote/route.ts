@@ -18,9 +18,11 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const NETWORK_ROLES = new Set(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]);
   let user;
   try {
     user = await requireAuth();
+    if (!NETWORK_ROLES.has(user.role)) throw new AuthError("Payout is available for network users only", 403);
     await assertKycCurrent(user);
     // Scheme gate — quote is only meaningful once a scheme is assigned.
     await requireActiveScheme(user.id);

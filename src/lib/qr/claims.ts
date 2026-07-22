@@ -21,6 +21,8 @@ import { createHash } from "crypto";
 import { prisma } from "../db";
 import { creditWallet, debitWallet } from "../ledger";
 import { round, toNumber } from "../money";
+import { getSetting } from "../settings";
+import { priceSchemeSettlement, startOfTodayIst, SETTLED_VIA } from "../settlement/engine";
 
 export class QrClaimError extends Error {
   public statusCode: number;
@@ -201,12 +203,16 @@ export type QrClaimReviewInput = {
 };
 
 /**
- * Approve a claim. Below the threshold this credits the wallet immediately;
- * above it, the first call stages the claim (AWAITING_SECOND_APPROVAL) and a
- * DIFFERENT admin must call approve again to move the money.
+ * Approve a claim — the FRAUD gate. Approval attests the payment is real (UTR
+ * found in the provider portal) and makes the claim SETTLEABLE. It NO LONGER
+ * moves money: settlement is a separate step where the scheme's QR MDR is
+ * deducted (instant/T0 via the retailer button, or T1 via the daily cron).
  *
- * The credit is race-safe: the status transition is claimed with updateMany
- * before creditWallet runs, and the ledger entry carries an idempotencyKey.
+ * Below the maker-checker threshold this goes straight to SETTLEABLE; above it,
+ * the first call stages the claim (AWAITING_SECOND_APPROVAL) and a DIFFERENT
+ * admin must approve again before it becomes SETTLEABLE.
+ *
+ * Race-safe: the status transition is claimed with updateMany.
  */
 export async function approveQrClaim(input: QrClaimReviewInput): Promise<{ id: string; status: QrClaimStatus }> {
   if (!input.portalVerified) {
@@ -250,52 +256,255 @@ export async function approveQrClaim(input: QrClaimReviewInput): Promise<{ id: s
     throw new QrClaimError("A different admin must give the second approval", 403, "SECOND_APPROVER_MUST_DIFFER");
   }
 
-  await prisma.$transaction(async (tx) => {
-    // Claim the terminal transition first so concurrent approvers do nothing.
-    const claimed = await tx.qrClaim.updateMany({
-      where: { id: claim.id, status: claim.status },
-      data: {
-        status: "APPROVED",
-        reviewedById: input.adminId,
-        reviewedAt: new Date(),
-        reviewNote: input.note ?? null,
+  // Terminal transition to SETTLEABLE (no money moves here). Claim it first so
+  // concurrent approvers do nothing.
+  const approved = await prisma.qrClaim.updateMany({
+    where: { id: claim.id, status: claim.status },
+    data: {
+      status: "SETTLEABLE",
+      reviewedById: input.adminId,
+      reviewedAt: new Date(),
+      reviewNote: input.note ?? null,
+      portalVerified: true,
+      settleableAt: new Date(),
+    },
+  });
+  if (approved.count === 0) {
+    throw new QrClaimError("Claim was reviewed by someone else — refresh", 409, "NOT_REVIEWABLE");
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      userId: input.adminId,
+      action: "qr_claim.approved",
+      entity: "QrClaim",
+      entityId: claim.id,
+      meta: {
+        amount,
+        utr: claim.utr,
+        beneficiaryId: claim.userId,
         portalVerified: true,
+        secondApproval: claim.status === "AWAITING_SECOND_APPROVAL",
+        note: input.note ?? null,
+      },
+    },
+  });
+
+  return { id: claim.id, status: "SETTLEABLE" };
+}
+
+// ── Settlement (scheme MDR; instant button / T+1 cron) ──────────────────────
+
+type SettleableClaim = {
+  id: string;
+  userId: string;
+  amount: Prisma.Decimal | number | string;
+  utr: string;
+};
+
+/**
+ * Settle ONE SETTLEABLE claim: price the scheme's QR MDR (T0 for instant, T1
+ * for the daily sweep), deduct it, and credit the NET to the retailer wallet.
+ *
+ * No double credit: the SETTLEABLE→SETTLED transition is claimed with
+ * updateMany INSIDE the same transaction as the credit, and the wallet credit
+ * carries the `qrsettle:<id>` idempotency key. A racing instant-button click
+ * and T+1 sweep can never both pay out. Returns the net credited, or null when
+ * the claim can't be priced (no scheme slab / below floor) — left SETTLEABLE.
+ */
+async function settleClaim(
+  claim: SettleableClaim,
+  settlementType: "T0" | "T1",
+  via: string,
+  actorId?: string
+): Promise<number | null> {
+  const price = await priceSchemeSettlement({
+    userId: claim.userId,
+    serviceKind: "QR",
+    grossAmount: Number(claim.amount),
+    paymentMode: "UPI",
+    settlementType,
+  });
+  if (!price) return null; // no scheme rate / below floor — leave SETTLEABLE for admin
+
+  let credited: number | null = null;
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.qrClaim.updateMany({
+      where: { id: claim.id, status: "SETTLEABLE" },
+      data: {
+        status: "SETTLED",
+        settledAt: new Date(),
+        settledVia: via,
+        mdrAmount: price.mdrAmount,
+        netAmount: price.netAmount,
+        settlementSchemeId: price.schemeId,
+        mdrSlabId: price.slabId,
       },
     });
-    if (claimed.count === 0) {
-      throw new QrClaimError("Claim was reviewed by someone else — refresh", 409, "NOT_REVIEWABLE");
-    }
-    await creditWallet(
+    if (claimed.count === 0) return; // already settled by a concurrent writer
+
+    const wtxn = await creditWallet(
       {
         userId: claim.userId,
-        amount: claim.amount,
-        reason: "TOPUP",
+        amount: price.netAmount,
+        reason: "SETTLEMENT",
         refType: "QrClaim",
         refId: claim.id,
-        note: `QR collection settlement (UTR ${claim.utr})`,
-        idempotencyKey: `qrclaim:${claim.id}`,
+        note: `QR ${settlementType === "T0" ? "instant" : "T+1"} settlement (UTR ${claim.utr})`,
+        idempotencyKey: `qrsettle:${claim.id}`,
       },
       tx
     );
+    await tx.qrClaim.updateMany({ where: { id: claim.id }, data: { walletTxnId: wtxn.id } });
     await tx.auditLog.create({
       data: {
-        userId: input.adminId,
-        action: "qr_claim.approved",
+        userId: actorId ?? claim.userId,
+        action: settlementType === "T0" ? "qr_claim.instant_settled" : "qr_claim.t1_settled",
         entity: "QrClaim",
         entityId: claim.id,
         meta: {
-          amount,
+          gross: Number(claim.amount),
+          mdr: toNumber(price.mdrAmount),
+          net: toNumber(price.netAmount),
           utr: claim.utr,
-          beneficiaryId: claim.userId,
-          portalVerified: true,
-          secondApproval: claim.status === "AWAITING_SECOND_APPROVAL",
-          note: input.note ?? null,
+          via,
         },
       },
     });
+    credited = toNumber(price.netAmount);
   });
 
-  return { id: claim.id, status: "APPROVED" };
+  return credited;
+}
+
+export type QrSettleResult = {
+  requested: number;
+  settled: number;
+  failed: number;
+  skipped: number;
+  totalAmount: number;
+  results: Array<{ id: string; status: "SETTLED" | "SKIPPED" | "FAILED"; netAmount?: number; reason?: string }>;
+};
+
+/**
+ * Retailer-driven INSTANT settlement (the dashboard button). Settles the chosen
+ * SETTLEABLE claims owned by `userId` at the scheme's T0 rate; anything not
+ * chosen stays SETTLEABLE for the next-day T+1 cron.
+ */
+export async function instantSettleQrClaims(userId: string, claimIds: string[]): Promise<QrSettleResult> {
+  const unique = Array.from(new Set(claimIds)).slice(0, 200);
+  const claims = await prisma.qrClaim.findMany({
+    where: { id: { in: unique }, userId, status: "SETTLEABLE" },
+    orderBy: { settleableAt: "asc" },
+  });
+
+  let settled = 0;
+  let failed = 0;
+  let skipped = 0;
+  let totalAmount = 0;
+  const results: QrSettleResult["results"] = [];
+
+  for (const claim of claims) {
+    try {
+      const net = await settleClaim(claim, "T0", SETTLED_VIA.INSTANT_BUTTON, userId);
+      if (net === null) {
+        skipped++;
+        results.push({ id: claim.id, status: "SKIPPED", reason: "no scheme rate configured" });
+        continue;
+      }
+      settled++;
+      totalAmount += net;
+      results.push({ id: claim.id, status: "SETTLED", netAmount: net });
+    } catch {
+      failed++;
+      results.push({ id: claim.id, status: "FAILED", reason: "ledger error" });
+    }
+  }
+
+  const found = new Set(claims.map((c) => c.id));
+  for (const id of unique) {
+    if (!found.has(id)) {
+      skipped++;
+      results.push({ id, status: "SKIPPED", reason: "already settled or not found" });
+    }
+  }
+
+  return { requested: unique.length, settled, failed, skipped, totalAmount, results };
+}
+
+/**
+ * QR T+1 cron: settle SETTLEABLE claims approved BEFORE the current IST day
+ * (true T+1) at the scheme's T1 rate. Instant-settled claims are already SETTLED
+ * and invisible here, so a claim is never paid out twice.
+ */
+export async function runQrT1SettlementSweep(): Promise<{
+  processed: number;
+  settled: number;
+  failed: number;
+  totalAmount: number;
+}> {
+  const config = await getSetting("settlement.qr_t1");
+  if (!config.enabled || config.paused) {
+    return { processed: 0, settled: 0, failed: 0, totalAmount: 0 };
+  }
+
+  const cutoff = startOfTodayIst();
+  const claims = await prisma.qrClaim.findMany({
+    where: { status: "SETTLEABLE", settleableAt: { lt: cutoff } },
+    orderBy: { settleableAt: "asc" },
+    take: 500,
+  });
+
+  let settled = 0;
+  let failed = 0;
+  let totalAmount = 0;
+
+  for (const claim of claims) {
+    if (Number(claim.amount) < config.minAmount) continue; // below minimum — leave for next run
+    try {
+      const net = await settleClaim(claim, "T1", SETTLED_VIA.T1_CRON);
+      if (net === null) continue; // not priceable — leave SETTLEABLE for admin
+      settled++;
+      totalAmount += net;
+    } catch {
+      failed++;
+    }
+  }
+
+  return { processed: claims.length, settled, failed, totalAmount };
+}
+
+/**
+ * The retailer's SETTLEABLE claims plus instant (T0) and T+1 quotes per claim.
+ * Powers the dashboard "Instant settle" table.
+ */
+export async function listSettleableQrClaims(userId: string) {
+  const claims = await prisma.qrClaim.findMany({
+    where: { userId, status: "SETTLEABLE" },
+    orderBy: { settleableAt: "desc" },
+    take: 200,
+    include: { qr: { select: { label: true } } },
+  });
+
+  const rows = [];
+  for (const c of claims) {
+    const gross = Number(c.amount);
+    const [instant, t1] = await Promise.all([
+      priceSchemeSettlement({ userId, serviceKind: "QR", grossAmount: gross, paymentMode: "UPI", settlementType: "T0" }),
+      priceSchemeSettlement({ userId, serviceKind: "QR", grossAmount: gross, paymentMode: "UPI", settlementType: "T1" }),
+    ]);
+    rows.push({
+      id: c.id,
+      qrLabel: c.qr.label,
+      amount: gross,
+      utr: c.utr,
+      paidAt: c.paidAt.toISOString(),
+      settleableAt: c.settleableAt?.toISOString() ?? null,
+      instant: instant ? { mdrAmount: toNumber(instant.mdrAmount), netAmount: toNumber(instant.netAmount) } : null,
+      t1: t1 ? { mdrAmount: toNumber(t1.mdrAmount), netAmount: toNumber(t1.netAmount) } : null,
+    });
+  }
+  return rows;
 }
 
 export async function rejectQrClaim(input: QrClaimReviewInput & { note: string }): Promise<{ id: string; status: QrClaimStatus }> {
@@ -332,30 +541,36 @@ export async function rejectQrClaim(input: QrClaimReviewInput & { note: string }
 }
 
 /**
- * Claw back an APPROVED claim whose payment never appeared in the provider's
- * settlement (phase-2 recon, or a manual admin action on discovered fraud).
- * Debits the wallet (idempotently) and freezes nothing by itself — account
- * suspension stays a separate, human decision.
+ * Claw back a claim whose payment never appeared in the provider's settlement
+ * (phase-2 recon, or a manual admin action on discovered fraud). Debits back
+ * whatever was actually credited: the NET for SETTLED claims (post-MDR), or the
+ * full amount for legacy APPROVED (credit-on-approval) rows. Idempotent; freezes
+ * nothing by itself — account suspension stays a separate, human decision.
  */
 export async function clawbackQrClaim(input: QrClaimReviewInput & { note: string }): Promise<{ id: string; status: QrClaimStatus }> {
   if (!input.note?.trim()) throw new QrClaimError("A clawback note is required", 400, "NOTE_REQUIRED");
 
   const claim = await prisma.qrClaim.findUnique({ where: { id: input.claimId } });
   if (!claim) throw new QrClaimError("Claim not found", 404, "NOT_FOUND");
-  if (claim.status !== "APPROVED") {
-    throw new QrClaimError("Only approved claims can be clawed back", 409, "NOT_CLAWBACKABLE");
+  if (claim.status !== "SETTLED" && claim.status !== "APPROVED") {
+    throw new QrClaimError("Only settled claims can be clawed back", 409, "NOT_CLAWBACKABLE");
   }
+
+  // Debit back what was credited: NET for the new SETTLED path, full face value
+  // for legacy credit-on-approval rows (netAmount is null on those).
+  const debitAmount = claim.status === "SETTLED" ? claim.netAmount ?? claim.amount : claim.amount;
+  const fromStatus = claim.status;
 
   await prisma.$transaction(async (tx) => {
     const claimed = await tx.qrClaim.updateMany({
-      where: { id: claim.id, status: "APPROVED" },
+      where: { id: claim.id, status: fromStatus },
       data: { status: "CLAWED_BACK", reviewNote: input.note, reviewedById: input.adminId, reviewedAt: new Date() },
     });
     if (claimed.count === 0) throw new QrClaimError("Claim state changed — refresh", 409, "NOT_CLAWBACKABLE");
     await debitWallet(
       {
         userId: claim.userId,
-        amount: claim.amount,
+        amount: debitAmount,
         reason: "REVERSAL",
         refType: "QrClaim",
         refId: claim.id,
@@ -370,7 +585,7 @@ export async function clawbackQrClaim(input: QrClaimReviewInput & { note: string
         action: "qr_claim.clawed_back",
         entity: "QrClaim",
         entityId: claim.id,
-        meta: { amount: Number(claim.amount), utr: claim.utr, beneficiaryId: claim.userId, note: input.note },
+        meta: { amount: Number(debitAmount), utr: claim.utr, beneficiaryId: claim.userId, note: input.note },
       },
     });
   });
@@ -386,17 +601,21 @@ export async function clawbackQrClaim(input: QrClaimReviewInput & { note: string
  * you yet. If it grows faster than settlements arrive, stop approving.
  */
 export async function getQrClaimOverview() {
-  const [pending, awaitingSecond, outstanding] = await Promise.all([
+  const [pending, awaitingSecond, settleable, outstanding] = await Promise.all([
     prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "PENDING" } }),
     prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "AWAITING_SECOND_APPROVAL" } }),
-    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "APPROVED", reconciledAt: null } }),
+    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "SETTLEABLE" } }),
+    // Fronted float: SETTLED (net-credited) claims the provider hasn't settled to us yet.
+    prisma.qrClaim.aggregate({ _count: true, _sum: { netAmount: true }, where: { status: "SETTLED", reconciledAt: null } }),
   ]);
   return {
     pendingCount: pending._count,
     pendingAmount: Number(pending._sum.amount ?? 0),
     awaitingSecondCount: awaitingSecond._count,
     awaitingSecondAmount: Number(awaitingSecond._sum.amount ?? 0),
+    settleableCount: settleable._count,
+    settleableAmount: Number(settleable._sum.amount ?? 0),
     outstandingReceivableCount: outstanding._count,
-    outstandingReceivable: Number(outstanding._sum.amount ?? 0),
+    outstandingReceivable: Number(outstanding._sum.netAmount ?? 0),
   };
 }

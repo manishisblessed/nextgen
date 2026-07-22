@@ -8,14 +8,16 @@ import { flags } from "@/lib/env";
 import {
   samedaySettlementConfigured,
   settlementAddAccount,
+  settlementAddTrustedAccount,
   settlementDeleteAccount,
   settlementListAccounts,
 } from "@/lib/partners/sameday-settlement";
 
 /**
  * Admin — Same Day settlement beneficiary accounts.
- *   GET    — list verified accounts
- *   POST   — add + penny-drop verify a new account (₹4 partner charge)
+ *   GET    — list all accounts (verified + trusted)
+ *   POST   — add a new account; penny-drop verify (₹4) or skip verification
+ *            (₹0, trusted — at your own risk) based on `skipVerification` flag
  *   DELETE — ?id=  deactivate an account
  */
 export const fetchCache = "force-no-store";
@@ -38,7 +40,11 @@ const AddBody = z.object({
   contactName: z.string().max(120).optional(),
   contactEmail: z.string().email().optional(),
   contactMobile: z.string().regex(/^\d{10}$/).optional(),
-}).strict();
+  skipVerification: z.boolean().optional(),
+}).strict().refine(
+  (d) => !d.skipVerification || (d.contactMobile && /^\d{10}$/.test(d.contactMobile)),
+  { message: "contact_mobile is required (10 digits) when skipping verification", path: ["contactMobile"] }
+);
 
 export async function GET() {
   try {
@@ -69,16 +75,32 @@ export async function POST(req: Request) {
   const parsed = AddBody.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const r = await settlementAddAccount(parsed.data);
+  const { skipVerification, ...accountFields } = parsed.data;
+
+  const r = skipVerification
+    ? await settlementAddTrustedAccount({
+        ...accountFields,
+        contactMobile: accountFields.contactMobile!,
+      })
+    : await settlementAddAccount(accountFields);
+
+  const auditMeta = r.ok
+    ? {
+        verificationStatus: r.data.verificationStatus,
+        ...("verifiedName" in r.data ? { verifiedName: r.data.verifiedName ?? null } : {}),
+        ...("skipVerification" in r.data ? { skipVerification: r.data.skipVerification } : {}),
+      }
+    : { code: r.code };
+
   await prisma.auditLog.create({
     data: {
       userId: admin.id,
-      action: r.ok ? "settlement.account_added" : "settlement.account_add_failed",
+      action: r.ok
+        ? skipVerification ? "settlement.trusted_account_added" : "settlement.account_added"
+        : "settlement.account_add_failed",
       entity: "SettlementAccount",
       entityId: r.ok ? r.data.account.id : parsed.data.accountNumber.slice(-4),
-      meta: r.ok
-        ? { verificationStatus: r.data.verificationStatus, verifiedName: r.data.verifiedName ?? null }
-        : { code: r.code },
+      meta: auditMeta,
     },
   });
   return r.ok

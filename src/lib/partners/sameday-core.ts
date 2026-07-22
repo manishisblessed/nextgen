@@ -106,14 +106,20 @@ export async function samedayRequest<T extends { success?: boolean }>(
  * key pair per partner account.
  */
 export function samedayCredentials(
-  product: "BBPS" | "SETTLEMENT"
+  product: "BBPS" | "SETTLEMENT" | "RECHARGEKIT"
 ): SamedayCredentials | null {
-  const apiKey =
-    (product === "BBPS" ? env.SAMEDAY_BBPS_API_KEY : env.SAMEDAY_SETTLEMENT_API_KEY) ||
-    env.SAMEDAY_POS_API_KEY;
-  const apiSecret =
-    (product === "BBPS" ? env.SAMEDAY_BBPS_API_SECRET : env.SAMEDAY_SETTLEMENT_API_SECRET) ||
-    env.SAMEDAY_POS_API_SECRET;
+  const keyMap = {
+    BBPS: env.SAMEDAY_BBPS_API_KEY,
+    SETTLEMENT: env.SAMEDAY_SETTLEMENT_API_KEY,
+    RECHARGEKIT: env.SAMEDAY_RECHARGEKIT_API_KEY,
+  };
+  const secretMap = {
+    BBPS: env.SAMEDAY_BBPS_API_SECRET,
+    SETTLEMENT: env.SAMEDAY_SETTLEMENT_API_SECRET,
+    RECHARGEKIT: env.SAMEDAY_RECHARGEKIT_API_SECRET,
+  };
+  const apiKey = keyMap[product] || env.SAMEDAY_POS_API_KEY;
+  const apiSecret = secretMap[product] || env.SAMEDAY_POS_API_SECRET;
   if (!apiKey || !apiSecret) return null;
   return { baseUrl: env.SAMEDAY_POS_BASE_URL, apiKey, apiSecret };
 }

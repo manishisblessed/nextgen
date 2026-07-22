@@ -86,8 +86,8 @@ export function quotePayout(amount: Money | string | number, mode: PayoutMode): 
 }
 
 /**
- * User-aware payout quote. The service charge resolves from the user's OWN
- * assigned Scheme via getEffectiveRate (cascade model — no default-scheme
+ * User-aware payout quote. The service charge resolves from the user's
+ * assigned Scheme via getEffectiveRate (flat model — no default-scheme
  * fallback; the scheme gate blocks unassigned network users upstream). If the
  * scheme has no slab for this amount/mode, the static SLABS price the charge
  * so staff accounts and unconfigured bands stay functional.

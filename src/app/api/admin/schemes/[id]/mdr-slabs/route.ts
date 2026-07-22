@@ -4,6 +4,7 @@ import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { validateMdrSlab } from "@/lib/mdr/resolver";
+import { validateMdrAgainstFloor } from "@/lib/mdr/floor";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -26,7 +27,61 @@ const SlabBody = z.object({
   mdrValue: z.number().nonnegative(),
   // Instant (T+0) settlement rate; 0 = unset, falls back to mdrValue.
   mdrValueT0: z.number().nonnegative().default(0),
+  // Vendor/acquirer cost the company pays upstream. Revenue = mdrValue − vendorCharge.
+  vendorCharge: z.number().nonnegative().default(0),
+  vendorChargeT0: z.number().nonnegative().default(0),
+  // Commission distributed up the chain (DT/MD/SD). Retailer earns none.
+  commissionType: z.enum(["FLAT", "PERCENT"]).default("PERCENT"),
+  commissionDistributor: z.number().nonnegative().default(0),
+  commissionMaster: z.number().nonnegative().default(0),
+  commissionSuperDistributor: z.number().nonnegative().default(0),
 });
+
+/**
+ * Guardrail: total DT+MD+SD commission must not exceed the company MDR margin
+ * (serviceCharge − vendorCharge), so payouts are always funded by the same
+ * transaction's earning and the revenue wallet can never go negative.
+ *
+ * When commission and MDR use the same RateType the comparison is exact. When
+ * they differ (one FLAT, one PERCENT) both are evaluated at a nominal reference
+ * amount as a conservative guardrail.
+ */
+const MARGIN_REF_AMOUNT = 100000;
+function validateMarginVsCommission(b: {
+  mdrType: "FLAT" | "PERCENT";
+  mdrValue: number;
+  mdrValueT0: number;
+  vendorCharge: number;
+  vendorChargeT0: number;
+  commissionType: "FLAT" | "PERCENT";
+  commissionDistributor: number;
+  commissionMaster: number;
+  commissionSuperDistributor: number;
+}): string | null {
+  const abs = (type: "FLAT" | "PERCENT", val: number) =>
+    type === "FLAT" ? val : MARGIN_REF_AMOUNT * val;
+  const EPS = 1e-6;
+
+  const commissionSum = abs(b.commissionType, b.commissionDistributor)
+    + abs(b.commissionType, b.commissionMaster)
+    + abs(b.commissionType, b.commissionSuperDistributor);
+
+  // T+1 margin
+  const marginT1 = abs(b.mdrType, b.mdrValue) - abs(b.mdrType, b.vendorCharge);
+  if (marginT1 < -EPS) return "Vendor charge cannot exceed the MDR (service charge).";
+  if (commissionSum - marginT1 > EPS)
+    return "Total DT+MD+SD commission exceeds the company margin (MDR − vendor charge). Reduce commissions or adjust the MDR / vendor charge.";
+
+  // T+0 margin (fall back to T+1 values when a T+0 value is unset).
+  const mdrT0 = b.mdrValueT0 > 0 ? b.mdrValueT0 : b.mdrValue;
+  const vendorT0 = b.vendorChargeT0 > 0 ? b.vendorChargeT0 : b.vendorCharge;
+  const marginT0 = abs(b.mdrType, mdrT0) - abs(b.mdrType, vendorT0);
+  if (marginT0 < -EPS) return "T+0 vendor charge cannot exceed the T+0 MDR.";
+  if (commissionSum - marginT0 > EPS)
+    return "Total DT+MD+SD commission exceeds the T+0 company margin.";
+
+  return null;
+}
 
 /** POST — add an MDR slab to a scheme (band-overlap validated). */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -61,6 +116,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
   );
   if (overlap) return NextResponse.json({ error: overlap }, { status: 400 });
+
+  const floorErr = await validateMdrAgainstFloor({
+    serviceKind: b.serviceKind,
+    paymentMode: b.paymentMode,
+    mdrType: b.mdrType,
+    mdrValue: b.mdrValue,
+    mdrValueT0: b.mdrValueT0,
+  });
+  if (floorErr) return NextResponse.json({ error: floorErr }, { status: 400 });
+
+  const marginErr = validateMarginVsCommission(b);
+  if (marginErr) return NextResponse.json({ error: marginErr }, { status: 400 });
 
   const slab = await prisma.mdrSlab.create({
     data: {
@@ -99,6 +166,12 @@ const UpdateBody = z.object({
   mdrType: z.enum(["FLAT", "PERCENT"]).optional(),
   mdrValue: z.number().nonnegative().optional(),
   mdrValueT0: z.number().nonnegative().optional(),
+  vendorCharge: z.number().nonnegative().optional(),
+  vendorChargeT0: z.number().nonnegative().optional(),
+  commissionType: z.enum(["FLAT", "PERCENT"]).optional(),
+  commissionDistributor: z.number().nonnegative().optional(),
+  commissionMaster: z.number().nonnegative().optional(),
+  commissionSuperDistributor: z.number().nonnegative().optional(),
   active: z.boolean().optional(),
 });
 
@@ -146,6 +219,29 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   );
   if (overlap) return NextResponse.json({ error: overlap }, { status: 400 });
 
+  const floorErr = await validateMdrAgainstFloor({
+    serviceKind: existing.serviceKind,
+    paymentMode: next.paymentMode,
+    mdrType: b.mdrType ?? existing.mdrType,
+    mdrValue: b.mdrValue ?? Number(existing.mdrValue),
+    mdrValueT0: b.mdrValueT0 ?? Number(existing.mdrValueT0),
+  });
+  if (floorErr) return NextResponse.json({ error: floorErr }, { status: 400 });
+
+  const marginErr = validateMarginVsCommission({
+    mdrType: b.mdrType ?? existing.mdrType,
+    mdrValue: b.mdrValue ?? Number(existing.mdrValue),
+    mdrValueT0: b.mdrValueT0 ?? Number(existing.mdrValueT0),
+    vendorCharge: b.vendorCharge ?? Number(existing.vendorCharge),
+    vendorChargeT0: b.vendorChargeT0 ?? Number(existing.vendorChargeT0),
+    commissionType: b.commissionType ?? existing.commissionType,
+    commissionDistributor: b.commissionDistributor ?? Number(existing.commissionDistributor),
+    commissionMaster: b.commissionMaster ?? Number(existing.commissionMaster),
+    commissionSuperDistributor:
+      b.commissionSuperDistributor ?? Number(existing.commissionSuperDistributor),
+  });
+  if (marginErr) return NextResponse.json({ error: marginErr }, { status: 400 });
+
   const updated = await prisma.mdrSlab.update({
     where: { id: existing.id },
     data: {
@@ -153,6 +249,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       ...(b.mdrType !== undefined ? { mdrType: b.mdrType } : {}),
       ...(b.mdrValue !== undefined ? { mdrValue: b.mdrValue } : {}),
       ...(b.mdrValueT0 !== undefined ? { mdrValueT0: b.mdrValueT0 } : {}),
+      ...(b.vendorCharge !== undefined ? { vendorCharge: b.vendorCharge } : {}),
+      ...(b.vendorChargeT0 !== undefined ? { vendorChargeT0: b.vendorChargeT0 } : {}),
+      ...(b.commissionType !== undefined ? { commissionType: b.commissionType } : {}),
+      ...(b.commissionDistributor !== undefined ? { commissionDistributor: b.commissionDistributor } : {}),
+      ...(b.commissionMaster !== undefined ? { commissionMaster: b.commissionMaster } : {}),
+      ...(b.commissionSuperDistributor !== undefined
+        ? { commissionSuperDistributor: b.commissionSuperDistributor }
+        : {}),
       ...(b.active !== undefined ? { active: b.active } : {}),
     },
   });

@@ -46,6 +46,19 @@ const SETTING_SCHEMAS = {
     hour: z.number().int().min(0).max(23).default(3),
   }),
 
+  /**
+   * POS rent waiver by business volume. When a machine does at least
+   * `thresholdPerMachine` of POS business (gross transaction volume, all
+   * payment modes) within its current billing cycle, that machine's monthly
+   * rent is auto-waived — the subscriber is not debited and no commission
+   * cascades up the chain for that machine that cycle. Evaluated per machine.
+   */
+  "pos.rental_waiver": z.object({
+    enabled: z.boolean().default(false),
+    /** Business (₹) a single machine must do in its cycle to waive its rent. */
+    thresholdPerMachine: z.number().positive().default(5_000_000), // ₹50 lakh
+  }),
+
   /** Default settlement tier caps applied when a user has no UserLimit row (₹). */
   "limits.settlement_defaults": z.object({
     dailyCap: z.number().positive().default(200_000),
@@ -66,6 +79,32 @@ const SETTING_SCHEMAS = {
     hour: z.number().int().min(0).max(23).default(9),
     paused: z.boolean().default(false),
     minAmount: z.number().nonnegative().default(50),
+  }),
+
+  /**
+   * QR collection T+1 settlement cron. Approved (SETTLEABLE) claims that the
+   * retailer didn't instant-settle are swept the next IST day, net of the
+   * scheme's T1 MDR. Retailer-driven instant settlement (T0) needs no cron.
+   */
+  "settlement.qr_t1": z.object({
+    enabled: z.boolean().default(true),
+    hour: z.number().int().min(0).max(23).default(9),
+    paused: z.boolean().default(false),
+    minAmount: z.number().nonnegative().default(1),
+  }),
+
+  /**
+   * Retailer-facing INSTANT settlement button (the "Instant settle" action on
+   * the POS / QR dashboards). Admin-controlled per rail: when a rail is
+   * disabled, retailers cannot instant-settle (T0) — every transaction simply
+   * auto-settles on the next-day T+1 cron. Ships disabled; an admin turns each
+   * rail on when the client is ready to expose it.
+   */
+  "settlement.instant_button": z.object({
+    /** Allow retailers to instant-settle POS proceeds (T0). */
+    posEnabled: z.boolean().default(false),
+    /** Allow retailers to instant-settle approved QR claims (T0). */
+    qrEnabled: z.boolean().default(false),
   }),
 
   /**

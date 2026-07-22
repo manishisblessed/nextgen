@@ -12,6 +12,7 @@ import { CreditCard, RefreshCw, Clock, PlayCircle, DownloadCloud, Zap, Save } fr
 type PosT1 = { enabled: boolean; hour: number; paused: boolean; minAmount: number };
 type PosInstant = { defaultEnabled: boolean; paused: boolean };
 type PosIngest = { enabled: boolean; paused: boolean; lookbackDays: number; maxPages: number };
+type InstantButton = { posEnabled: boolean; qrEnabled: boolean };
 
 type Entry = {
   id: string;
@@ -30,7 +31,7 @@ type Entry = {
 type SummaryRow = { status: string; count: number; totalNet: number };
 
 type ApiData = {
-  config: { posInstant: PosInstant; posT1: PosT1; posIngest: PosIngest };
+  config: { posInstant: PosInstant; posT1: PosT1; posIngest: PosIngest; instantButton: InstantButton };
   summary: SummaryRow[];
   entries: Entry[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
@@ -53,8 +54,10 @@ export default function PosSettlementPage() {
   const [loading, setLoading] = useState(true);
   const [t1, setT1] = useState<PosT1>({ enabled: true, hour: 10, paused: false, minAmount: 50 });
   const [ingest, setIngest] = useState<PosIngest>({ enabled: true, paused: false, lookbackDays: 3, maxPages: 50 });
+  const [instantButton, setInstantButton] = useState<InstantButton>({ posEnabled: false, qrEnabled: false });
   const [savingT1, setSavingT1] = useState(false);
   const [savingIngest, setSavingIngest] = useState(false);
+  const [savingButton, setSavingButton] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -73,6 +76,7 @@ export default function PosSettlementPage() {
       setData(d);
       setT1(d.config.posT1);
       setIngest(d.config.posIngest);
+      if (d.config.instantButton) setInstantButton(d.config.instantButton);
     } catch (e) {
       notify(e instanceof Error ? e.message : "Load failed", false);
     } finally {
@@ -136,6 +140,23 @@ export default function PosSettlementPage() {
       notify(e instanceof Error ? e.message : "Save failed", false);
     } finally {
       setSavingIngest(false);
+    }
+  };
+
+  const saveButton = async (next: InstantButton) => {
+    setSavingButton(true);
+    try {
+      await post({
+        action: "configure",
+        key: "settlement.instant_button",
+        value: { posEnabled: next.posEnabled, qrEnabled: next.qrEnabled },
+      });
+      setInstantButton(next);
+      notify("Instant settlement button updated.", true);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Save failed", false);
+    } finally {
+      setSavingButton(false);
     }
   };
 
@@ -356,6 +377,38 @@ export default function PosSettlementPage() {
             </div>
             <p className="mt-2 text-[11px] text-ink-400">Leave dates empty to use the configured lookback window.</p>
           </div>
+        </div>
+      </div>
+
+      {/* Retailer-facing instant settlement button (admin-controlled per rail) */}
+      <div className="rounded-2xl border border-ink-100 bg-white p-5">
+        <h3 className="mb-1 flex items-center gap-2 text-sm font-bold text-ink-900">
+          <Zap className="h-4 w-4 text-brand-600" /> Instant settlement button
+        </h3>
+        <p className="mb-4 text-[11px] text-ink-400">
+          Controls whether retailers see the &quot;Instant settle&quot; action on their POS and QR dashboards. When a
+          rail is off, retailers can&apos;t settle at the T0 rate — those transactions simply auto-settle on the next-day
+          T+1 sweep.
+        </p>
+        <div className="flex flex-wrap gap-6">
+          <label className="flex items-center gap-2 text-sm text-ink-700">
+            <input
+              type="checkbox"
+              disabled={savingButton}
+              checked={instantButton.posEnabled}
+              onChange={(e) => saveButton({ ...instantButton, posEnabled: e.target.checked })}
+            />
+            POS instant settle enabled
+          </label>
+          <label className="flex items-center gap-2 text-sm text-ink-700">
+            <input
+              type="checkbox"
+              disabled={savingButton}
+              checked={instantButton.qrEnabled}
+              onChange={(e) => saveButton({ ...instantButton, qrEnabled: e.target.checked })}
+            />
+            QR instant settle enabled
+          </label>
         </div>
       </div>
 

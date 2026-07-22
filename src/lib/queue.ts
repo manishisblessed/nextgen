@@ -72,6 +72,10 @@ export const QUEUES = {
   // and settles them. BulkPe BBPS has no webhooks, so this sweep is the
   // only way to finalize PENDING payments. Runs every 5 minutes.
   BBPS_RECONCILE: "bbps.reconcile",
+  // QR collection T+1 settlement — sweeps approved (SETTLEABLE) claims the
+  // retailer didn't instant-settle into their wallet the next IST day, net of
+  // the scheme's T1 MDR. Scheduled hourly; fires only at the configured hour.
+  QR_SETTLEMENT_T1: "qr.settlement.t1",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

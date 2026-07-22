@@ -48,6 +48,7 @@ const schema = z.object({
   PARTNER_VERIFICATION_ENABLED: z.string().default("false"),
   PARTNER_POS_ENABLED: z.string().default("false"),
   PARTNER_SETTLEMENT_ENABLED: z.string().default("false"),
+  PARTNER_RECHARGEKIT_ENABLED: z.string().default("false"),
   PARTNER_ESIGN_ENABLED: z.string().default("false"),
 
   // Same Day Solution — POS Partner API
@@ -63,6 +64,11 @@ const schema = z.object({
   SAMEDAY_BBPS_API_SECRET: z.string().min(1).optional(),
   SAMEDAY_SETTLEMENT_API_KEY: z.string().min(1).optional(),
   SAMEDAY_SETTLEMENT_API_SECRET: z.string().min(1).optional(),
+
+  // Same Day Solution — RechargeKit (CC-2) credit card payment rail.
+  // Falls back to POS key pair when unset. Gated by flags.rechargekit.
+  SAMEDAY_RECHARGEKIT_API_KEY: z.string().min(1).optional(),
+  SAMEDAY_RECHARGEKIT_API_SECRET: z.string().min(1).optional(),
 
   // Phase 3 — settlement automation. A daily worker job sweeps the Same Day
   // partner-wallet balance above the float you keep, into a verified account.
@@ -236,6 +242,7 @@ export const flags = {
   pos: env.PARTNER_POS_ENABLED === "true",
   settlement: env.PARTNER_SETTLEMENT_ENABLED === "true",
   settlementAutosweep: env.SETTLEMENT_AUTOSWEEP_ENABLED === "true",
+  rechargekit: env.PARTNER_RECHARGEKIT_ENABLED === "true",
   esign: env.PARTNER_ESIGN_ENABLED === "true",
 
   // Security toggles

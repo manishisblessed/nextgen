@@ -4,6 +4,8 @@ import bcrypt from "bcryptjs";
 import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
+import { generateNextUserCode } from "@/lib/userCode";
+import { uplineInclude, flattenUpline } from "@/lib/hierarchy";
 
 export const fetchCache = "force-no-store";
 
@@ -70,6 +72,7 @@ export async function POST(req: Request) {
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
+  const userCode = await generateNextUserCode(role);
 
   const user = await prisma.user.create({
     data: {
@@ -79,6 +82,7 @@ export async function POST(req: Request) {
       passwordHash,
       role,
       status,
+      userCode,
       shopName: shopName?.trim(),
       city: city?.trim(),
       state: state?.trim(),
@@ -87,6 +91,7 @@ export async function POST(req: Request) {
     },
     select: {
       id: true,
+      userCode: true,
       name: true,
       email: true,
       phone: true,
@@ -153,6 +158,7 @@ export async function GET(req: Request) {
         { shopName: { contains: q, mode: "insensitive" } },
         { city: { contains: q, mode: "insensitive" } },
         { id: { contains: q, mode: "insensitive" } },
+        { userCode: { contains: q, mode: "insensitive" } },
       ];
     }
 
@@ -164,6 +170,7 @@ export async function GET(req: Request) {
         where: where as any,
         select: {
           id: true,
+          userCode: true,
           name: true,
           email: true,
           phone: true,
@@ -175,6 +182,7 @@ export async function GET(req: Request) {
           walletBalance: true,
           createdAt: true,
           _count: { select: { children: true } },
+          ...uplineInclude,
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
@@ -225,6 +233,7 @@ export async function GET(req: Request) {
 
     const mapped = users.map((u) => ({
       id: u.id,
+      userCode: u.userCode ?? "—",
       name: u.name,
       shop: u.shopName ?? "—",
       role: displayRole(u.role),
@@ -239,6 +248,11 @@ export async function GET(req: Request) {
       walletBalance: Number(u.walletBalance),
       monthlyTurnover: turnoverMap.get(u.id) ?? 0,
       retailers: u._count.children,
+      upline: flattenUpline(u).map((n) => ({
+        role: n.role,
+        name: n.name,
+        userCode: n.userCode,
+      })),
     }));
 
     return NextResponse.json({ users: mapped, total, page, pageSize });

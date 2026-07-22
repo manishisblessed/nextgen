@@ -7,6 +7,7 @@ import { assertPasswordNotBreached, BreachedPasswordError } from "@/lib/security
 import { env } from "@/lib/env";
 import { needsSuccessorApproval } from "@/lib/declaration/types";
 import { getRequiredDocTypes, docTypeLabel } from "@/lib/onboarding/requiredDocuments";
+import { generateNextUserCode } from "@/lib/userCode";
 
 const RegisterBody = z.object({
   name: z.string().min(2).max(100),
@@ -314,6 +315,7 @@ export async function POST(
         },
       });
     } else {
+      const userCode = await generateNextUserCode(invite.role);
       user = await tx.user.create({
         data: {
           name: data.name,
@@ -322,6 +324,7 @@ export async function POST(
           passwordHash,
           role: invite.role,
           status: "PENDING_KYC",
+          userCode,
           parentId: invite.parentId,
           shopName: data.shopName,
           shopAddress: data.shopAddress,

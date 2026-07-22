@@ -99,7 +99,8 @@ export async function runSettlementAutosweep(now: Date = new Date()): Promise<{
   });
   if (!decision.sweep) return { swept: false, reason: decision.reason };
 
-  // The target must be a live, verified beneficiary at the provider.
+  // Autosweep intentionally requires a penny-drop verified account — trusted
+  // (skip-verified) accounts are too risky for unattended automated transfers.
   const accounts = await settlementListAccounts();
   const target = accounts.ok ? accounts.data.find((a) => a.id === accountId) : undefined;
   if (!target || !target.isVerified) {
@@ -108,7 +109,7 @@ export async function runSettlementAutosweep(now: Date = new Date()): Promise<{
       severity: "critical",
       details: { accountId, found: Boolean(target), verified: target?.isVerified ?? false },
     });
-    return { swept: false, reason: "target account missing or unverified" };
+    return { swept: false, reason: "target account missing or unverified (autosweep requires a penny-drop verified account)" };
   }
 
   const r = await settlementTransfer({

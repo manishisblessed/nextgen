@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   ArrowRight,
   Pencil,
+  Eye,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -199,41 +200,53 @@ function MachinesTab() {
   const filteredUser = byUser.find((u) => u.userId === assigneeFilter) ?? null;
   const autoSynced = useRef(false);
 
+  const syncInFlight = useRef(false);
+
   const handleSync = useCallback(async () => {
+    if (syncInFlight.current) return;
+    syncInFlight.current = true;
     setSyncing(true);
     try {
       const res = await fetch("/api/admin/pos/machines/sync", { method: "POST" });
       const text = await res.text();
-      let d: { error?: string } = {};
+      let d: { error?: string; retryAfterSec?: number; scanned?: number; created?: number; updated?: number } = {};
       try {
         d = text ? JSON.parse(text) : {};
       } catch {
         /* non-JSON body */
       }
       if (!res.ok) {
-        toast.error(typeof d.error === "string" ? d.error : "Sync failed");
+        if (res.status === 429) {
+          toast.error(`Sync rate limited — try again in ${d.retryAfterSec ?? 60}s`);
+        } else {
+          toast.error(typeof d.error === "string" ? d.error : `Sync failed (HTTP ${res.status})`);
+        }
       } else {
         await mutate();
-        toast.success("Machine inventory synced");
+        const msg = d.scanned != null
+          ? `Synced: ${d.scanned} scanned, ${d.created} new, ${d.updated} updated`
+          : "Machine inventory synced";
+        toast.success(msg);
       }
-    } catch {
-      toast.error("Sync request failed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Sync request failed — check your connection");
     } finally {
       setSyncing(false);
+      syncInFlight.current = false;
     }
   }, [mutate]);
 
   // Local PosMachine mirror starts empty until the first partner sync.
   // Auto-pull once so admins aren't stuck on an empty inventory table.
   useEffect(() => {
-    if (autoSynced.current || isLoading || error || !data || syncing) return;
+    if (autoSynced.current || isLoading || error || !data) return;
     if ((data.stats?.total ?? 0) > 0) {
       autoSynced.current = true;
       return;
     }
     autoSynced.current = true;
     void handleSync();
-  }, [data, error, isLoading, syncing, handleSync]);
+  }, [data, error, isLoading, handleSync]);
 
   const handleUnassign = useCallback(async (machine: LocalPosMachine) => {
     setUnassigning((prev) => new Set(prev).add(machine.id));
@@ -855,6 +868,7 @@ function TransactionsTab() {
   const [terminalFilter, setTerminalFilter] = useState("");
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
+  const [slipTxn, setSlipTxn] = useState<PosTransaction | null>(null);
 
   const body = {
     date_from: `${dateFrom}T00:00:00.000Z`,
@@ -920,8 +934,27 @@ function TransactionsTab() {
         const res = await fetch(`/api/pos/export-status/${jobId}`);
         const d = await res.json();
         if (d.data?.job?.status === "COMPLETED" && d.data.job.file_url) {
-          window.open(d.data.job.file_url, "_blank");
-          toast.success("Export ready — download opened in a new tab.");
+          const fileUrl = d.data.job.file_url;
+          try {
+            const blob = await fetch(fileUrl).then((r) => r.blob());
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `pos-export-${jobId}.${fileUrl.includes(".xlsx") ? "xlsx" : fileUrl.includes(".pdf") ? "pdf" : "csv"}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch {
+            const a = document.createElement("a");
+            a.href = fileUrl;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+          toast.success("Export ready — download started.");
           setExporting(false);
           return;
         }
@@ -945,12 +978,18 @@ function TransactionsTab() {
     { key: "terminal_id", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.terminal_id}</span> },
     { key: "payment_mode", header: "Mode", render: (r) => <Badge variant="default">{r.payment_mode}</Badge> },
     { key: "card_brand", header: "Card", render: (r) => r.payment_mode === "CARD" ? `${r.card_brand} ${r.card_type}` : "—" },
+    { key: "card_classification", header: "Classification", render: (r) => r.card_classification ? <Badge variant="accent">{r.card_classification}</Badge> : "—" },
     { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold text-ink-900">{formatINR(parseFloat(r.amount))}</span> },
     { key: "status", header: "Status", render: (r) => statusBadge(r.status) },
     { key: "customer_name", header: "Customer", render: (r) => <span className="max-w-[140px] truncate block text-xs">{cleanName(r.customer_name)}</span> },
     { key: "card_number", header: "Card No.", render: (r) => r.card_number ? <span className="font-mono text-xs">{r.card_number}</span> : "—" },
     { key: "rrn", header: "RRN", render: (r) => <span className="font-mono text-xs">{r.rrn}</span> },
     { key: "auth_code", header: "Auth Code", render: (r) => <span className="font-mono text-xs">{r.auth_code}</span> },
+    { key: "actions", header: "", align: "center", render: (r) => (
+      <button onClick={() => setSlipTxn(r)} className="grid h-7 w-7 place-items-center rounded-lg text-brand-600 hover:bg-brand-50" title="View slip">
+        <Eye className="h-4 w-4" />
+      </button>
+    )},
   ];
 
   return (
@@ -1063,6 +1102,74 @@ function TransactionsTab() {
           onNext={() => setPage((p) => p + 1)}
         />
       )}
+
+      {/* Transaction Slip Drawer */}
+      {slipTxn && <TxnSlipDrawer txn={slipTxn} onClose={() => setSlipTxn(null)} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TRANSACTION SLIP DRAWER
+// ═══════════════════════════════════════════════════════════════════════
+
+function TxnSlipDrawer({ txn, onClose }: { txn: PosTransaction; onClose: () => void }) {
+  const rows: [string, string | null][] = [
+    ["Transaction ID", txn.razorpay_txn_id],
+    ["External Ref", txn.external_ref],
+    ["Terminal ID", txn.terminal_id],
+    ["MID", txn.mid],
+    ["Device Serial", txn.device_serial],
+    ["Amount", `₹${parseFloat(txn.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`],
+    ["Status", txn.status],
+    ["Payment Mode", txn.payment_mode],
+    ["Card Brand", txn.card_brand],
+    ["Card Type", txn.card_type],
+    ["Card Classification", txn.card_classification],
+    ["Card Number", txn.card_number],
+    ["Issuing Bank", txn.issuing_bank],
+    ["Acquiring Bank", txn.acquiring_bank],
+    ["RRN", txn.rrn],
+    ["Auth Code", txn.auth_code],
+    ["Customer", txn.customer_name?.replace(/\s*\/\s*$/, "") || null],
+    ["Payer Name", txn.payer_name || null],
+    ["Transaction Time", new Date(txn.txn_time).toLocaleString("en-IN")],
+    ["Posting Date", txn.posting_date ? new Date(txn.posting_date).toLocaleDateString("en-IN") : null],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-md overflow-y-auto bg-white shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-100 bg-white px-6 py-4">
+          <h2 className="font-display text-lg font-bold text-ink-900">Transaction Slip</h2>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-ink-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-6">
+          <div className="mb-4 text-center">
+            <div className="text-2xl font-bold text-ink-900">₹{parseFloat(txn.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+            <Badge variant={txn.status === "CAPTURED" ? "success" : txn.status === "FAILED" ? "danger" : "warning"} className="mt-1">
+              {txn.status}
+            </Badge>
+          </div>
+          <div className="divide-y divide-ink-100 rounded-xl border border-ink-100">
+            {rows.map(([label, value]) => value ? (
+              <div key={label} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <span className="text-xs font-medium text-ink-500">{label}</span>
+                <span className="text-right text-xs font-semibold text-ink-900">{value}</span>
+              </div>
+            ) : null)}
+          </div>
+          {txn.receipt_url && (
+            <a href={txn.receipt_url} target="_blank" rel="noopener noreferrer"
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-100">
+              <Download className="h-4 w-4" /> Download Receipt
+            </a>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

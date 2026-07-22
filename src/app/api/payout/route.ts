@@ -123,11 +123,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Payout service is currently disabled" }, { status: 503 });
   }
 
+  const NETWORK_ROLES = new Set(["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"]);
   let user;
   try {
     user = await requireAuth();
-    // Suspension gate — a SUSPENDED account (admin/distributor action) cannot
-    // create payouts, regardless of what its session token says.
+    if (!NETWORK_ROLES.has(user.role))
+      return NextResponse.json({ error: "Payout is available for network users only" }, { status: 403 });
     await assertAccountActive(user.id);
     // Onboarding liveness gate — network users must have a face baseline first.
     await assertLivenessReady(user);

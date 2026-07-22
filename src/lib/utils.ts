@@ -28,25 +28,23 @@ export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** JMP NextGenPay network-code prefixes — driven by the role of the user. */
-export const USER_CODE_PREFIX = {
-  retailer: "JNPR",
-  distributor: "JNPD",
-  "master-distributor": "JNPM"
-} as const;
+/** Role-based user code prefixes (production format). */
+export const USER_CODE_PREFIX: Record<string, string> = {
+  RETAILER: "RT",
+  DISTRIBUTOR: "DT",
+  MASTER_DISTRIBUTOR: "MD",
+  SUPER_DISTRIBUTOR: "SD",
+};
 
 /**
- * Generate a unique NextGenPay network code for a given role.
- *
- *   retailer            → JNPR + 6 chars  (e.g. JNPR8K2X9P)
- *   distributor         → JNPD + 6 chars
- *   master-distributor  → JNPM + 6 chars
+ * Build a user code from a role prefix and a sequence number.
+ * Sequence starts at 101, zero-padded to 4 digits.
+ * e.g. role=RETAILER, seq=1 → "RT0101", seq=2 → "RT0102"
  */
-export function generateUserCode(
-  role: keyof typeof USER_CODE_PREFIX
-): string {
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `${USER_CODE_PREFIX[role]}${rand}`;
+export function buildUserCode(role: string, seq: number): string {
+  const prefix = USER_CODE_PREFIX[role] ?? "XX";
+  const num = (100 + seq).toString().padStart(4, "0");
+  return `${prefix}${num}`;
 }
 
 /**

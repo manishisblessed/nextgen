@@ -60,7 +60,7 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-const services: NavItem[] = [
+const baseServices: NavItem[] = [
   { href: "/dashboard/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
   { href: "/dashboard/pos", label: "POS Terminals", icon: Monitor, badge: "New" },
   { href: "/dashboard/qr", label: "QR Payments", icon: QrCode, badge: "New" },
@@ -70,12 +70,22 @@ const services: NavItem[] = [
   { href: "/dashboard/aadhaar-pay", label: "AePS / Aadhaar Pay", icon: Fingerprint },
   { href: "/dashboard/upi", label: "UPI Collect", icon: Send },
   { href: "/dashboard/recharge/mobile", label: "Recharges", icon: Smartphone },
-  { href: "/dashboard/bill-pay/credit-card", label: "Credit Card Bill Payment", icon: CreditCard, badge: "New" },
-  { href: "/dashboard/bill-pay/bbps-1", label: "BBPS-Bharat BillPay", icon: Receipt, badge: "New" },
-  { href: "/dashboard/bill-pay/bbps-2", label: "Unified Bill Payment Platform", icon: Receipt, badge: "New" },
   { href: "/dashboard/travel/flight", label: "Travel", icon: Plane },
   { href: "/dashboard/virtual-account", label: "Virtual Account", icon: Building2 }
 ];
+
+const bbpsServices: NavItem[] = [
+  { href: "/dashboard/bill-pay/credit-card", label: "Credit Card Bill Payment", icon: CreditCard, badge: "New" },
+  { href: "/dashboard/bill-pay/cc-pay", label: "Credit Card Payment (CC-2)", icon: CreditCard, badge: "New" },
+  { href: "/dashboard/bill-pay/bbps-1", label: "BBPS-Bharat BillPay", icon: Receipt, badge: "New" },
+  { href: "/dashboard/bill-pay/bbps-2", label: "Unified Bill Payment Platform", icon: Receipt, badge: "New" },
+];
+
+/** RT gets all services including BBPS */
+const retailerServices: NavItem[] = [...baseServices, ...bbpsServices];
+
+/** DT/MD/SD get payout but NOT BBPS */
+const networkServices: NavItem[] = [...baseServices];
 
 const account: NavItem[] = [
   { href: "/dashboard/performance", label: "Performance", icon: Activity },
@@ -108,7 +118,8 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "qr", label: "QR Collections" },
   { href: "disputes", label: "Disputes & Support" },
   { href: "aml", label: "AML Monitoring" },
-  { href: "revenue", label: "Revenue & Commission" },
+  { href: "revenue", label: "Company Earnings" },
+  { href: "commission-report", label: "Commission Distributed" },
   { href: "analytics", label: "Business Analytics" },
   { href: "agreements", label: "Agreements Vault" },
   { href: "verify", label: "Identity Toolkit" },
@@ -146,12 +157,14 @@ const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/wallet-ops", label: "Wallet Operations", icon: Wallet, badge: "New" },
   { href: "/dashboard/admin/ledger", label: "Ledger Explorer", icon: BookOpenCheck, badge: "New" },
   { href: "/dashboard/admin/brands", label: "Brands & MDR", icon: Tag, badge: "New" },
+  { href: "/dashboard/admin/company-charges", label: "Company Charges", icon: ShieldAlert, badge: "New" },
   { href: "/dashboard/admin/settlement-ops", label: "Settlement Ops", icon: Timer, badge: "New" },
   { href: "/dashboard/admin/reversals", label: "Reversal Desk", icon: Undo2, badge: "New" },
   { href: "/dashboard/admin/aeps", label: "AEPS Centre", icon: Fingerprint, badge: "New" },
   { href: "/dashboard/admin/pos-rental", label: "POS Rental & Billing", icon: ReceiptText, badge: "New" },
   { href: "/dashboard/admin/pos-settlement", label: "POS Settlement", icon: CreditCard, badge: "New" },
-  { href: "/dashboard/admin/revenue", label: "Revenue & Commission", icon: CircleDollarSign, badge: "New" },
+  { href: "/dashboard/admin/revenue", label: "Company Earnings", icon: CircleDollarSign, badge: "New" },
+  { href: "/dashboard/admin/commission-report", label: "Commission Distributed", icon: HandCoins, badge: "New" },
   { href: "/dashboard/admin/analytics", label: "Business Analytics", icon: LineChart, badge: "New" },
   { href: "/dashboard/admin/agreements", label: "Agreements Vault", icon: FileSignature, badge: "New" },
   { href: "/dashboard/admin/verify", label: "Identity Toolkit", icon: ScanSearch, badge: "New" },
@@ -202,7 +215,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
     },
-    { heading: "Services", items: services },
+    { heading: "Services", items: retailerServices },
     { heading: "Account", items: account }
   ],
 
@@ -213,7 +226,6 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/network", label: "My Retailers", icon: Users },
         { href: "/dashboard/network/onboard", label: "Invite Retailer", icon: PackagePlus },
-        { href: "/dashboard/network/schemes", label: "My Schemes", icon: Layers, badge: "New" },
         { href: "/dashboard/pos-rental", label: "POS Rental", icon: ReceiptText, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
@@ -223,7 +235,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
     },
-    { heading: "Run Services", items: services },
+    { heading: "Run Services", items: networkServices },
     { heading: "Account", items: account }
   ],
 
@@ -234,7 +246,6 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/network", label: "My Network", icon: Users },
         { href: "/dashboard/network/onboard", label: "Invite Master Distributor", icon: PackagePlus },
-        { href: "/dashboard/network/schemes", label: "My Schemes", icon: Layers, badge: "New" },
         { href: "/dashboard/pos-rental", label: "POS Rental", icon: ReceiptText, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
@@ -252,7 +263,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/marketing", label: "Marketing Tools", icon: Megaphone }
       ]
     },
-    { heading: "Run Services", items: services },
+    { heading: "Run Services", items: networkServices },
     { heading: "Account", items: account }
   ],
 
@@ -263,7 +274,6 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/network", label: "My Distributors", icon: Users },
         { href: "/dashboard/network/onboard", label: "Invite Distributor", icon: PackagePlus },
-        { href: "/dashboard/network/schemes", label: "My Schemes", icon: Layers, badge: "New" },
         { href: "/dashboard/pos-rental", label: "POS Rental", icon: ReceiptText, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
@@ -281,7 +291,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/marketing", label: "Marketing Tools", icon: Megaphone }
       ]
     },
-    { heading: "Run Services", items: services },
+    { heading: "Run Services", items: networkServices },
     { heading: "Account", items: account }
   ],
 
@@ -323,7 +333,8 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/admin/wallet-ops", label: "Wallet Balances", icon: Wallet },
         { href: "/dashboard/admin/ledger", label: "Ledger Explorer", icon: BookOpenCheck },
-        { href: "/dashboard/admin/revenue", label: "Revenue & Commission", icon: CircleDollarSign },
+        { href: "/dashboard/admin/revenue", label: "Company Earnings", icon: CircleDollarSign },
+        { href: "/dashboard/admin/commission-report", label: "Commission Distributed", icon: HandCoins },
         { href: "/dashboard/admin/analytics", label: "Business Analytics", icon: LineChart },
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]

@@ -4,6 +4,7 @@ import { requireRole, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { validateBrandRate } from "@/lib/brand/mdr";
+import { validateMdrAgainstFloor } from "@/lib/mdr/floor";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -46,6 +47,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     maxAmount: b.maxAmount,
   });
   if (overlap) return NextResponse.json({ error: overlap }, { status: 400 });
+
+  const floorErr = await validateMdrAgainstFloor({
+    serviceKind: "POS",
+    paymentMode: b.paymentMode,
+    mdrType: b.mdrType,
+    mdrValue: b.mdrValue,
+    mdrValueT0: b.mdrValueT0,
+  });
+  if (floorErr) return NextResponse.json({ error: floorErr }, { status: 400 });
 
   const rate = await prisma.brandMdrRate.create({
     data: { brandId: params.id, ...b },
@@ -111,6 +121,15 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     existing.id
   );
   if (overlap) return NextResponse.json({ error: overlap }, { status: 400 });
+
+  const floorErr = await validateMdrAgainstFloor({
+    serviceKind: "POS",
+    paymentMode: next.paymentMode,
+    mdrType: b.mdrType ?? existing.mdrType,
+    mdrValue: b.mdrValue ?? Number(existing.mdrValue),
+    mdrValueT0: b.mdrValueT0 ?? Number(existing.mdrValueT0),
+  });
+  if (floorErr) return NextResponse.json({ error: floorErr }, { status: 400 });
 
   const updated = await prisma.brandMdrRate.update({
     where: { id: existing.id },

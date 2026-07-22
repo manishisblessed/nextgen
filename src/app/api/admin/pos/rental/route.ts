@@ -22,8 +22,9 @@ export async function GET(req: Request) {
     const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
     const pageSize = 25;
 
-    const [cfg, summary, plans, subs, subTotal, invoices] = await Promise.all([
+    const [cfg, waiverCfg, summary, plans, subs, subTotal, invoices] = await Promise.all([
       getSetting("pos.rental_billing"),
+      getSetting("pos.rental_waiver"),
       rentalBillingSummary(),
       // Admin manages platform plans (ownerId = null). Network users' private
       // plans are managed by those users on their own dashboard.
@@ -61,6 +62,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       config: cfg,
+      waiver: waiverCfg,
       summary,
       plans: plans.map((p) => ({
         id: p.id,
@@ -153,6 +155,8 @@ const ActionBody = z.discriminatedUnion("action", [
   z.object({ action: z.literal("waive_invoice"), invoiceId: z.string().min(1), note: z.string().max(200).optional() }),
   z.object({ action: z.literal("toggle_billing"), enabled: z.boolean() }),
   z.object({ action: z.literal("set_billing_hour"), hour: z.number().int().min(0).max(23) }),
+  z.object({ action: z.literal("toggle_waiver"), enabled: z.boolean() }),
+  z.object({ action: z.literal("set_waiver_threshold"), amount: z.number().positive() }),
 ]);
 
 /** POST — rental actions (plans, subscriptions, billing runs, waivers). */
@@ -402,6 +406,20 @@ export async function POST(req: Request) {
         const cfg = await getSetting("pos.rental_billing");
         await setSetting("pos.rental_billing", { ...cfg, hour: body.hour }, admin.id);
         await audit("pos.rental_billing_hour_changed", { hour: body.hour });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "toggle_waiver": {
+        const cfg = await getSetting("pos.rental_waiver");
+        await setSetting("pos.rental_waiver", { ...cfg, enabled: body.enabled }, admin.id);
+        await audit("pos.rental_waiver_toggled", { enabled: body.enabled });
+        return NextResponse.json({ ok: true });
+      }
+
+      case "set_waiver_threshold": {
+        const cfg = await getSetting("pos.rental_waiver");
+        await setSetting("pos.rental_waiver", { ...cfg, thresholdPerMachine: body.amount }, admin.id);
+        await audit("pos.rental_waiver_threshold_changed", { amount: body.amount });
         return NextResponse.json({ ok: true });
       }
     }

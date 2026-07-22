@@ -1,17 +1,25 @@
 /**
  * Same Day Solution — Settlement API adapter.
  *
- * Moves money from our PARTNER wallet at Same Day to pre-verified bank
- * accounts (penny-drop verified, ₹4 per verification). Exposed via
- * /api/admin/settlement/* (admin transfers) and wrapped by sameday-payout.ts
- * as the bank-mode retailer payout rail.
+ * Moves money from our PARTNER wallet at Same Day to bank accounts. Two
+ * account-add flows are supported:
+ *
+ *   1. Penny-drop verified (₹4 charge) — settlementAddAccount()
+ *   2. Trusted / skip-verification (₹0) — settlementAddTrustedAccount()
+ *
+ * Transfers work to BOTH verified and trusted (skip-verified) accounts.
+ * Trusted accounts are NOT confirmed with the bank — use only for accounts
+ * we already trust. Wrong details = funds sent to the wrong recipient.
+ *
+ * Exposed via /api/admin/settlement/* (admin transfers) and wrapped by
+ * sameday-payout.ts as the bank-mode retailer payout rail.
  *
  * Activate: PARTNER_SETTLEMENT_ENABLED=true  (flags.settlement)
  *   needs: SAMEDAY_SETTLEMENT_API_KEY / SAMEDAY_SETTLEMENT_API_SECRET
  *          (falls back to SAMEDAY_POS_API_KEY / SECRET)
  *
  * Notes from the collection:
- * - transfers go to verified accounts only, duplicate cooldown 2 min/account
+ * - duplicate cooldown 2 min/account
  * - failed transfers auto-refund the partner wallet
  * - PENDING transfers must be tracked via status (which also live-polls)
  */
@@ -22,6 +30,8 @@ const P = "/api/partner/settlement";
 
 export type SettlementMode = "IMPS" | "NEFT" | "RTGS";
 
+export type VerificationStatus = "VERIFIED" | "NOT_VERIFIED" | "SKIPPED" | "PENDING" | "FAILED";
+
 export type SettlementAccount = {
   id: string;
   accountNumber: string;
@@ -29,6 +39,8 @@ export type SettlementAccount = {
   accountHolderName: string;
   isVerified: boolean;
   verifiedName?: string;
+  verificationStatus?: VerificationStatus;
+  verificationLabel?: string;
 };
 
 export type SettlementTransaction = {
@@ -75,6 +87,8 @@ type RawAccount = {
   account_holder_name: string;
   is_verified?: boolean;
   verified_name?: string;
+  verification_status?: string;
+  verification_label?: string;
 };
 
 type RawTxn = {
@@ -101,6 +115,8 @@ function mapAccount(a: RawAccount): SettlementAccount {
     accountHolderName: a.account_holder_name,
     isVerified: Boolean(a.is_verified),
     verifiedName: a.verified_name,
+    verificationStatus: (a.verification_status as VerificationStatus) || undefined,
+    verificationLabel: a.verification_label,
   };
 }
 
@@ -182,6 +198,68 @@ export async function settlementAddAccount(input: {
   };
 }
 
+/**
+ * Add a trusted bank account WITHOUT penny-drop verification (₹0 charge).
+ *
+ * WARNING: account details are NOT confirmed with the bank. If the account
+ * number or IFSC is wrong, funds will be sent to the wrong recipient. Only
+ * use for accounts we already trust. We accept this risk.
+ */
+export async function settlementAddTrustedAccount(input: {
+  accountNumber: string;
+  ifscCode: string;
+  accountHolderName: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactMobile: string;
+}): Promise<
+  PartnerResult<{
+    account: SettlementAccount;
+    verificationStatus: string;
+    skipVerification: boolean;
+    message?: string;
+  }>
+> {
+  if (!/^\d{10}$/.test(input.contactMobile)) {
+    return { ok: false, code: "INVALID_MOBILE", message: "contact_mobile must be a valid 10-digit number when skipping verification" };
+  }
+
+  const r = await samedayRequest<{
+    success: boolean;
+    verified?: boolean;
+    verification_status?: string;
+    verification_label?: string;
+    account?: RawAccount;
+    skip_verification?: boolean;
+    charge_deducted?: number;
+    message?: string;
+  }>(creds(), "POST", `${P}/accounts`, {
+    account_number: input.accountNumber,
+    ifsc_code: input.ifscCode,
+    account_holder_name: input.accountHolderName,
+    contact_name: input.contactName ?? input.accountHolderName,
+    contact_email: input.contactEmail ?? "",
+    contact_mobile: input.contactMobile,
+    skip_verification: true,
+  });
+
+  if (!r.ok) return r;
+  if (!r.data.account) {
+    return { ok: false, code: "NO_ACCOUNT", message: "Provider did not return an account", raw: r.raw };
+  }
+
+  return {
+    ok: true,
+    data: {
+      account: mapAccount(r.data.account),
+      verificationStatus: r.data.verification_status || "SKIPPED",
+      skipVerification: true,
+      message: r.data.message,
+    },
+    raw: r.raw,
+  };
+}
+
 export async function settlementListAccounts(): Promise<PartnerResult<SettlementAccount[]>> {
   const r = await samedayRequest<{ success: boolean; accounts?: RawAccount[] }>(
     creds(),
@@ -246,7 +324,7 @@ export async function settlementCharges(
   };
 }
 
-/** Initiate a settlement transfer to a verified account. */
+/** Initiate a settlement transfer to a verified or trusted (skip-verified) account. */
 export async function settlementTransfer(input: {
   accountId: string;
   amount: number;

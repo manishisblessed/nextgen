@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { debitWallet, creditWallet, LedgerError } from "@/lib/ledger";
-import { dec, add, sub as subtract, toNumber, round, mul } from "@/lib/money";
+import { dec, add, sub as subtract, toNumber, round, mul, gte } from "@/lib/money";
 import { getSetting } from "@/lib/settings";
 
 /**
@@ -41,6 +41,93 @@ function istDayOfMonth(now: Date): number {
   );
 }
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** IST calendar parts (year, 0-indexed month, day) for a UTC instant. */
+function istYmd(now: Date): { y: number; m: number; d: number } {
+  const ist = new Date(now.getTime() + IST_OFFSET_MS);
+  return { y: ist.getUTCFullYear(), m: ist.getUTCMonth(), d: ist.getUTCDate() };
+}
+
+/** UTC instant of IST-midnight on (year, month, day). Month over/underflow is normalized. */
+function istMidnight(y: number, m: number, day: number): Date {
+  return new Date(Date.UTC(y, m, day) - IST_OFFSET_MS);
+}
+
+/**
+ * The volume-measurement window the rent waiver evaluates when billing runs at
+ * `now`. It is the ~1-month cycle that just completed: from the previous
+ * billing anchor up to the most recent one (≤ now). Business done by a machine
+ * inside this window decides whether the invoice raised now is waived.
+ *
+ * `billingDay` is 1-28 (schema-enforced), so no short-month clamping is needed.
+ */
+export function posRentalBillingWindow(
+  billingDay: number,
+  now: Date,
+  startedAt?: Date | null
+): { windowStart: Date; windowEnd: Date } {
+  const { m, y, d } = istYmd(now);
+  // Most recent billing anchor at or before `now`.
+  let ay = y;
+  let am = m;
+  if (d < billingDay) {
+    am = m - 1; // billing day hasn't arrived yet this month → last month's anchor
+  }
+  const windowEnd = istMidnight(ay, am, billingDay);
+  let windowStart = istMidnight(ay, am - 1, billingDay);
+  // A subscription created mid-cycle only accrues from its start date.
+  if (startedAt && startedAt.getTime() > windowStart.getTime()) windowStart = startedAt;
+  return { windowStart, windowEnd };
+}
+
+/**
+ * The current in-progress cycle for a subscription, used by the retailer
+ * dashboard to show a countdown to the next billing day. `nextBilling` is the
+ * upcoming billing date; the volume accrued in [cycleStart, now] is exactly the
+ * window the billing run at `nextBilling` will evaluate for the waiver.
+ */
+export function posRentalCurrentCycle(
+  billingDay: number,
+  now: Date,
+  startedAt?: Date | null
+): { cycleStart: Date; nextBilling: Date } {
+  const { m, y, d } = istYmd(now);
+  let sy = y;
+  let sm = m;
+  if (d < billingDay) {
+    sm = m - 1; // still before this month's billing day → current cycle began last month
+  }
+  let cycleStart = istMidnight(sy, sm, billingDay);
+  const nextBilling = istMidnight(sy, sm + 1, billingDay);
+  if (startedAt && startedAt.getTime() > cycleStart.getTime()) cycleStart = startedAt;
+  return { cycleStart, nextBilling };
+}
+
+/**
+ * Gross POS business a machine did within [start, end). "Business" is the full
+ * transaction (swipe) amount across all payment modes — every captured
+ * settlement entry counts regardless of settlement status. Legacy entries
+ * without `capturedAt` fall back to their `createdAt`.
+ */
+export async function machineBusinessInWindow(
+  machineId: string,
+  start: Date,
+  end: Date
+): Promise<ReturnType<typeof dec>> {
+  const agg = await prisma.posSettlementEntry.aggregate({
+    where: {
+      machineId,
+      OR: [
+        { capturedAt: { gte: start, lt: end } },
+        { capturedAt: null, createdAt: { gte: start, lt: end } },
+      ],
+    },
+    _sum: { grossAmount: true },
+  });
+  return dec(agg._sum.grossAmount ?? 0);
+}
+
 /** Compute the total debit for a subscription: base rent + optional GST. */
 export function computeRentalAmounts(baseRent: number | string, includeGst: boolean) {
   const rent = dec(baseRent);
@@ -54,9 +141,12 @@ export async function runPosRentalBilling(now = new Date()): Promise<{
   billed: number;
   failed: number;
   skipped: number;
+  waived: number;
 }> {
   const cfg = await getSetting("pos.rental_billing");
-  if (!cfg.enabled) return { processed: 0, billed: 0, failed: 0, skipped: 0 };
+  if (!cfg.enabled) return { processed: 0, billed: 0, failed: 0, skipped: 0, waived: 0 };
+
+  const waiverCfg = await getSetting("pos.rental_waiver");
 
   const periodKey = istPeriodKey(now);
   const today = istDayOfMonth(now);
@@ -85,6 +175,7 @@ export async function runPosRentalBilling(now = new Date()): Promise<{
   let billed = 0;
   let failed = 0;
   let skipped = 0;
+  let waived = 0;
 
   for (const sub of subs) {
     // Skip billing if the subscriber has created a downstream subscription
@@ -111,6 +202,47 @@ export async function runPosRentalBilling(now = new Date()): Promise<{
     if (!total.gt(0)) {
       skipped++;
       continue;
+    }
+
+    // Volume-based waiver: if this machine did at least the configured business
+    // in its current billing cycle, waive the rent entirely — no wallet debit
+    // and no commission cascade for this machine this cycle.
+    if (waiverCfg.enabled && waiverCfg.thresholdPerMachine > 0) {
+      const { windowStart, windowEnd } = posRentalBillingWindow(sub.billingDay, now, sub.startedAt);
+      const business = await machineBusinessInWindow(sub.machineId, windowStart, windowEnd);
+      if (gte(business, waiverCfg.thresholdPerMachine)) {
+        const detail = `Auto-waived — ₹${toNumber(round(business))} POS business this cycle (target ₹${waiverCfg.thresholdPerMachine})`;
+        if (existing) {
+          await prisma.posRentalInvoice.update({
+            where: { id: existing.id },
+            data: {
+              status: "WAIVED",
+              amount: rent,
+              gstAmount: gst,
+              totalAmount: dec(0),
+              commissionAmount: dec(0),
+              walletTxnId: null,
+              commissionTxnId: null,
+              detail,
+            },
+          });
+        } else {
+          await prisma.posRentalInvoice.create({
+            data: {
+              subscriptionId: sub.id,
+              periodKey,
+              amount: rent,
+              gstAmount: gst,
+              totalAmount: dec(0),
+              commissionAmount: dec(0),
+              status: "WAIVED",
+              detail,
+            },
+          });
+        }
+        waived++;
+        continue;
+      }
     }
 
     const commissionAmount = dec(sub.commission);
@@ -228,7 +360,7 @@ export async function runPosRentalBilling(now = new Date()): Promise<{
     }
   }
 
-  return { processed: subs.length, billed, failed, skipped };
+  return { processed: subs.length, billed, failed, skipped, waived };
 }
 
 /** Rental revenue rollup for the admin billing view. */

@@ -4,10 +4,9 @@ import { dec, gte, lte, mul, round, type Money } from "@/lib/money";
 
 /**
  * MDR engine — resolves the merchant discount rate + commission share for
- * acquiring-style rails (POS / PG / QR / UPI). Cascade model: ONLY the user's
- * assigned active Scheme resolves — no platform-default fallback. MDR rows now
- * live on the same Scheme as the service slabs (unified model). Ancestor
- * margins come from resolveMdrChain (child MDR − own MDR per tier).
+ * acquiring-style rails (POS / PG / QR / UPI). Flat model: ONLY the user's
+ * assigned active Scheme resolves — no platform-default fallback. Admin assigns
+ * schemes directly to any user; commission values are credited flat (no chain).
  *
  * Slab matching: (serviceKind, amount band) plus the card/acquirer dimensions
  * paymentMode, company, cardType, brandType, classification. A null/"*"
@@ -35,6 +34,10 @@ export type EffectiveMdr = {
   slabId: string | null;
   /** Absolute MDR (₹) charged for `amount`. Zero when no slab matched. */
   mdr: Money;
+  /** Absolute vendor/acquirer cost (₹) the company pays upstream. */
+  vendor: Money;
+  /** Absolute company revenue margin (₹) = mdr − vendor (never below zero). */
+  margin: Money;
   mdrType: RateType | null;
   commission: {
     retailer: Money;
@@ -56,6 +59,8 @@ function emptyMdr(): EffectiveMdr {
     schemeName: null,
     slabId: null,
     mdr: dec(0),
+    vendor: dec(0),
+    margin: dec(0),
     mdrType: null,
     commission: {
       retailer: dec(0),
@@ -112,6 +117,12 @@ function slabMdrValue(slab: MdrSlab, settlementType?: "T0" | "T1") {
   return slab.mdrValue;
 }
 
+/** Effective vendor/acquirer cost for a slab (T0 falls back to T1). */
+function slabVendorValue(slab: MdrSlab, settlementType?: "T0" | "T1") {
+  if (settlementType === "T0" && Number(slab.vendorChargeT0) > 0) return slab.vendorChargeT0;
+  return slab.vendorCharge;
+}
+
 async function resolveFromScheme(
   schemeId: string,
   serviceKind: MdrServiceKind,
@@ -145,12 +156,19 @@ export async function getEffectiveMdr(
     schemeId: string,
     schemeName: string,
     source: EffectiveMdr["source"]
-  ): EffectiveMdr => ({
+  ): EffectiveMdr => {
+    const mdr = applyRate(amt, slab.mdrType, slabMdrValue(slab, d.settlementType));
+    const vendor = applyRate(amt, slab.mdrType, slabVendorValue(slab, d.settlementType));
+    const rawMargin = round(dec(mdr).sub(dec(vendor)));
+    const margin = rawMargin.gt(0) ? rawMargin : dec(0);
+    return {
     source,
     schemeId,
     schemeName,
     slabId: slab.id,
-    mdr: applyRate(amt, slab.mdrType, slabMdrValue(slab, d.settlementType)),
+    mdr,
+    vendor,
+    margin,
     mdrType: slab.mdrType,
     commission: {
       retailer: applyRate(amt, slab.commissionType, slab.commissionRetailer),
@@ -158,7 +176,8 @@ export async function getEffectiveMdr(
       master: applyRate(amt, slab.commissionType, slab.commissionMaster),
       superDistributor: applyRate(amt, slab.commissionType, slab.commissionSuperDistributor),
     },
-  });
+    };
+  };
 
   if (user.schemeId) {
     const scheme = await prisma.scheme.findFirst({
@@ -175,149 +194,20 @@ export async function getEffectiveMdr(
 }
 
 // ---------------------------------------------------------------------------
-// MDR pricing chain (cascade model)
+// MDR resolver — flat model (no chain walk)
 // ---------------------------------------------------------------------------
 
-export type MdrChainMember = {
-  userId: string;
-  role: string;
-  /** 0 = transacting user (machine owner), 1..3 = ancestors. */
-  level: number;
-  schemeId: string | null;
-  slabId: string | null;
-  /** Absolute MDR (₹) this member's own scheme prices for the txn. */
-  mdr: Money;
-  /**
-   * Gross commission (₹) this member earns: level 0 → 0 (the retailer's
-   * benefit is the net credit); level>0 → max(0, childMdr − ownMdr).
-   */
-  gross: Money;
-};
-
-export type MdrChain =
-  | {
-      ok: true;
-      schemeId: string;
-      schemeName: string;
-      slabId: string;
-      /** MDR charged to the transacting user (their own scheme). */
-      userMdr: Money;
-      members: MdrChainMember[];
-    }
-  | { ok: false; reason: "NO_USER" | "NO_SCHEME" | "NO_SLAB" };
-
-const NETWORK_ROLES = new Set([
-  "RETAILER",
-  "DISTRIBUTOR",
-  "MASTER_DISTRIBUTOR",
-  "SUPER_DISTRIBUTOR",
-]);
-
 /**
- * Resolve the MDR margin chain for a POS/PG/QR/UPI capture. Mirrors
- * resolvePricingChain: the transacting user needs an active Scheme with a
- * matching MDR slab; ancestors without one earn zero (pass-through).
+ * Resolve the effective MDR for a user directly from their assigned scheme.
+ * No chain walk, no ancestor margins. Used by the POS settlement engine.
  */
-export async function resolveMdrChain(
+export async function resolveMdrForUser(
   userId: string,
   serviceKind: MdrServiceKind,
   amount: Money | string | number,
   dims: MdrDimensions | string = {}
-): Promise<MdrChain> {
-  const d: MdrDimensions = typeof dims === "string" ? { paymentMode: dims } : dims;
-  const amt = round(amount);
-
-  const walk: Array<{ id: string; role: string; schemeId: string | null }> = [];
-  let currentId: string | null = userId;
-  const seen = new Set<string>();
-  for (let depth = 0; depth < 4 && currentId; depth++) {
-    if (seen.has(currentId)) break;
-    seen.add(currentId);
-    const u: { id: string; role: string; schemeId: string | null; parentId: string | null; status: string } | null =
-      await prisma.user.findUnique({
-        where: { id: currentId },
-        select: { id: true, role: true, schemeId: true, parentId: true, status: true },
-      });
-    if (!u || u.status === "CLOSED" || !NETWORK_ROLES.has(u.role)) break;
-    walk.push({ id: u.id, role: u.role, schemeId: u.schemeId });
-    currentId = u.parentId;
-  }
-
-  if (walk.length === 0) return { ok: false, reason: "NO_USER" };
-
-  type Resolved = { schemeId: string | null; schemeName: string | null; slab: MdrSlab | null };
-  const resolved: Resolved[] = [];
-  for (const member of walk) {
-    let r: Resolved = { schemeId: null, schemeName: null, slab: null };
-    if (member.schemeId) {
-      const scheme = await prisma.scheme.findFirst({
-        where: { id: member.schemeId, active: true },
-        select: { id: true, name: true },
-      });
-      if (scheme) {
-        r = {
-          schemeId: scheme.id,
-          schemeName: scheme.name,
-          slab: await resolveFromScheme(scheme.id, serviceKind, d, amt),
-        };
-      }
-    }
-    resolved.push(r);
-  }
-
-  const self = resolved[0];
-  if (!self.schemeId) return { ok: false, reason: "NO_SCHEME" };
-  if (!self.slab) return { ok: false, reason: "NO_SLAB" };
-
-  const members: MdrChainMember[] = [];
-  let childMdr = applyRate(amt, self.slab.mdrType, slabMdrValue(self.slab, d.settlementType));
-
-  members.push({
-    userId: walk[0].id,
-    role: walk[0].role,
-    level: 0,
-    schemeId: self.schemeId,
-    slabId: self.slab.id,
-    mdr: childMdr,
-    gross: dec(0),
-  });
-
-  for (let i = 1; i < walk.length; i++) {
-    const r = resolved[i];
-    if (r.slab) {
-      const ownMdr = applyRate(amt, r.slab.mdrType, slabMdrValue(r.slab, d.settlementType));
-      const margin = childMdr.gt(ownMdr) ? round(childMdr.sub(ownMdr)) : dec(0);
-      members.push({
-        userId: walk[i].id,
-        role: walk[i].role,
-        level: i,
-        schemeId: r.schemeId,
-        slabId: r.slab.id,
-        mdr: ownMdr,
-        gross: margin,
-      });
-      childMdr = ownMdr;
-    } else {
-      members.push({
-        userId: walk[i].id,
-        role: walk[i].role,
-        level: i,
-        schemeId: r.schemeId,
-        slabId: null,
-        mdr: childMdr,
-        gross: dec(0),
-      });
-    }
-  }
-
-  return {
-    ok: true,
-    schemeId: self.schemeId,
-    schemeName: self.schemeName ?? "",
-    slabId: self.slab.id,
-    userMdr: members[0].mdr,
-    members,
-  };
+): Promise<EffectiveMdr> {
+  return getEffectiveMdr(userId, serviceKind, amount, dims);
 }
 
 /**

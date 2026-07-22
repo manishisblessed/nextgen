@@ -681,13 +681,37 @@ function DetailsTab({ kyc }: { kyc: KycRow }) {
       {kyc.nameMismatch && (
         <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-amber-800">Name Mismatch Detected</p>
             <p className="mt-1 text-xs text-amber-700">
-              The names across Aadhaar, PAN, and/or Bank records do not match exactly. Please compare them carefully before approving.
+              The names across Aadhaar, PAN, and/or Bank records do not match exactly. Compare them below before approving.
             </p>
+
+            {/* Side-by-side comparison — the exact names the applicant reviewed */}
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              {[
+                { label: "As per Aadhaar", value: kyc.aadhaarName },
+                { label: "As per PAN", value: kyc.panName },
+                { label: "As per Bank", value: kyc.bankAccountName },
+              ]
+                .filter((r) => !!r.value)
+                .map((r) => (
+                  <div
+                    key={r.label}
+                    className="rounded-lg border border-amber-200 bg-white/70 px-3 py-2"
+                  >
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500">
+                      {r.label}
+                    </p>
+                    <p className="mt-0.5 text-sm font-semibold text-ink-900 break-words">
+                      {r.value}
+                    </p>
+                  </div>
+                ))}
+            </div>
+
             {kyc.nameDeclarationAccepted && (
-              <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+              <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                 Applicant self-declared that all names belong to them
                 {kyc.nameDeclarationAt

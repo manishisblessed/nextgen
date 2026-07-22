@@ -50,23 +50,23 @@ beforeEach(() => {
 });
 
 describe("runTransaction — success path", () => {
-  it("debits amount+fee, credits scheme commission net of TDS, marks SUCCESS", async () => {
-    // Cascade model: commission comes ONLY from the user's assigned scheme.
+  it("debits amount+fee and marks SUCCESS; non-acquiring services earn no commission", async () => {
+    // Commission is ONLY distributed for the acquiring rails (PG/POS/QR/UPI).
+    // Service transactions like recharge earn NO commission even with a scheme.
     holder.db.users.delete("u1");
     holder.db.addUser("u1", 1000, 0, "ACTIVE", 0, { role: "RETAILER", schemeId: "s1" });
     holder.db.addScheme("s1", { service: "RECHARGE_MOBILE", commissionValue: 3 });
 
     const result = await runTransaction(baseInput());
     expect(result.status).toBe("SUCCESS");
-    // 1000 − (100 + 2) + (3 gross − 2% TDS = 2.94) = 900.94
-    expect(holder.db.balanceOf("u1")).toBe("900.94");
+    // 1000 − (100 + 2) = 898.00 (no commission for recharge)
+    expect(holder.db.balanceOf("u1")).toBe("898.00");
     const txn = holder.db.transactions[0];
     expect(txn.status).toBe("SUCCESS");
     expect(txn.partnerTxnId).toBe("OP123");
-    // Passbook: one reserve DEBIT + one commission CREDIT
-    expect(holder.db.walletTxns).toHaveLength(2);
-    // CommissionCredit row records the gross/TDS/net breakdown.
-    expect(holder.db.commissionCredits).toHaveLength(1);
+    // Passbook: only the reserve DEBIT — no commission CREDIT.
+    expect(holder.db.walletTxns).toHaveLength(1);
+    expect(holder.db.commissionCredits).toHaveLength(0);
   });
 
   it("credits no commission when the user has no scheme (no hardcoded fallback)", async () => {
@@ -127,8 +127,8 @@ describe("runTransaction — idempotency", () => {
     const replay = await runTransaction(baseInput({ idempotencyKey: "key-dup", call }));
     expect(replay.status).toBe("SUCCESS");
     expect(call).toHaveBeenCalledTimes(1);
-    // Charged exactly once: 1000 − 102 + 2.94 (3 gross net of 2% TDS).
-    expect(holder.db.balanceOf("u1")).toBe("900.94");
+    // Charged exactly once: 1000 − 102 = 898.00 (recharge earns no commission).
+    expect(holder.db.balanceOf("u1")).toBe("898.00");
   });
 });
 

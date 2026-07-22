@@ -727,6 +727,7 @@ function UserDrawer({
                 </Button>
                 <Button
                   size="sm"
+                  className={walletOpType === "PUSH" ? "from-emerald-600 to-emerald-500" : "from-rose-600 to-rose-500"}
                   isLoading={busy === "walletOp"}
                   disabled={busy === "walletOp"}
                   onClick={async () => {
@@ -793,8 +794,7 @@ function UserDrawer({
           ) : (
             <Button
               size="sm"
-              className="mt-3 w-full"
-              variant={walletOpType === "PUSH" ? "primary" : "secondary"}
+              className={`mt-3 w-full ${walletOpType === "PUSH" ? "from-emerald-600 to-emerald-500 hover:shadow-emerald-200" : "from-rose-600 to-rose-500 hover:shadow-rose-200"}`}
               disabled={busy === "walletOp"}
               onClick={() => {
                 const amt = Number(walletOpAmount);

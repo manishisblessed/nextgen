@@ -36,6 +36,7 @@ import { sweepDisputeSlas } from "@/lib/disputes/service";
 import { runSettlementAutosweep } from "@/lib/settlement/autosweep";
 import { runT1SettlementSweep } from "@/lib/settlement/t1";
 import { runPosT1SettlementSweep, runPosInstantSettlementSweep } from "@/lib/settlement/pos";
+import { runQrT1SettlementSweep } from "@/lib/qr/claims";
 import { runPosIngestSweep } from "@/lib/settlement/pos-ingest";
 import { runPosRentalBilling } from "@/lib/pos/rental";
 import { getSetting } from "@/lib/settings";
@@ -273,6 +274,30 @@ async function main() {
   });
   await boss.schedule(QUEUES.POS_SETTLEMENT_INSTANT, "*/3 * * * *", {}, { tz: "Asia/Kolkata" });
 
+  // QUEUES.QR_SETTLEMENT_T1 — QR collection T+1 settlement. Scheduled hourly;
+  // fires only at the operator-configured IST hour (PlatformSetting
+  // "settlement.qr_t1"). Settles approved (SETTLEABLE) claims the retailer
+  // didn't instant-settle, net of the scheme's T1 MDR. Each claim settles at
+  // most once via the SETTLEABLE→SETTLED status gate + qrsettle:<id> ledger key.
+  await boss.work(QUEUES.QR_SETTLEMENT_T1, async () => {
+    const cfg = await getSetting("settlement.qr_t1");
+    const istHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        hour12: false,
+      }).format(new Date())
+    );
+    if (!cfg.enabled || cfg.paused || istHour !== cfg.hour) return;
+    const r = await runQrT1SettlementSweep();
+    if (r.processed > 0)
+      log(
+        `qr.settlement.t1: processed=${r.processed} settled=${r.settled} ` +
+          `failed=${r.failed} amount=₹${r.totalAmount}`
+      );
+  });
+  await boss.schedule(QUEUES.QR_SETTLEMENT_T1, "12 * * * *", {}, { tz: "Asia/Kolkata" });
+
   // QUEUES.POS_RENTAL_BILLING — admin console Phase 5. Runs every hour; only
   // fires billing when the current IST hour matches the admin-configured hour.
   // Idempotent per (subscription, YYYY-MM) via the unique invoice key.
@@ -337,7 +362,7 @@ async function main() {
   }
 
   log(
-    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.ingest (*/30 * * * * IST), pos.settlement.t1 (10 * * * * IST), pos.settlement.instant (*/3 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
+    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.ingest (*/30 * * * * IST), pos.settlement.t1 (10 * * * * IST), pos.settlement.instant (*/3 * * * * IST), qr.settlement.t1 (12 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
   );
 }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { ShieldOff } from "lucide-react";
-import { schemeAssignerLabel } from "@/lib/scheme/constants";
 import { useSchemeGate } from "@/lib/useSchemeGate";
 
 /**
@@ -11,12 +10,10 @@ import { useSchemeGate } from "@/lib/useSchemeGate";
  * so users don't fill out forms only to hit a backend 403.
  */
 export function SchemeGateOverlay({ children }: { children: React.ReactNode }) {
-  const { blocked, role, isLoading } = useSchemeGate();
+  const { blocked, isLoading } = useSchemeGate();
 
   if (isLoading) return <>{children}</>;
   if (!blocked) return <>{children}</>;
-
-  const assigner = schemeAssignerLabel(role);
 
   return (
     <div className="relative">
@@ -33,8 +30,8 @@ export function SchemeGateOverlay({ children }: { children: React.ReactNode }) {
             Transactions are disabled
           </h3>
           <p className="mt-2 text-sm text-amber-800">
-            Your {assigner} must assign you a commission scheme before you can
-            use this service. Contact them to get activated.
+            Your admin must assign you a scheme before you can
+            use this service. Contact your admin to get activated.
           </p>
         </div>
       </div>

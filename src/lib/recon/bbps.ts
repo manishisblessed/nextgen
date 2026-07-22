@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
 import { getPartner } from "@/lib/partners";
 import { creditWallet } from "@/lib/ledger";
-import { distributeCommission } from "@/lib/commission/distribute";
 import { round, add } from "@/lib/money";
 import { sendOpsAlert } from "@/lib/monitoring/alerts";
 import { emitWebhookEvent } from "@/lib/platform/webhooks";
@@ -106,23 +105,7 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
               response: { reconSettled: true, providerStatus: r.data.status, operatorRef: r.data.operatorRef } as Prisma.InputJsonValue,
             },
           });
-          // Cascade commission distribution (scheme chain, net of 2% TDS).
-          // Idempotency-keyed per (txn, user), so a re-run cannot double-pay.
-          const credits = await distributeCommission(
-            txn.id,
-            txn.userId,
-            txn.service,
-            txn.amount.toNumber(),
-            tx,
-            txn.partner
-          );
-          const own = credits.find((c) => c.userId === txn.userId);
-          if (own) {
-            await tx.transaction.update({
-              where: { id: txn.id },
-              data: { commission: round(own.amount) },
-            });
-          }
+          // BBPS does not earn commission (only PG/POS/QR do).
           await tx.auditLog.create({
             data: {
               userId: txn.userId,

@@ -16,7 +16,15 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 const REVIEWABLE: QrClaimStatus[] = ["PENDING", "AWAITING_SECOND_APPROVAL"];
-const ALL: QrClaimStatus[] = ["PENDING", "AWAITING_SECOND_APPROVAL", "APPROVED", "REJECTED", "CLAWED_BACK"];
+const ALL: QrClaimStatus[] = [
+  "PENDING",
+  "AWAITING_SECOND_APPROVAL",
+  "APPROVED",
+  "SETTLEABLE",
+  "SETTLED",
+  "REJECTED",
+  "CLAWED_BACK",
+];
 
 export async function GET(req: Request) {
   try {
@@ -43,7 +51,8 @@ export async function GET(req: Request) {
       include: {
         user: { select: { id: true, name: true, phone: true, shopName: true } },
         qr: { select: { label: true, upiVpa: true } },
-        reviewedBy: { select: { name: true } },
+        reviewedBy: { select: { id: true, name: true, userCode: true } },
+        firstApprovedBy: { select: { id: true, name: true, userCode: true } },
       },
     }),
     getQrClaimOverview(),
@@ -61,9 +70,16 @@ export async function GET(req: Request) {
       utr: c.utr,
       paidAt: c.paidAt.toISOString(),
       status: c.status,
-      firstApprovedById: c.firstApprovedById,
       reviewNote: c.reviewNote,
+      // Maker-checker reconciliation trail: who approved (and, for large
+      // amounts, who gave the first approval), each with a stable user code.
+      firstApprovedById: c.firstApprovedById,
+      firstApprovedBy: c.firstApprovedBy?.name ?? null,
+      firstApprovedByCode: c.firstApprovedBy?.userCode ?? null,
+      firstApprovedAt: c.firstApprovedAt?.toISOString() ?? null,
+      reviewedById: c.reviewedById,
       reviewedBy: c.reviewedBy?.name ?? null,
+      reviewedByCode: c.reviewedBy?.userCode ?? null,
       reviewedAt: c.reviewedAt?.toISOString() ?? null,
       createdAt: c.createdAt.toISOString(),
       // 5-minute signed link for the private screenshot.

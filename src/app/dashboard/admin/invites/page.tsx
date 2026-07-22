@@ -25,6 +25,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label, Select } from "@/components/ui/Input";
+import { UplineChain } from "@/components/dashboard/UplineChain";
 
 const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: "SUPER_DISTRIBUTOR", label: "Super Distributor" },
@@ -55,6 +56,7 @@ type Invite = {
   approvedAt: string | null;
   rejectedAt: string | null;
   rejectedReason: string | null;
+  upline?: { role: string; name: string; userCode: string | null }[];
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -272,6 +274,7 @@ export default function AdminInvitesPage() {
               <tr>
                 <th className="px-4 py-3 text-left font-semibold text-ink-700">Contact</th>
                 <th className="px-4 py-3 text-left font-semibold text-ink-700">Role</th>
+                <th className="px-4 py-3 text-left font-semibold text-ink-700">Upline</th>
                 <th className="px-4 py-3 text-left font-semibold text-ink-700">Status</th>
                 <th className="px-4 py-3 text-left font-semibold text-ink-700">Created</th>
                 <th className="px-4 py-3 text-right font-semibold text-ink-700">Actions</th>
@@ -286,6 +289,9 @@ export default function AdminInvitesPage() {
                   </td>
                   <td className="px-4 py-3 text-ink-700">
                     {inv.role.replace("_", " ")}
+                  </td>
+                  <td className="px-4 py-3">
+                    <UplineChain nodes={inv.upline ?? []} />
                   </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[inv.status] ?? "bg-gray-100 text-gray-700"}`}>

@@ -3,11 +3,10 @@ import { prisma } from "@/lib/db";
 /**
  * Scheme gate — "no scheme, no transaction".
  *
- * Assignment cascades strictly down the network (admin → SD → MD → DT → RT):
- * a user may only transact once their parent (or admin, for SDs) has assigned
- * them an ACTIVE scheme. There is no platform-default fallback. Staff roles
- * (ADMIN/MASTER_ADMIN/SUPPORT/FINANCE) are exempt — they do not price via
- * schemes.
+ * Admin assigns schemes directly to any user. A user may only transact once
+ * admin has assigned them an ACTIVE scheme. There is no hierarchy or cascade.
+ * Staff roles (ADMIN/MASTER_ADMIN/SUPPORT/FINANCE) are exempt — they do not
+ * price via schemes.
  *
  * Throw-style guard so routes can surface it via toErrorResponse (403).
  */
@@ -24,7 +23,7 @@ export class NoSchemeError extends Error {
   readonly code: "NO_SCHEME_ASSIGNED" | "NO_MDR_SCHEME_ASSIGNED";
 
   constructor(kind: "SCHEME" | "MDR" = "SCHEME") {
-    super("No scheme assigned yet. Ask your distributor or admin to assign a scheme before transacting.");
+    super("No scheme assigned yet. Contact your admin to assign a scheme before transacting.");
     this.name = "NoSchemeError";
     this.code = kind === "MDR" ? "NO_MDR_SCHEME_ASSIGNED" : "NO_SCHEME_ASSIGNED";
   }

@@ -127,3 +127,77 @@ export function getParentRole(role: string): DbRole | null {
   if (idx < 0 || idx >= NETWORK_TIERS.length - 1) return null;
   return NETWORK_TIERS[idx + 1];
 }
+
+/* ---------- Upline chain resolution (RT → DT → MD → SD) ---------- */
+
+/** A single ancestor node in a user's upline chain. */
+export type UplineNode = {
+  id: string;
+  name: string;
+  role: DbRole;
+  userCode: string | null;
+  shopName: string | null;
+};
+
+/** Fields selected for each node when resolving an upline chain. */
+const uplineSelect = {
+  id: true,
+  name: true,
+  role: true,
+  userCode: true,
+  shopName: true,
+} as const;
+
+/**
+ * Nested self-relation include covering the full network depth
+ * (RETAILER → DISTRIBUTOR → MASTER_DISTRIBUTOR → SUPER_DISTRIBUTOR).
+ * The tree is at most 4 tiers deep, so a fixed nesting avoids recursion.
+ * Spread this into a Prisma `select` on the User model.
+ */
+export const uplineInclude = {
+  parent: {
+    select: {
+      ...uplineSelect,
+      parent: {
+        select: {
+          ...uplineSelect,
+          parent: {
+            select: {
+              ...uplineSelect,
+              parent: { select: uplineSelect },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+type LoadedParent = {
+  id: string;
+  name: string;
+  role: string;
+  userCode?: string | null;
+  shopName?: string | null;
+  parent?: LoadedParent | null;
+} | null;
+
+/**
+ * Flatten a loaded user's ancestors into an ordered upline chain, nearest
+ * parent first. e.g. a retailer resolves to [DT, MD, SD].
+ */
+export function flattenUpline(user: { parent?: LoadedParent } | null): UplineNode[] {
+  const out: UplineNode[] = [];
+  let cur = user?.parent ?? null;
+  while (cur) {
+    out.push({
+      id: cur.id,
+      name: cur.name,
+      role: cur.role as DbRole,
+      userCode: cur.userCode ?? null,
+      shopName: cur.shopName ?? null,
+    });
+    cur = cur.parent ?? null;
+  }
+  return out;
+}

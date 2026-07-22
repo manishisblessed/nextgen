@@ -45,6 +45,8 @@ export class FakeDb {
       walletBalance: decOf(walletBalance),
       heldBalance: decOf(heldBalance),
       aepsBalance: decOf(aepsBalance),
+      lienBalance: decOf(0),
+      revenueBalance: decOf(0),
       // Left undefined unless set: a role-less fake user is treated as staff
       // by the scheme gate, so legacy tests that don't care about schemes
       // keep working. Cascade tests pass role: "RETAILER" etc. explicitly.
@@ -116,6 +118,8 @@ export class FakeDb {
       if (data.walletBalance !== undefined) row.walletBalance = decOf(data.walletBalance);
       if (data.heldBalance !== undefined) row.heldBalance = decOf(data.heldBalance);
       if (data.aepsBalance !== undefined) row.aepsBalance = decOf(data.aepsBalance);
+      if (data.lienBalance !== undefined) row.lienBalance = decOf(data.lienBalance);
+      if (data.revenueBalance !== undefined) row.revenueBalance = decOf(data.revenueBalance);
       return { ...row };
     },
   };
@@ -211,6 +215,19 @@ export class FakeDb {
     findFirst: async () => null,
   };
 
+  // ── prisma.walletLien — no liens in the legacy money-path tests, so the
+  //    eager-recovery sweep is a clean no-op. ─────────────────────────────────
+  walletLien = {
+    findMany: async () => [] as Row[],
+    findUnique: async () => null,
+    findUniqueOrThrow: async () => {
+      throw new Error("FakeDb: walletLien.findUniqueOrThrow not stubbed");
+    },
+    create: async ({ data }: { data: Row }) => ({ id: nextId(), createdAt: new Date(), ...data }),
+    update: async ({ data }: { where: { id: string }; data: Row }) => ({ ...data }),
+    count: async () => 0,
+  };
+
   // ── prisma.platformSetting — no rows in unit tests, so every setting
   //    resolves to its schema default (see src/lib/settings.ts). ─────────────
   platformSetting = {
@@ -277,6 +294,46 @@ export class FakeDb {
       const row = { id: nextId(), status: "PENDING", createdAt: new Date(), ...data };
       this.qrClaims.push(row);
       return { ...row };
+    },
+    findMany: async ({
+      where = {},
+      take,
+      include,
+    }: {
+      where?: {
+        id?: string | { in: string[] };
+        userId?: string;
+        status?: string | { in: string[] };
+        settleableAt?: { lt: Date };
+      };
+      orderBy?: unknown;
+      take?: number;
+      include?: { qr?: unknown };
+    } = {}) => {
+      let rows = this.qrClaims.filter((c) => {
+        if (where.id !== undefined) {
+          if (typeof where.id === "string") {
+            if (c.id !== where.id) return false;
+          } else if (!where.id.in.includes(c.id as string)) return false;
+        }
+        if (where.userId !== undefined && c.userId !== where.userId) return false;
+        if (where.status !== undefined) {
+          if (typeof where.status === "string") {
+            if (c.status !== where.status) return false;
+          } else if (!where.status.in.includes(c.status as string)) return false;
+        }
+        if (where.settleableAt?.lt !== undefined) {
+          const at = c.settleableAt as Date | null | undefined;
+          if (!at || !(at < where.settleableAt.lt)) return false;
+        }
+        return true;
+      });
+      if (typeof take === "number") rows = rows.slice(0, take);
+      return rows.map((c) => {
+        const out: Row = { ...c };
+        if (include?.qr) out.qr = { label: `QR ${c.qrId}` };
+        return out;
+      });
     },
     updateMany: async ({
       where,

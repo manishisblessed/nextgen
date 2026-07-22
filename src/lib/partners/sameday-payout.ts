@@ -11,9 +11,10 @@
  *          (falls back to SAMEDAY_POS_API_KEY / SECRET)
  *
  * Provider constraints (from the collection):
- * - Transfers go to PRE-VERIFIED accounts only. First payout to a new
- *   beneficiary triggers an add + penny-drop verification (₹4 partner-wallet
- *   charge) before the transfer.
+ * - The provider supports both verified and trusted (skip-verified) accounts,
+ *   but the PAYOUT rail intentionally requires penny-drop verification for
+ *   retailer payouts. First payout to a new beneficiary triggers an add +
+ *   penny-drop verification (₹4 partner-wallet charge) before the transfer.
  * - Bank modes only (IMPS/NEFT/RTGS). UPI payouts must route elsewhere.
  * - No client-supplied idempotency key; duplicate defense is the provider's
  *   2-minute per-account cooldown plus our worker's "reconcile if a provider

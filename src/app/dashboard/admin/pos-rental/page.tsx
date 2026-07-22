@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { formatINR, formatNumber } from "@/lib/utils";
 import {
   RefreshCw, ReceiptText, Plus, Upload, History, Search, IndianRupee,
-  CreditCard, AlertCircle, CheckCircle2, XCircle, Loader2, Percent, Pencil, Clock,
+  CreditCard, AlertCircle, CheckCircle2, XCircle, Loader2, Percent, Pencil, Clock, Gift,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -58,6 +58,7 @@ type Invoice = {
 
 type Overview = {
   config: { enabled: boolean; hour: number };
+  waiver: { enabled: boolean; thresholdPerMachine: number };
   summary: {
     periodKey: string;
     activeSubscriptions: number;
@@ -147,7 +148,7 @@ export default function PosRentalPage() {
       if (!res.ok) throw new Error(typeof d?.error === "string" ? d.error : "Action failed");
       if (body.action === "run_billing" && d.result) {
         notify(
-          `Billing complete: ${d.result.billed} billed, ${d.result.failed} failed, ${d.result.skipped} skipped.`,
+          `Billing complete: ${d.result.billed} billed, ${d.result.waived ?? 0} waived, ${d.result.failed} failed, ${d.result.skipped} skipped.`,
           d.result.failed === 0
         );
       } else {
@@ -240,6 +241,8 @@ export default function PosRentalPage() {
         </div>
       )}
 
+      <WaiverCard waiver={data?.waiver} busy={busy} act={act} />
+
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
         {tabs.map(({ key, label, icon: TabIcon }) => (
@@ -288,6 +291,98 @@ export default function PosRentalPage() {
           setRunBillingOpen(false);
         }}
       />
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────── Free-rent waiver */
+
+function WaiverCard({
+  waiver, busy, act,
+}: {
+  waiver?: { enabled: boolean; thresholdPerMachine: number };
+  busy: boolean;
+  act: (b: Record<string, unknown>, m?: string) => Promise<boolean>;
+}) {
+  const [threshold, setThreshold] = useState("");
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (waiver && !editing) setThreshold(String(waiver.thresholdPerMachine));
+  }, [waiver, editing]);
+
+  if (!waiver) return null;
+
+  const enabled = waiver.enabled;
+  const parsed = Number(threshold);
+  const dirty = editing && parsed > 0 && parsed !== waiver.thresholdPerMachine;
+
+  return (
+    <div className={`rounded-2xl border p-5 transition-colors ${enabled ? "border-emerald-200 bg-emerald-50/40" : "border-ink-100 bg-white"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${enabled ? "bg-emerald-100 text-emerald-600" : "bg-ink-100 text-ink-500"}`}>
+            <Gift className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+              Free-rent on business target
+              <Badge variant={enabled ? "success" : "default"}>{enabled ? "ON" : "OFF"}</Badge>
+            </h3>
+            <p className="mt-0.5 max-w-xl text-xs text-ink-500">
+              When a machine does at least the target POS business in its billing cycle, that
+              machine&apos;s rent is auto-waived — no debit and no commission that cycle. Checked per machine.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className={labelCls}>Target per machine (₹)</label>
+            <div className="flex items-center gap-2">
+              <input
+                className={`${inputCls} w-40`}
+                type="number"
+                min="1"
+                step="1"
+                value={threshold}
+                onFocus={() => setEditing(true)}
+                onChange={(e) => setThreshold(e.target.value)}
+              />
+              <Button
+                size="sm"
+                disabled={busy || !dirty}
+                onClick={async () => {
+                  const ok = await act(
+                    { action: "set_waiver_threshold", amount: parsed },
+                    `Target set to ${formatINR(parsed)} per machine.`
+                  );
+                  if (ok) setEditing(false);
+                }}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Save
+              </Button>
+            </div>
+            <p className="mt-1 text-[11px] text-ink-400">
+              Current: {formatINR(waiver.thresholdPerMachine)} · e.g. {formatINR(waiver.thresholdPerMachine * 3)} of business frees 3 machines.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              act(
+                { action: "toggle_waiver", enabled: !enabled },
+                enabled ? "Free-rent waiver disabled." : "Free-rent waiver enabled."
+              )
+            }
+          >
+            {enabled ? "Disable" : "Enable"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

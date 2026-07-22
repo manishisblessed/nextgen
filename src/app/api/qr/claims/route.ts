@@ -63,6 +63,11 @@ export async function GET() {
       utr: c.utr,
       paidAt: c.paidAt.toISOString(),
       status: c.status,
+      // Settlement figures (net of scheme MDR) — present once settled.
+      netAmount: c.netAmount != null ? Number(c.netAmount) : null,
+      mdrAmount: c.mdrAmount != null ? Number(c.mdrAmount) : null,
+      settledVia: c.settledVia,
+      settledAt: c.settledAt?.toISOString() ?? null,
       reviewNote: c.status === "REJECTED" || c.status === "CLAWED_BACK" ? c.reviewNote : null,
       createdAt: c.createdAt.toISOString(),
       reviewedAt: c.reviewedAt?.toISOString() ?? null,

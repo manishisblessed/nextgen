@@ -37,7 +37,7 @@ export async function GET(req: Request) {
   if (userId) where.userId = userId;
   if (status) where.status = status;
 
-  const [total, entries, config, t1Config, ingestConfig, counts] = await Promise.all([
+  const [total, entries, config, t1Config, ingestConfig, instantButton, counts] = await Promise.all([
     prisma.posSettlementEntry.count({ where }),
     prisma.posSettlementEntry.findMany({
       where,
@@ -51,6 +51,7 @@ export async function GET(req: Request) {
     getSetting("settlement.pos_instant"),
     getSetting("settlement.pos_t1"),
     getSetting("settlement.pos_ingest"),
+    getSetting("settlement.instant_button"),
     prisma.posSettlementEntry.groupBy({
       by: ["status"],
       _count: true,
@@ -59,7 +60,7 @@ export async function GET(req: Request) {
   ]);
 
   return NextResponse.json({
-    config: { posInstant: config, posT1: t1Config, posIngest: ingestConfig },
+    config: { posInstant: config, posT1: t1Config, posIngest: ingestConfig, instantButton },
     summary: counts.map((c) => ({
       status: c.status,
       count: c._count,
@@ -97,7 +98,12 @@ const ActionBody = z.discriminatedUnion("action", [
   }),
   z.object({
     action: z.literal("configure"),
-    key: z.enum(["settlement.pos_instant", "settlement.pos_t1", "settlement.pos_ingest"]),
+    key: z.enum([
+      "settlement.pos_instant",
+      "settlement.pos_t1",
+      "settlement.pos_ingest",
+      "settlement.instant_button",
+    ]),
     value: z.record(z.unknown()),
   }),
 ]);
@@ -166,7 +172,11 @@ export async function POST(req: Request) {
   if (action === "configure") {
     const { key, value } = parsed.data;
     const stored = await setSetting(
-      key as "settlement.pos_instant" | "settlement.pos_t1" | "settlement.pos_ingest",
+      key as
+        | "settlement.pos_instant"
+        | "settlement.pos_t1"
+        | "settlement.pos_ingest"
+        | "settlement.instant_button",
       value,
       admin.id
     );

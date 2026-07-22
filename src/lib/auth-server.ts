@@ -21,6 +21,7 @@ import { isLoginAllowed } from "./security/accountGate";
 
 export type SessionUser = {
   id: string;
+  userCode: string | null;
   name: string;
   email: string;
   phone: string;
@@ -96,6 +97,7 @@ export const authOptions: NextAuthOptions = {
 
         return {
           id: user.id,
+          userCode: (user as any).userCode ?? null,
           name: user.name,
           email: user.email,
           phone: user.phone,
@@ -155,6 +157,7 @@ export const authOptions: NextAuthOptions = {
 
         return {
           id: user.id,
+          userCode: (user as any).userCode ?? null,
           name: user.name,
           email: user.email,
           phone: user.phone,
@@ -174,6 +177,7 @@ export const authOptions: NextAuthOptions = {
       //    trust it for this pass — no validation needed, it was just minted.
       if (user) {
         token.id = user.id;
+        token.userCode = (user as any).userCode ?? null;
         token.name = user.name;
         token.email = user.email;
         token.phone = user.phone;
@@ -217,6 +221,7 @@ export const authOptions: NextAuthOptions = {
               where: { id: userId },
               select: {
                 name: true,
+                userCode: true,
                 tokenVersion: true,
                 twoFactorEnabled: true,
                 walletBalance: true,
@@ -235,6 +240,7 @@ export const authOptions: NextAuthOptions = {
             return {} as typeof token;
           }
           token.name = fresh.name;
+          token.userCode = (fresh as any).userCode ?? null;
           token.tokenVersion = fresh.tokenVersion;
           token.twoFactorEnabled = fresh.twoFactorEnabled;
           token.walletBalance = Number(fresh.walletBalance);
@@ -256,6 +262,7 @@ export const authOptions: NextAuthOptions = {
       }
       session.user = {
         id: token.id as string,
+        userCode: (token.userCode as string) ?? null,
         name: token.name as string,
         email: token.email as string,
         phone: token.phone as string,
@@ -348,6 +355,7 @@ export function verifyMobileToken(token: string): SessionUser | null {
 
     return {
       id: data.sub,
+      userCode: data.userCode ?? null,
       name: data.name,
       email: data.email,
       phone: data.phone,

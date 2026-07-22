@@ -42,6 +42,17 @@ const ADMIN_PATHS: Array<{ prefix: string; roles: string[] }> = [
   { prefix: "/dashboard/admin", roles: ["MASTER_ADMIN", "ADMIN", "SUPPORT", "FINANCE"] },
 ];
 
+/** BBPS bill-pay pages: only RETAILER can access. */
+const BBPS_PATHS: Array<{ prefix: string; roles: string[] }> = [
+  { prefix: "/dashboard/bill-pay", roles: ["RETAILER"] },
+];
+
+/** Payout consumer page: only network tiers (RT/DT/MD/SD) can access.
+ *  Note: /dashboard/payout-approvals is a separate path and is NOT blocked. */
+const PAYOUT_PATHS: Array<{ prefix: string; roles: string[] }> = [
+  { prefix: "/dashboard/payout", roles: ["RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"] },
+];
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -78,6 +89,27 @@ export async function middleware(req: NextRequest) {
       url.pathname = "/dashboard";
       url.search = "";
       return NextResponse.redirect(url);
+    }
+
+    // BBPS pages: RETAILER-only (/dashboard/bill-pay/*)
+    const bbpsRule = BBPS_PATHS.find((r) => pathname.startsWith(r.prefix));
+    if (bbpsRule && !bbpsRule.roles.includes(role)) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/dashboard";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
+
+    // Payout consumer page: network roles only (/dashboard/payout but NOT
+    // /dashboard/payout-approvals which admins need).
+    if (pathname.startsWith("/dashboard/payout") && !pathname.startsWith("/dashboard/payout-approvals")) {
+      const payoutRule = PAYOUT_PATHS[0];
+      if (!payoutRule.roles.includes(role)) {
+        const url = req.nextUrl.clone();
+        url.pathname = "/dashboard";
+        url.search = "";
+        return NextResponse.redirect(url);
+      }
     }
   }
 

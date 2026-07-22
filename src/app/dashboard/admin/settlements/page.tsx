@@ -29,6 +29,8 @@ type BankAccount = {
   accountHolderName: string;
   isVerified: boolean;
   verifiedName?: string;
+  verificationStatus?: "VERIFIED" | "NOT_VERIFIED" | "SKIPPED" | "PENDING" | "FAILED";
+  verificationLabel?: string;
 };
 
 type TransferRow = {
@@ -141,7 +143,7 @@ function BankTransfersTab() {
 
   // Add-account form
   const [showAdd, setShowAdd] = useState(false);
-  const [accForm, setAccForm] = useState({ accountNumber: "", ifscCode: "", accountHolderName: "" });
+  const [accForm, setAccForm] = useState({ accountNumber: "", ifscCode: "", accountHolderName: "", contactMobile: "", skipVerification: false });
   const [addBusy, setAddBusy] = useState(false);
 
   // Transfer form
@@ -217,19 +219,37 @@ function BankTransfersTab() {
 
   async function addAccount(e: React.FormEvent) {
     e.preventDefault();
+    if (accForm.skipVerification && !/^\d{10}$/.test(accForm.contactMobile)) {
+      toast.error("A valid 10-digit mobile number is required when skipping verification.");
+      return;
+    }
     setAddBusy(true);
     try {
+      const payload: Record<string, unknown> = {
+        accountNumber: accForm.accountNumber,
+        ifscCode: accForm.ifscCode,
+        accountHolderName: accForm.accountHolderName,
+      };
+      if (accForm.skipVerification) {
+        payload.skipVerification = true;
+        payload.contactMobile = accForm.contactMobile;
+      } else if (accForm.contactMobile) {
+        payload.contactMobile = accForm.contactMobile;
+      }
+
       const res = await fetch("/api/admin/settlement/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(accForm),
+        body: JSON.stringify(payload),
       });
       const d = await res.json();
       if (!res.ok) {
-        toast.error(typeof d.error === "string" ? d.error : "Account verification failed");
+        toast.error(typeof d.error === "string" ? d.error : "Account add failed");
         return;
       }
-      if (d.verificationStatus === "SUCCESS") {
+      if (d.skipVerification) {
+        toast.success("Trusted account added (unverified). Transfers to this account are at your own risk.");
+      } else if (d.verificationStatus === "SUCCESS") {
         toast.success(
           `Account verified — bank returned "${d.verifiedName ?? d.account.accountHolderName}" (₹4 verification charge applied).`
         );
@@ -237,7 +257,7 @@ function BankTransfersTab() {
         toast.warning("Account added — penny-drop verification is pending. Refresh in a minute.");
       }
       setShowAdd(false);
-      setAccForm({ accountNumber: "", ifscCode: "", accountHolderName: "" });
+      setAccForm({ accountNumber: "", ifscCode: "", accountHolderName: "", contactMobile: "", skipVerification: false });
       refresh();
     } catch {
       toast.error("Network error while adding the account.");
@@ -380,7 +400,7 @@ function BankTransfersTab() {
 
           <div className="rounded-2xl border border-ink-100 bg-white p-5">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-ink-900">Verified accounts</p>
+              <p className="text-sm font-semibold text-ink-900">Settlement accounts</p>
               <Button variant="outline" onClick={() => setShowAdd((s) => !s)} className="h-8 px-2">
                 <Plus className="h-3.5 w-3.5" />
               </Button>
@@ -416,8 +436,36 @@ function BankTransfersTab() {
                     onChange={(e) => setAccForm((f) => ({ ...f, accountHolderName: e.target.value }))}
                   />
                 </div>
+                <div>
+                  <Label htmlFor="acc-mobile">Mobile number</Label>
+                  <Input
+                    id="acc-mobile"
+                    placeholder="10-digit mobile"
+                    required={accForm.skipVerification}
+                    maxLength={10}
+                    value={accForm.contactMobile}
+                    onChange={(e) => setAccForm((f) => ({ ...f, contactMobile: e.target.value.replace(/\D/g, "") }))}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-ink-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={accForm.skipVerification}
+                    onChange={(e) => setAccForm((f) => ({ ...f, skipVerification: e.target.checked }))}
+                    className="rounded border-ink-300"
+                  />
+                  Skip verification (trusted account)
+                </label>
+                {accForm.skipVerification && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                    This account will NOT be verified with the bank. If the details are wrong, funds may go to the wrong
+                    recipient. Only use for accounts you already trust.
+                  </div>
+                )}
                 <Button type="submit" className="w-full" disabled={addBusy}>
-                  {addBusy ? "Verifying (penny drop)…" : "Add & verify (₹4)"}
+                  {addBusy
+                    ? accForm.skipVerification ? "Adding trusted account…" : "Verifying (penny drop)…"
+                    : accForm.skipVerification ? "Add trusted account (₹0)" : "Add & verify (₹4)"}
                 </Button>
               </form>
             )}
@@ -425,32 +473,42 @@ function BankTransfersTab() {
             <ul className="mt-3 space-y-2">
               {accounts.length === 0 && (
                 <li className="text-xs text-ink-500">
-                  {loading ? "Loading…" : "No verified accounts yet. Add one to enable transfers."}
+                  {loading ? "Loading…" : "No accounts yet. Add one to enable transfers."}
                 </li>
               )}
-              {accounts.map((a) => (
-                <li key={a.id} className="flex items-center justify-between rounded-xl border border-ink-100 p-3">
-                  <div>
-                    <p className="text-sm font-medium text-ink-900">
-                      {a.verifiedName || a.accountHolderName}
-                    </p>
-                    <p className="text-xs text-ink-500">
-                      {a.accountNumber} · {a.ifscCode}
-                    </p>
-                    <Badge variant={a.isVerified ? "success" : "warning"}>
-                      {a.isVerified ? "Verified" : "Pending verification"}
-                    </Badge>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRemoveTarget(a)}
-                    className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-rose-50 hover:text-rose-600"
-                    title="Deactivate account"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </li>
-              ))}
+              {accounts.map((a) => {
+                const badgeProps = a.verificationStatus === "SKIPPED"
+                  ? { variant: "warning" as const, label: a.verificationLabel || "Unverified (trusted)" }
+                  : a.isVerified
+                    ? { variant: "success" as const, label: a.verificationLabel || "Verified" }
+                    : a.verificationStatus === "FAILED"
+                      ? { variant: "danger" as const, label: a.verificationLabel || "Verification failed" }
+                      : { variant: "warning" as const, label: a.verificationLabel || "Pending verification" };
+                return (
+                  <li key={a.id} className="flex items-center justify-between rounded-xl border border-ink-100 p-3">
+                    <div>
+                      <p className="text-sm font-medium text-ink-900">
+                        {a.verifiedName || a.accountHolderName}
+                      </p>
+                      <p className="text-xs text-ink-500">
+                        {a.accountNumber} · {a.ifscCode}
+                      </p>
+                      <Badge variant={badgeProps.variant}>{badgeProps.label}</Badge>
+                      {a.verificationStatus === "SKIPPED" && (
+                        <p className="mt-1 text-[10px] text-amber-700">Transfers at your own risk — not bank-verified</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRemoveTarget(a)}
+                      className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-rose-50 hover:text-rose-600"
+                      title="Deactivate account"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>
@@ -464,7 +522,7 @@ function BankTransfersTab() {
             <div>
               <p className="text-sm font-semibold text-ink-900">New bank transfer</p>
               <p className="text-xs text-ink-500">
-                Moves money from the Same Day partner wallet to a verified account. Failed transfers auto-refund.
+                Moves money from the Same Day partner wallet to a verified or trusted account. Failed transfers auto-refund.
               </p>
             </div>
           </div>
@@ -477,10 +535,11 @@ function BankTransfersTab() {
                 value={transferForm.accountId}
                 onChange={(e) => setTransferForm((f) => ({ ...f, accountId: e.target.value }))}
               >
-                {accounts.length === 0 && <option value="">No verified accounts</option>}
+                {accounts.length === 0 && <option value="">No accounts</option>}
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {(a.verifiedName || a.accountHolderName) + " — " + a.accountNumber}
+                    {a.verificationStatus === "SKIPPED" ? " (trusted)" : ""}
                   </option>
                 ))}
               </Select>

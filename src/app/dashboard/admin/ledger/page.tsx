@@ -1,15 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/lib/useAuth";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import { formatINR, formatNumber } from "@/lib/utils";
-import { RefreshCw, Download, Search } from "lucide-react";
+import { RefreshCw, Download, Search, Lock } from "lucide-react";
 
 type Entry = {
   id: string;
+  userId: string;
   user: { name: string; email: string; shopName: string | null; role: string };
   walletType: string;
   direction: "CREDIT" | "DEBIT";
@@ -21,6 +25,11 @@ type Entry = {
   note: string | null;
   createdAt: string;
 };
+
+/** Roles whose wallets can never be liened (matches the lien API guard). */
+const STAFF_ROLES = ["ADMIN", "MASTER_ADMIN", "SUPPORT", "FINANCE"];
+
+const LIEN_REASON_CODES = ["CHARGEBACK", "FRAUD", "DISPUTE", "INVESTIGATION", "OTHER"] as const;
 
 const WALLET_REASONS = [
   "TOPUP",
@@ -43,6 +52,16 @@ const inputCls =
   "rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 
 export default function LedgerExplorerPage() {
+  const { session } = useAuth();
+  // Full admins can always place liens; a sub-admin needs the wallet-ops tab.
+  // FINANCE (read-only oversight) never can.
+  const canLien = useMemo(() => {
+    const role = session?.role;
+    if (role === "master-admin" || role === "admin") return true;
+    if (role === "sub-admin") return (session?.allowedTabs ?? []).includes("wallet-ops");
+    return false;
+  }, [session?.role, session?.allowedTabs]);
+
   const [entries, setEntries] = useState<Entry[]>([]);
   const [total, setTotal] = useState(0);
   const [sums, setSums] = useState({ credit: 0, debit: 0 });
@@ -56,6 +75,7 @@ export default function LedgerExplorerPage() {
   const [reason, setReason] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [lienFor, setLienFor] = useState<Entry | null>(null);
   const pageSize = 50;
 
   useEffect(() => {
@@ -178,6 +198,21 @@ export default function LedgerExplorerPage() {
         </span>
       ),
     },
+    {
+      key: "actions",
+      header: "",
+      render: (r) =>
+        !canLien || STAFF_ROLES.includes(r.user.role) ? null : (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setLienFor(r)}
+            title="Place a lien on this user against this transaction"
+          >
+            <Lock className="h-3.5 w-3.5" /> Lien
+          </Button>
+        ),
+    },
   ];
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -277,6 +312,161 @@ export default function LedgerExplorerPage() {
           </Button>
         </div>
       )}
+
+      {lienFor && (
+        <PlaceLienModal
+          entry={lienFor}
+          onClose={() => setLienFor(null)}
+          onDone={() => {
+            setLienFor(null);
+            load();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/* ------------------------------------------------ place-lien modal */
+
+function PlaceLienModal({
+  entry,
+  onClose,
+  onDone,
+}: {
+  entry: Entry;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [amount, setAmount] = useState(String(entry.amount || ""));
+  const [reasonCode, setReasonCode] = useState<string>("CHARGEBACK");
+  const [remarks, setRemarks] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Link the lien to the transaction this ledger entry references (fall back to
+  // the wallet-entry id so the recovery is always traceable to a source).
+  const refType = entry.refType ?? "WalletTxn";
+  const refId = entry.refId ?? entry.id;
+
+  const submit = async () => {
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) return toast.error("Enter a valid amount.");
+    if (remarks.trim().length < 3) return toast.error("Remarks are mandatory (min 3 chars).");
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/wallet/liens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetUserId: entry.userId,
+          amount: amt,
+          reasonCode,
+          remarks: remarks.trim(),
+          refType,
+          refId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Failed to place lien");
+      const recovered = data.lien?.recoveredAmount ?? 0;
+      toast.success(
+        recovered > 0
+          ? `Lien placed — ${formatINR(recovered)} recovered now, ${formatINR(data.lien.outstanding)} pending against future credits.`
+          : `Lien of ${formatINR(amt)} placed — will recover from incoming funds.`
+      );
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to place lien");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fieldCls =
+    "w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Admin · Money"
+      title="Place lien"
+      subtitle={`On ${entry.user.name} · against ${refType} #${refId.slice(0, 14)}`}
+      size="md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            isLoading={busy}
+            disabled={busy}
+            className="from-rose-600 to-rose-500 hover:shadow-rose-200"
+          >
+            <Lock className="h-4 w-4" /> Place lien &amp; recover
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-xl border border-ink-100 bg-ink-50/50 p-3 text-[13px] text-ink-600">
+          Freezes funds on <b className="text-ink-800">{entry.user.name}</b> and eagerly recovers
+          them (and all future credits) into the Company Suspense account until fully recovered. The
+          freeze is invisible to the user; the recovery shows as
+          &ldquo;Recovery against txn #…&rdquo;.
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+              Lien amount (₹)
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              className={`${fieldCls} mt-1.5`}
+            />
+            <p className="mt-1 text-[11px] text-ink-400">
+              Transaction amount: {formatINR(entry.amount)}
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+              Reason code
+            </label>
+            <select
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value)}
+              className={`${fieldCls} mt-1.5`}
+            >
+              {LIEN_REASON_CODES.map((c) => (
+                <option key={c} value={c}>
+                  {c.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-bold uppercase tracking-widest text-ink-500">
+            Remarks (mandatory, audit-logged)
+          </label>
+          <textarea
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            rows={3}
+            placeholder="Why is this lien being placed?"
+            className={`${fieldCls} mt-1.5 resize-none`}
+          />
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -409,7 +409,7 @@ function SliderCard({
     <div className={`group relative overflow-hidden rounded-2xl border bg-white shadow-sm transition-all ${s.active ? "border-transparent ring-2 ring-brand-200" : "border-ink-100 opacity-90"}`}>
       <div className="relative aspect-[16/7] w-full overflow-hidden bg-ink-100">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={s.imageUrl} alt={s.title} className="h-full w-full object-cover" />
+        <img src={s.imageUrl} alt={s.title} className="h-full w-full object-contain" />
         <div className="absolute right-2 top-2 flex gap-1">
           <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-ink-700 shadow">#{s.sortOrder}</span>
           <Badge variant={s.active ? "success" : "danger"}>{s.active ? "LIVE" : "OFF"}</Badge>
@@ -518,6 +518,11 @@ function SliderForm({
       };
     });
 
+  // Empty audienceRoles = visible to everyone (matches API semantics), so
+  // "All roles" simply clears the selection rather than listing every role.
+  const allRolesSelected = form.audienceRoles.length === 0;
+  const selectAllRoles = () => set("audienceRoles", []);
+
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -615,7 +620,7 @@ function SliderForm({
             <div className="overflow-hidden rounded-xl border border-ink-200 bg-ink-50">
               {form.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={form.imageUrl} alt="Preview" className="aspect-[16/7] w-full object-cover" />
+                <img src={form.imageUrl} alt="Preview" className="aspect-[16/7] w-full object-contain" />
               ) : (
                 <div className="grid aspect-[16/7] w-full place-items-center text-ink-400">
                   <div className="text-center">
@@ -698,8 +703,18 @@ function SliderForm({
           </div>
 
           <div>
-            <Label>Audience roles</Label>
-            <p className="mb-2 -mt-1 text-xs text-ink-500">No selection = visible to everyone.</p>
+            <div className="mb-1 flex items-center justify-between">
+              <Label className="mb-0">Audience roles</Label>
+              <button
+                type="button"
+                onClick={selectAllRoles}
+                disabled={allRolesSelected}
+                className="text-xs font-semibold text-brand-600 transition hover:text-brand-700 disabled:cursor-default disabled:text-ink-400"
+              >
+                All roles
+              </button>
+            </div>
+            <p className="mb-2 text-xs text-ink-500">No selection = visible to everyone (all roles).</p>
             <div className="flex flex-wrap gap-2">
               {ROLE_OPTIONS.map((r) => {
                 const on = form.audienceRoles.includes(r.value);

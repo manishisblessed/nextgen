@@ -30,10 +30,12 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { Pagination } from "@/components/ui/Pagination";
+import { UplineChain } from "@/components/dashboard/UplineChain";
 import { formatINR } from "@/lib/utils";
 
 type UserRow = {
   id: string;
+  userCode: string;
   name: string;
   shop: string;
   role: "retailer" | "distributor" | "master-distributor" | "super-distributor";
@@ -44,6 +46,7 @@ type UserRow = {
   walletBalance: number;
   monthlyTurnover: number;
   retailers: number;
+  upline: { role: string; name: string; userCode: string | null }[];
 };
 
 export default function AdminUsersPage() {
@@ -185,7 +188,7 @@ export default function AdminUsersPage() {
       render: (r) => (
         <div>
           <div className="font-semibold text-ink-900">{r.name}</div>
-          <div className="text-xs text-ink-500">{r.shop} · {r.id.slice(0, 8)}</div>
+          <div className="text-xs text-ink-500">{r.shop} · <span className="font-medium text-brand-600">{r.userCode}</span></div>
         </div>
       ),
     },
@@ -197,6 +200,11 @@ export default function AdminUsersPage() {
           {r.role}
         </Badge>
       ),
+    },
+    {
+      key: "upline",
+      header: "Upline",
+      render: (r) => <UplineChain nodes={r.upline ?? []} />,
     },
     { key: "city", header: "Location", render: (r) => `${r.city}, ${r.state}` },
     { key: "joined", header: "Joined" },
@@ -471,7 +479,7 @@ function UserMoreMenu({
 
   async function copyId() {
     try {
-      await navigator.clipboard.writeText(user.id);
+      await navigator.clipboard.writeText(user.userCode || user.id);
       onCopied();
     } catch {
       onCopied();

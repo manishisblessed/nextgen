@@ -103,7 +103,7 @@ function SlideCarousel({ slides }: { slides: PublicSlider[] }) {
           >
             <Wrapper {...wrapperProps} className="block h-full w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={current.imageUrl} alt={current.title} className="h-full w-full object-cover" />
+              <img src={current.imageUrl} alt={current.title} className="h-full w-full object-contain" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink-900/70 to-transparent p-4 sm:p-5">
                 <p className="font-display text-sm font-semibold text-white sm:text-base">{current.title}</p>
               </div>
@@ -209,11 +209,11 @@ function PopupModal({ popups, userId }: { popups: PublicSlider[]; userId: string
             {active.linkUrl ? (
               <a href={active.linkUrl} target="_blank" rel="noreferrer" onClick={dismiss}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={active.imageUrl} alt={active.title} className="w-full object-cover" />
+                <img src={active.imageUrl} alt={active.title} className="w-full object-contain" />
               </a>
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={active.imageUrl} alt={active.title} className="w-full object-cover" />
+              <img src={active.imageUrl} alt={active.title} className="w-full object-contain" />
             )}
 
             <div className="p-5">

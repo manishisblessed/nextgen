@@ -8,6 +8,18 @@
 // =====================================================================
 
 import { prisma } from "@/lib/db";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
+
+/** Service keys for which staff roles do NOT bypass the per-user allowlist.
+ *  BBPS is retailer-only; payout is network-only — admins must not transact. */
+const NO_STAFF_BYPASS_KEYS = new Set<string>([
+  SERVICE_KEYS.BBPS,
+  SERVICE_KEYS.BBPS_SAMEDAY,
+  SERVICE_KEYS.BBPS_BULKPE,
+  SERVICE_KEYS.BBPS_CREDIT_CARD,
+  SERVICE_KEYS.PAYOUT,
+  SERVICE_KEYS.RECHARGEKIT_CC,
+]);
 
 export class ServiceDisabledError extends Error {
   public statusCode = 503;
@@ -67,14 +79,14 @@ export async function isServiceEnabledForUser(
   userId: string,
   role?: string
 ): Promise<boolean> {
-  if (role && STAFF_ROLES.has(role)) return true;
+  if (role && STAFF_ROLES.has(role) && !NO_STAFF_BYPASS_KEYS.has(key)) return true;
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { role: true, enabledServices: true },
   });
   if (!user) return false;
-  if (STAFF_ROLES.has(user.role)) return true;
+  if (STAFF_ROLES.has(user.role) && !NO_STAFF_BYPASS_KEYS.has(key)) return true;
   if (user.enabledServices.length === 0) return true;
   return user.enabledServices.includes(key);
 }
@@ -124,14 +136,23 @@ export async function getEffectiveServiceKeys(
   });
   const globallyOn = routes.map((r) => r.key);
 
-  if (role && STAFF_ROLES.has(role)) return globallyOn;
+  const resolvedRole = role ?? (await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true },
+  }))?.role;
+
+  if (resolvedRole && STAFF_ROLES.has(resolvedRole)) {
+    return globallyOn.filter((k) => !NO_STAFF_BYPASS_KEYS.has(k));
+  }
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { role: true, enabledServices: true },
   });
   if (!user) return [];
-  if (STAFF_ROLES.has(user.role)) return globallyOn;
+  if (STAFF_ROLES.has(user.role)) {
+    return globallyOn.filter((k) => !NO_STAFF_BYPASS_KEYS.has(k));
+  }
 
   if (user.enabledServices.length === 0) return globallyOn;
 

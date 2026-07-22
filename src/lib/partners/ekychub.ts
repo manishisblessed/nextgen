@@ -411,6 +411,31 @@ export async function faceRegister(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Card BIN Checker
+// ---------------------------------------------------------------------------
+
+export interface CardBinResponse {
+  status: string;
+  bin: string;
+  cardNetwork: string;
+  cardType: string;
+  cardLevel: string;
+  country: string;
+  issuerBank: string;
+  message: string;
+}
+
+export async function checkCardBin(input: {
+  card: string;
+  orderid: string;
+}): Promise<PartnerResult<CardBinResponse>> {
+  return ekychubGet("/verification/bin", {
+    card: input.card.slice(0, 6),
+    orderid: input.orderid,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Unified verification provider interface
 // ---------------------------------------------------------------------------
 
@@ -428,4 +453,5 @@ export const ekychubVerification = {
   aadhaarOtpVerify,
   faceMatch,
   faceRegister,
+  checkCardBin,
 } as const;
