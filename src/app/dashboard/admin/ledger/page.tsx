@@ -14,7 +14,7 @@ import { RefreshCw, Download, Search, Lock } from "lucide-react";
 type Entry = {
   id: string;
   userId: string;
-  user: { name: string; email: string; shopName: string | null; role: string };
+  user: { userCode: string | null; name: string; email: string; shopName: string | null; role: string };
   walletType: string;
   direction: "CREDIT" | "DEBIT";
   reason: string;
@@ -144,7 +144,10 @@ export default function LedgerExplorerPage() {
       header: "User",
       render: (r) => (
         <div>
-          <p className="font-semibold text-ink-900">{r.user.name}</p>
+          <p className="font-semibold text-ink-900">
+            {r.user.name}
+            {r.user.userCode && <span className="ml-2 font-medium text-brand-600">{r.user.userCode}</span>}
+          </p>
           <p className="text-[11px] text-ink-500">{r.user.shopName ?? r.user.email}</p>
         </div>
       ),

@@ -40,6 +40,7 @@ export async function GET(req: Request) {
         where: where as never,
         select: {
           id: true,
+          userCode: true,
           name: true,
           email: true,
           phone: true,
@@ -53,7 +54,7 @@ export async function GET(req: Request) {
           enabledServices: true,
           createdAt: true,
           scheme: { select: { id: true, name: true } },
-          parent: { select: { id: true, name: true, role: true } },
+          parent: { select: { id: true, name: true, role: true, userCode: true } },
           userLimit: {
             select: { settlementTier: true, settlementDailyCap: true, walletCap: true },
           },
@@ -75,6 +76,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       users: users.map((u) => ({
         id: u.id,
+        userCode: u.userCode,
         name: u.name,
         email: u.email,
         phone: u.phone,

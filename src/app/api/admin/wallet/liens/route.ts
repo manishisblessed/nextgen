@@ -115,7 +115,7 @@ export async function GET(req: Request) {
       prisma.walletLien.findMany({
         where: where as never,
         include: {
-          targetUser: { select: { name: true, email: true, shopName: true, role: true } },
+          targetUser: { select: { userCode: true, name: true, email: true, shopName: true, role: true } },
           actor: { select: { name: true, email: true } },
         },
         orderBy: { createdAt: "desc" },

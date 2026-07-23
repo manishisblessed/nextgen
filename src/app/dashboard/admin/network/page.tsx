@@ -30,6 +30,7 @@ import {
 
 type NetworkUser = {
   id: string;
+  userCode: string | null;
   name: string;
   email: string;
   phone: string;
@@ -42,7 +43,7 @@ type NetworkUser = {
   held: number;
   servicesEnabled: number;
   scheme: { id: string; name: string } | null;
-  parent: { id: string; name: string; role: string } | null;
+  parent: { id: string; name: string; role: string; userCode: string | null } | null;
   settlementTier: string | null;
   walletCap: number | null;
   autoSettle: boolean;
@@ -126,7 +127,10 @@ export default function NetworkManagerPage() {
       render: (r) => (
         <button className="text-left" onClick={() => setSelected(r)}>
           <p className="font-semibold text-brand-700 hover:underline">{r.name}</p>
-          <p className="text-[11px] text-ink-500">{r.shopName ?? r.email}</p>
+          <p className="text-[11px] text-ink-500">
+            {r.shopName ?? r.email}
+            {r.userCode && <> · <span className="font-medium text-brand-600">{r.userCode}</span></>}
+          </p>
         </button>
       ),
     },
@@ -583,7 +587,14 @@ function UserDrawer({
         <div className="p-6">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="font-display text-lg font-bold text-ink-900">{user.name}</h2>
+              <h2 className="font-display text-lg font-bold text-ink-900">
+                {user.name}
+                {user.userCode && (
+                  <span className="ml-2 rounded-md bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-600 align-middle">
+                    {user.userCode}
+                  </span>
+                )}
+              </h2>
               <p className="text-xs text-ink-500">
                 {user.shopName ?? "—"} · {user.email} · {user.phone}
               </p>

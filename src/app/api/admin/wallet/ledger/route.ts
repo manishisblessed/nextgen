@@ -94,7 +94,7 @@ export async function GET(req: Request) {
       prisma.walletTxn.findMany({
         where: where as never,
         include: {
-          user: { select: { name: true, email: true, shopName: true, role: true } },
+          user: { select: { userCode: true, name: true, email: true, shopName: true, role: true } },
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,

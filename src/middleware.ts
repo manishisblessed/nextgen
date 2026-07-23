@@ -111,6 +111,16 @@ export async function middleware(req: NextRequest) {
         return NextResponse.redirect(url);
       }
     }
+
+    // Settlements (partner-wallet bank transfers) are a money movement admins
+    // must not perform. Blocked for everyone. Note: "/dashboard/admin/settlements"
+    // does not match "/dashboard/admin/settlement-ops" or ".../pos-settlement".
+    if (pathname.startsWith("/dashboard/admin/settlements")) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/dashboard";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   const res = NextResponse.next({ request: { headers: requestHeaders } });

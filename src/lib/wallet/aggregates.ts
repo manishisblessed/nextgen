@@ -92,6 +92,7 @@ export async function getCumulativeBalances(): Promise<CumulativeBalances> {
 
 export type UserBalanceRow = {
   id: string;
+  userCode: string | null;
   name: string;
   email: string;
   shopName: string | null;
@@ -146,6 +147,7 @@ export async function getUserWiseBalances(params: {
       where,
       select: {
         id: true,
+        userCode: true,
         name: true,
         email: true,
         shopName: true,
@@ -173,6 +175,7 @@ export async function getUserWiseBalances(params: {
   return {
     rows: users.map((u) => ({
       id: u.id,
+      userCode: u.userCode,
       name: u.name,
       email: u.email,
       shopName: u.shopName,

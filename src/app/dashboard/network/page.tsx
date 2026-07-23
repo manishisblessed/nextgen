@@ -20,6 +20,7 @@ import { formatINR } from "@/lib/utils";
 
 type NetworkUser = {
   id: string;
+  userCode: string | null;
   name: string;
   shop: string;
   role: "retailer" | "distributor" | "master-distributor" | "super-distributor";
@@ -154,7 +155,7 @@ export default function NetworkPage() {
       render: (r) => (
         <div>
           <div className="font-semibold text-ink-900">{r.name}</div>
-          <div className="text-xs text-ink-500">{r.shop} · {r.id.slice(0, 8)}</div>
+          <div className="text-xs text-ink-500">{r.shop} · <span className="font-medium text-brand-600">{r.userCode ?? r.id.slice(0, 8)}</span></div>
         </div>
       ),
     },

@@ -49,7 +49,7 @@ export async function GET(req: Request) {
       orderBy: { createdAt: "asc" }, // oldest first — FIFO review
       take: 200,
       include: {
-        user: { select: { id: true, name: true, phone: true, shopName: true } },
+        user: { select: { id: true, userCode: true, name: true, phone: true, shopName: true } },
         qr: { select: { label: true, upiVpa: true } },
         reviewedBy: { select: { id: true, name: true, userCode: true } },
         firstApprovedBy: { select: { id: true, name: true, userCode: true } },

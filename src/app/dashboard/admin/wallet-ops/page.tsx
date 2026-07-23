@@ -43,6 +43,7 @@ type Cumulative = {
 
 type UserRow = {
   id: string;
+  userCode: string | null;
   name: string;
   email: string;
   shopName: string | null;
@@ -66,7 +67,7 @@ type Lien = {
   refType: string | null;
   refId: string | null;
   createdAt: string;
-  targetUser?: { name: string; email: string; shopName: string | null; role: string };
+  targetUser?: { userCode: string | null; name: string; email: string; shopName: string | null; role: string };
   actor?: { name: string; email: string };
 };
 
@@ -80,7 +81,7 @@ type Operation = {
   status: string;
   createdAt: string;
   rejectedNote: string | null;
-  targetUser?: { name: string; email: string; shopName: string | null; role: string };
+  targetUser?: { userCode: string | null; name: string; email: string; shopName: string | null; role: string };
   actor?: { name: string; email: string };
   approvedBy?: { name: string; email: string } | null;
 };
@@ -299,7 +300,10 @@ function UserBalancesTab({ money }: { money: (n: number) => string }) {
         header: "User",
         render: (r) => (
           <div>
-            <p className="font-semibold text-ink-900">{r.name}</p>
+            <p className="font-semibold text-ink-900">
+              {r.name}
+              {r.userCode && <span className="ml-2 font-medium text-brand-600">{r.userCode}</span>}
+            </p>
             <p className="text-[11px] text-ink-500">{r.shopName ?? r.email}</p>
           </div>
         ),
@@ -402,7 +406,7 @@ function UserBalancesTab({ money }: { money: (n: number) => string }) {
 
 /* ------------------------------------------------------ push / pull tab */
 
-type UserHit = { id: string; name: string; shop: string; role: string; walletBalance: number };
+type UserHit = { id: string; userCode: string | null; name: string; shop: string; role: string; walletBalance: number };
 
 const ROLE_OPTIONS = [
   { value: "", label: "Select a role…" },
@@ -503,7 +507,10 @@ function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) 
           {selected ? (
             <div className="mt-1.5 flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5">
               <div>
-                <p className="text-sm font-semibold text-ink-900">{selected.name}</p>
+                <p className="text-sm font-semibold text-ink-900">
+                  {selected.name}
+                  {selected.userCode && <span className="ml-2 font-medium text-brand-600">{selected.userCode}</span>}
+                </p>
                 <p className="text-[11px] text-ink-500">
                   {selected.shop} · {selected.role} · Wallet {formatINR(selected.walletBalance)}
                 </p>
@@ -550,6 +557,7 @@ function OperateTab({ onDone }: { onDone: (msg: string, ok: boolean) => void }) 
                     >
                       <span>
                         <span className="font-semibold text-ink-900">{h.name}</span>{" "}
+                        {h.userCode && <span className="font-medium text-brand-600">{h.userCode}</span>}{" "}
                         <span className="text-ink-500">· {h.shop}</span>
                       </span>
                       <span className="shrink-0 ml-2 text-[11px] text-ink-500">{h.role} · {formatINR(h.walletBalance)}</span>
@@ -754,7 +762,10 @@ function HistoryTab({
       header: "User",
       render: (r) => (
         <div>
-          <p className="font-semibold text-ink-900">{r.targetUser?.name ?? "—"}</p>
+          <p className="font-semibold text-ink-900">
+            {r.targetUser?.name ?? "—"}
+            {r.targetUser?.userCode && <span className="ml-2 font-medium text-brand-600">{r.targetUser.userCode}</span>}
+          </p>
           <p className="text-[11px] text-ink-500">{r.targetUser?.shopName ?? r.targetUser?.email}</p>
         </div>
       ),
@@ -1019,7 +1030,10 @@ function LiensTab({
       header: "User",
       render: (r) => (
         <div>
-          <p className="font-semibold text-ink-900">{r.targetUser?.name ?? "—"}</p>
+          <p className="font-semibold text-ink-900">
+            {r.targetUser?.name ?? "—"}
+            {r.targetUser?.userCode && <span className="ml-2 font-medium text-brand-600">{r.targetUser.userCode}</span>}
+          </p>
           <p className="text-[11px] text-ink-500">{r.targetUser?.shopName ?? r.targetUser?.email}</p>
         </div>
       ),
@@ -1108,7 +1122,10 @@ function LiensTab({
             {selected ? (
               <div className="mt-1.5 flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5">
                 <div>
-                  <p className="text-sm font-semibold text-ink-900">{selected.name}</p>
+                  <p className="text-sm font-semibold text-ink-900">
+                    {selected.name}
+                    {selected.userCode && <span className="ml-2 font-medium text-brand-600">{selected.userCode}</span>}
+                  </p>
                   <p className="text-[11px] text-ink-500">
                     {selected.shop} · {selected.role} · Wallet {formatINR(selected.walletBalance)}
                   </p>
@@ -1152,6 +1169,7 @@ function LiensTab({
                       >
                         <span>
                           <span className="font-semibold text-ink-900">{h.name}</span>{" "}
+                          {h.userCode && <span className="font-medium text-brand-600">{h.userCode}</span>}{" "}
                           <span className="text-ink-500">· {h.shop}</span>
                         </span>
                         <span className="shrink-0 ml-2 text-[11px] text-ink-500">{h.role} · {formatINR(h.walletBalance)}</span>

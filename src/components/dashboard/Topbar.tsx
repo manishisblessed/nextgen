@@ -50,6 +50,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   }
 
   const user = session?.user;
+  const userCode = (user as { userCode?: string | null } | undefined)?.userCode ?? null;
   const initials = user?.name
     ? user.name
         .split(" ")
@@ -116,14 +117,21 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
                 {user?.name ?? "Guest"}
               </span>
               <span className="text-[10px] uppercase tracking-widest text-ink-500">
-                {displayRole}
+                {displayRole}{userCode ? ` · ${userCode}` : ""}
               </span>
             </span>
           </button>
           {open && (
             <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-soft">
               <div className="border-b border-ink-100 p-3 text-sm">
-                <p className="font-semibold text-ink-900">{user?.name}</p>
+                <p className="font-semibold text-ink-900">
+                  {user?.name}
+                  {userCode && (
+                    <span className="ml-2 rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-600 align-middle">
+                      {userCode}
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-ink-500">{user?.email}</p>
               </div>
               <div className="p-1">

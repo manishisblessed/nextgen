@@ -976,6 +976,12 @@ function TransactionsTab() {
   const cols: Column<PosTransaction>[] = [
     { key: "txn_time", header: "Time", render: (r) => <span className="text-xs">{fmtTime(r.txn_time)}</span> },
     { key: "terminal_id", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.terminal_id}</span> },
+    { key: "retailer", header: "Retailer", render: (r) => r.retailer ? (
+      <div className="flex flex-col">
+        <span className="text-xs font-semibold text-ink-900 truncate max-w-[130px]">{r.retailer.shopName || r.retailer.name}</span>
+        {r.retailer.userCode && <span className="text-[11px] font-medium text-brand-600">{r.retailer.userCode}</span>}
+      </div>
+    ) : <span className="text-xs text-ink-400">—</span> },
     { key: "payment_mode", header: "Mode", render: (r) => <Badge variant="default">{r.payment_mode}</Badge> },
     { key: "card_brand", header: "Card", render: (r) => r.payment_mode === "CARD" ? `${r.card_brand} ${r.card_type}` : "—" },
     { key: "card_classification", header: "Classification", render: (r) => r.card_classification ? <Badge variant="accent">{r.card_classification}</Badge> : "—" },
@@ -1114,10 +1120,15 @@ function TransactionsTab() {
 // ═══════════════════════════════════════════════════════════════════════
 
 function TxnSlipDrawer({ txn, onClose }: { txn: PosTransaction; onClose: () => void }) {
+  const retailerLabel = txn.retailer
+    ? `${txn.retailer.shopName || txn.retailer.name}${txn.retailer.userCode ? ` (${txn.retailer.userCode})` : ""}`
+    : null;
+
   const rows: [string, string | null][] = [
     ["Transaction ID", txn.razorpay_txn_id],
     ["External Ref", txn.external_ref],
     ["Terminal ID", txn.terminal_id],
+    ["Retailer", retailerLabel],
     ["MID", txn.mid],
     ["Device Serial", txn.device_serial],
     ["Amount", `₹${parseFloat(txn.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`],

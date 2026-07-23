@@ -10,8 +10,11 @@ export const dynamic = "force-dynamic";
  * GET /api/admin/schemes/meta — dropdown data for the scheme-management UI:
  *   providers:    configured partner routes grouped by service kind
  *                 (BBPS/RECHARGE/DMT/PAYOUT/...), for provider-scoped slabs
- *   posCompanies: distinct acquiring-company labels from the POS fleet,
- *                 for company-wise MDR rates
+ *   posCompanies: distinct acquiring-company labels from ACTIVE POS machines,
+ *                 for company-wise MDR rates. Sourced only from the `company`
+ *                 field (never `model`, which holds device/brand labels) and
+ *                 only from active machines, so decommissioned units and
+ *                 device-model values don't pollute the company picker.
  */
 export async function GET() {
   try {
@@ -24,23 +27,17 @@ export async function GET() {
     throw e;
   }
 
-  const [routes, companiesByField, companiesByModel] = await Promise.all([
+  const [routes, companiesByField] = await Promise.all([
     prisma.serviceRoute.findMany({
       where: { type: "SERVICE", provider: { not: null } },
       select: { kind: true, provider: true, name: true },
       orderBy: [{ kind: "asc" }, { sortOrder: "asc" }],
     }),
     prisma.posMachine.findMany({
-      where: { company: { not: null } },
+      where: { company: { not: null }, status: "active" },
       select: { company: true },
       distinct: ["company"],
       orderBy: { company: "asc" },
-    }),
-    prisma.posMachine.findMany({
-      where: { model: { not: null } },
-      select: { model: true },
-      distinct: ["model"],
-      orderBy: { model: "asc" },
     }),
   ]);
 
@@ -56,7 +53,6 @@ export async function GET() {
 
   const companyNames = new Set<string>();
   for (const c of companiesByField) if (c.company) companyNames.add(c.company);
-  for (const c of companiesByModel) if (c.model) companyNames.add(c.model);
 
   return NextResponse.json({
     providersByKind,

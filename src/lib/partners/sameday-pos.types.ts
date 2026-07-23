@@ -63,6 +63,14 @@ export interface PosExportRequest {
 
 // ── Response types (matched to live API) ──
 
+export interface PosTransactionRetailer {
+  id: string;
+  name: string;
+  shopName: string | null;
+  userCode: string | null;
+  role: string;
+}
+
 export interface PosTransaction {
   id: number;
   razorpay_txn_id: string;
@@ -90,6 +98,7 @@ export interface PosTransaction {
   posting_date: string;
   txn_time: string;
   created_at: string;
+  retailer?: PosTransactionRetailer | null;
 }
 
 export interface PosTransactionsPagination {

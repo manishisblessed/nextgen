@@ -34,7 +34,7 @@ type Overview = {
 
 type ClaimRow = {
   id: string;
-  retailer: { id: string; name: string; phone: string; shopName: string | null };
+  retailer: { id: string; userCode: string | null; name: string; phone: string; shopName: string | null };
   qrLabel: string;
   qrVpa: string | null;
   amount: number;
@@ -156,7 +156,10 @@ function ReviewQueueTab() {
       header: "Retailer",
       render: (r) => (
         <div>
-          <div className="font-medium">{r.retailer.name}</div>
+          <div className="font-medium">
+            {r.retailer.name}
+            {r.retailer.userCode && <span className="ml-2 font-medium text-brand-600">{r.retailer.userCode}</span>}
+          </div>
           <div className="text-xs text-ink-500">{r.retailer.shopName ?? r.retailer.phone}</div>
         </div>
       ),

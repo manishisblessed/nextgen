@@ -96,6 +96,7 @@ type KycRow = {
   reviewedAt: string | null;
   user: {
     id: string;
+    userCode: string | null;
     name: string;
     email: string;
     phone: string;
@@ -236,6 +237,7 @@ export default function AdminKycPage() {
 
   const reportRows = rows.map((r) => ({
     id: r.id,
+    userCode: r.user.userCode ?? "—",
     name: r.user.name,
     email: r.user.email,
     role: ROLE_LABEL[r.user.role] ?? r.user.role,
@@ -255,7 +257,10 @@ export default function AdminKycPage() {
       header: "Applicant",
       render: (r) => (
         <div>
-          <div className="font-semibold text-ink-900">{r.user.name}</div>
+          <div className="font-semibold text-ink-900">
+            {r.user.name}
+            {r.user.userCode && <span className="ml-2 font-medium text-brand-600">{r.user.userCode}</span>}
+          </div>
           <div className="text-xs text-ink-500">
             {r.user.shopName ?? r.user.email}
             {r.user.city ? ` · ${r.user.city}` : ""}
@@ -524,6 +529,11 @@ function DetailDrawer({
             </div>
             <h3 className="mt-1 font-display text-xl font-bold text-ink-900 truncate">
               {kyc.user.name}
+              {kyc.user.userCode && (
+                <span className="ml-2 rounded-md bg-brand-50 px-2 py-0.5 text-sm font-semibold text-brand-600 align-middle">
+                  {kyc.user.userCode}
+                </span>
+              )}
             </h3>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
               <span className="flex items-center gap-1">

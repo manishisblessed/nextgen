@@ -1194,7 +1194,7 @@ function AssignModal({
   onError: (msg: string) => void;
 }) {
   const [assigning, setAssigning] = useState(false);
-  const [userList, setUserList] = useState<{ id: string; name: string; email: string; role: string; shopName: string | null }[]>([]);
+  const [userList, setUserList] = useState<{ id: string; userCode: string | null; name: string; email: string; role: string; shopName: string | null }[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [assigned, setAssigned] = useState<{ id: string; name: string; email: string; role: string }[]>([]);
   const [loadingAssigned, setLoadingAssigned] = useState(true);
@@ -1215,8 +1215,9 @@ function AssignModal({
       if (schemeRes.ok) setAssigned(schemeData.assignedUsers ?? []);
       if (usersRes.ok)
         setUserList(
-          (usersData.users ?? []).map((u: { id: string; name: string; email: string; role: string; shopName: string | null }) => ({
+          (usersData.users ?? []).map((u: { id: string; userCode: string | null; name: string; email: string; role: string; shopName: string | null }) => ({
             id: u.id,
+            userCode: u.userCode,
             name: u.name,
             email: u.email,
             role: u.role,
@@ -1348,6 +1349,7 @@ function AssignModal({
                     <span className="min-w-0">
                       <span className="block truncate font-medium text-ink-900">
                         {u.name}
+                        {u.userCode && <span className="ml-1.5 font-medium text-brand-600">{u.userCode}</span>}
                         <span className="ml-1.5 inline-block rounded bg-ink-100 px-1 py-0.5 text-[10px] font-semibold text-ink-600">{ROLE_BADGE[u.role] ?? u.role}</span>
                       </span>
                       <span className="block truncate text-xs text-ink-400">{u.shopName ?? u.email}</span>

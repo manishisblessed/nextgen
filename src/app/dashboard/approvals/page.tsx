@@ -36,7 +36,7 @@ type TransferRequest = {
   id: string;
   status: string;
   reason: string | null;
-  user: { id: string; name: string; role: string; phone: string; email: string; shopName: string | null };
+  user: { id: string; userCode: string | null; name: string; role: string; phone: string; email: string; shopName: string | null };
   oldParent: { id: string; name: string; role: string };
   initiatedBy: { id: string; name: string };
   approvedAt: string | null;
@@ -900,6 +900,7 @@ function TransferCard({ transfer, onReview }: { transfer: TransferRequest; onRev
           <div className="flex items-center gap-2">
             <GitBranch className="h-4 w-4 text-brand-600" />
             <p className="font-semibold text-ink-900">{transfer.user.name}</p>
+            {transfer.user.userCode && <span className="font-medium text-brand-600 text-sm">{transfer.user.userCode}</span>}
           </div>
           <p className="text-xs text-ink-500">{transfer.user.role.replace(/_/g, " ")} · Transfer Request</p>
         </div>
@@ -1265,7 +1266,10 @@ function TransferReviewPage({ transfer, onBack }: { transfer: TransferRequest; o
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-ink-400 text-xs">User being transferred</p>
-            <p className="font-medium text-ink-900">{transfer.user.name}</p>
+            <p className="font-medium text-ink-900">
+              {transfer.user.name}
+              {transfer.user.userCode && <span className="ml-2 text-brand-600">{transfer.user.userCode}</span>}
+            </p>
           </div>
           <div>
             <p className="text-ink-400 text-xs">Role</p>

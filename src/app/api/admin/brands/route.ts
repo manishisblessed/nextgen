@@ -45,7 +45,7 @@ const CreateBody = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*$/, "key must be a lowercase slug (a-z, 0-9, -)"),
   name: z.string().trim().min(2).max(80),
   description: z.string().trim().max(300).optional(),
-  settlementMode: z.enum(["INSTANT", "T1"]).default("T1"),
+  settlementMode: z.enum(["INSTANT", "T1", "BOTH"]).default("T1"),
 });
 
 /** POST — create a brand. */

@@ -61,6 +61,7 @@ export async function GET(req: Request) {
         where: where as any,
         select: {
           id: true,
+          userCode: true,
           name: true,
           role: true,
           status: true,
@@ -118,6 +119,7 @@ export async function GET(req: Request) {
 
     const mapped = children.map((u) => ({
       id: u.id,
+      userCode: u.userCode,
       name: u.name,
       shop: u.shopName ?? "—",
       role: displayRole(u.role),

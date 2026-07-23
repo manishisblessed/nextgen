@@ -128,15 +128,20 @@ async function priceMdr(args: {
 }
 
 /**
- * Decide whether a capture settles instantly or T+1:
- *   1. user.instantSettlement = true      → INSTANT (explicit per-user override)
- *   2. brand.settlementMode = "INSTANT"   → INSTANT
- *   3. global settlement.pos_instant.defaultEnabled → INSTANT
- *   4. otherwise                          → T+1
+ * Decide whether a capture settles instantly or T+1. Priority order:
+ *   1. user.instantSettlement = true       → INSTANT (explicit per-user override)
+ *   2. brand.settlementMode = "INSTANT"    → INSTANT (brand pinned to instant)
+ *   3. brand.settlementMode = "T1"         → T+1 (brand pinned to next-day)
+ *   4. brand.settlementMode = "BOTH"/null  → follow global default:
+ *        global settlement.pos_instant.defaultEnabled → INSTANT, else T+1
+ *
+ * "BOTH" means the brand supports either mode and defers the decision to the
+ * per-user flag (above) or the platform default.
  */
 async function resolveSettlementMode(userInstant: boolean, brandMode: string | null): Promise<"INSTANT" | "T1"> {
   if (userInstant) return "INSTANT";
   if (brandMode === "INSTANT") return "INSTANT";
+  if (brandMode === "T1") return "T1";
   const globalInstant = await getSetting("settlement.pos_instant");
   return globalInstant.defaultEnabled ? "INSTANT" : "T1";
 }

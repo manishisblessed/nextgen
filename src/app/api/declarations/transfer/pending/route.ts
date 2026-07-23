@@ -20,7 +20,7 @@ export async function GET() {
       id: true,
       status: true,
       reason: true,
-      user: { select: { id: true, name: true, role: true, phone: true, email: true, shopName: true } },
+      user: { select: { id: true, userCode: true, name: true, role: true, phone: true, email: true, shopName: true } },
       oldParent: { select: { id: true, name: true, role: true } },
       initiatedBy: { select: { id: true, name: true } },
       approvedAt: true,

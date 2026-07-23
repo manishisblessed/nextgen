@@ -32,6 +32,7 @@ export async function GET(req: Request) {
         user: {
           select: {
             id: true,
+            userCode: true,
             name: true,
             email: true,
             phone: true,
@@ -175,6 +176,7 @@ export async function GET(req: Request) {
         reviewedAt: k.reviewedAt?.toISOString() ?? null,
         user: {
           id: k.user.id,
+          userCode: k.user.userCode,
           name: k.user.name,
           email: k.user.email,
           phone: k.user.phone,

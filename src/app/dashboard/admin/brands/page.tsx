@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { formatINR } from "@/lib/utils";
-import { Tag, Plus, RefreshCw, Trash2, X, Zap, Clock } from "lucide-react";
+import { Tag, Plus, RefreshCw, Trash2, X, Zap, Clock, ArrowLeftRight } from "lucide-react";
 
 type Brand = {
   id: string;
@@ -133,10 +133,14 @@ export default function BrandsPage() {
       key: "mode",
       header: "Settlement",
       render: (b) => (
-        <Badge variant={b.settlementMode === "INSTANT" ? "brand" : "default"}>
+        <Badge variant={b.settlementMode === "INSTANT" ? "brand" : b.settlementMode === "BOTH" ? "warning" : "default"}>
           {b.settlementMode === "INSTANT" ? (
             <span className="inline-flex items-center gap-1">
               <Zap className="h-3 w-3" /> Instant
+            </span>
+          ) : b.settlementMode === "BOTH" ? (
+            <span className="inline-flex items-center gap-1">
+              <ArrowLeftRight className="h-3 w-3" /> Both
             </span>
           ) : (
             <span className="inline-flex items-center gap-1">
@@ -159,16 +163,17 @@ export default function BrandsPage() {
       key: "actions",
       header: "",
       render: (b) => (
-        <div className="flex justify-end gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              patchBrand(b.id, { settlementMode: b.settlementMode === "INSTANT" ? "T1" : "INSTANT" })
-            }
+        <div className="flex items-center justify-end gap-2">
+          <select
+            className="rounded-lg border border-ink-200 bg-white px-2 py-1.5 text-xs text-ink-700 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            value={b.settlementMode}
+            onChange={(e) => patchBrand(b.id, { settlementMode: e.target.value })}
+            title="Settlement mode"
           >
-            {b.settlementMode === "INSTANT" ? "Set T+1" : "Set instant"}
-          </Button>
+            <option value="T1">T+1</option>
+            <option value="INSTANT">Instant</option>
+            <option value="BOTH">Both</option>
+          </select>
           <Button size="sm" variant="outline" onClick={() => patchBrand(b.id, { active: !b.active })}>
             {b.active ? "Deactivate" : "Activate"}
           </Button>
@@ -215,10 +220,11 @@ export default function BrandsPage() {
       {showCreate && (
         <CreateBrandModal
           onClose={() => setShowCreate(false)}
-          onCreated={() => {
+          onCreated={(brandId) => {
             setShowCreate(false);
-            notify("Brand created.", true);
+            notify("Brand created. Add its MDR rates below.", true);
             load();
+            loadDetail(brandId);
           }}
           onError={(text) => notify(text, false)}
         />
@@ -457,20 +463,53 @@ function RateEditor({
 
 /* --------------------------------------------------------- create modal */
 
+/** Turn a company label into a stable lowercase slug for the brand key. */
+function slugify(v: string) {
+  return v
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+type FleetCompany = { company: string; machineCount: number };
+
 function CreateBrandModal({
   onClose,
   onCreated,
   onError,
 }: {
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (brandId: string) => void;
   onError: (text: string) => void;
 }) {
-  const [key, setKey] = useState("");
-  const [name, setName] = useState("");
+  const [companies, setCompanies] = useState<FleetCompany[]>([]);
+  const [loadingCompanies, setLoadingCompanies] = useState(true);
+  const [company, setCompany] = useState("");
   const [description, setDescription] = useState("");
   const [settlementMode, setSettlementMode] = useState("T1");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/pos/companies");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error ?? "Failed to load companies");
+        if (active) setCompanies(data.companies ?? []);
+      } catch (e) {
+        if (active) onError(e instanceof Error ? e.message : "Failed to load companies");
+      } finally {
+        if (active) setLoadingCompanies(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [onError]);
+
+  const key = slugify(company);
 
   const submit = async () => {
     setBusy(true);
@@ -479,8 +518,8 @@ function CreateBrandModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          key: key.trim().toLowerCase(),
-          name: name.trim(),
+          key,
+          name: company.trim(),
           description: description.trim() || undefined,
           settlementMode,
         }),
@@ -495,7 +534,7 @@ function CreateBrandModal({
             : "Create failed";
         throw new Error(msg);
       }
-      onCreated();
+      onCreated(data.brand.id);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Create failed");
     } finally {
@@ -512,23 +551,32 @@ function CreateBrandModal({
         <h3 className="mb-4 text-base font-bold text-ink-900">New brand</h3>
         <div className="space-y-3">
           <label className="block text-xs text-ink-500">
-            Key (slug)
-            <input
+            Company (from POS fleet)
+            <select
               className={`${inputCls} mt-1 w-full`}
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="teachway"
-            />
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+              disabled={loadingCompanies}
+            >
+              <option value="">
+                {loadingCompanies
+                  ? "Loading companies…"
+                  : companies.length === 0
+                  ? "No companies found on POS machines"
+                  : "Select a company…"}
+              </option>
+              {companies.map((c) => (
+                <option key={c.company} value={c.company}>
+                  {c.company} ({c.machineCount})
+                </option>
+              ))}
+            </select>
           </label>
-          <label className="block text-xs text-ink-500">
-            Name
-            <input
-              className={`${inputCls} mt-1 w-full`}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="TeachWay"
-            />
-          </label>
+          {company && (
+            <p className="text-[11px] text-ink-400">
+              Brand key: <span className="font-mono text-ink-600">{key}</span>
+            </p>
+          )}
           <label className="block text-xs text-ink-500">
             Description (optional)
             <input className={`${inputCls} mt-1 w-full`} value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -538,6 +586,7 @@ function CreateBrandModal({
             <select className={`${inputCls} mt-1 w-full`} value={settlementMode} onChange={(e) => setSettlementMode(e.target.value)}>
               <option value="T1">T+1 (next-day cron)</option>
               <option value="INSTANT">Instant (per-transaction)</option>
+              <option value="BOTH">Both (follow per-user / platform default)</option>
             </select>
           </label>
         </div>
@@ -545,7 +594,7 @@ function CreateBrandModal({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy || key.trim().length < 2 || name.trim().length < 2} isLoading={busy}>
+          <Button onClick={submit} disabled={busy || key.length < 2} isLoading={busy}>
             Create brand
           </Button>
         </div>

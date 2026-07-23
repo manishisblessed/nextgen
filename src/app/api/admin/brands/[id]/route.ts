@@ -55,7 +55,7 @@ const PatchBody = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   description: z.string().trim().max(300).nullable().optional(),
   active: z.boolean().optional(),
-  settlementMode: z.enum(["INSTANT", "T1"]).optional(),
+  settlementMode: z.enum(["INSTANT", "T1", "BOTH"]).optional(),
 });
 
 /** PATCH — update brand metadata / active / settlement mode. */

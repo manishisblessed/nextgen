@@ -2208,7 +2208,7 @@ model Brand {
   active         Boolean @default(true)
   // Default settlement mode for this brand's captures. A per-user
   // instantSettlement override still forces INSTANT for that user.
-  settlementMode String  @default("T1") // INSTANT | T1
+  settlementMode String  @default("T1") // INSTANT | T1 | BOTH (BOTH = follow per-user/global default)
   createdById    String?
 
   rates       BrandMdrRate[]

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth-server";
 import { getPosTransactions } from "@/lib/partners/sameday-pos";
+import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
 import { scopePosTerminals } from "@/lib/pos/assignments";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
@@ -90,7 +91,41 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json(result.data);
+    // Enrich transactions with the assigned retailer from local PosMachine table.
+    const tids = [...new Set(result.data.data.map((t) => t.terminal_id).filter(Boolean))];
+    const machines = tids.length
+      ? await prisma.posMachine.findMany({
+          where: { tid: { in: tids } },
+          select: {
+            tid: true,
+            assignedUser: {
+              select: { id: true, name: true, shopName: true, userCode: true, role: true },
+            },
+          },
+        })
+      : [];
+
+    const tidToRetailer = new Map(
+      machines
+        .filter((m) => m.tid && m.assignedUser)
+        .map((m) => [
+          m.tid!,
+          {
+            id: m.assignedUser!.id,
+            name: m.assignedUser!.name,
+            shopName: (m.assignedUser as { shopName?: string | null }).shopName ?? null,
+            userCode: (m.assignedUser as { userCode?: string | null }).userCode ?? null,
+            role: m.assignedUser!.role,
+          },
+        ])
+    );
+
+    const enriched = result.data.data.map((txn) => ({
+      ...txn,
+      retailer: tidToRetailer.get(txn.terminal_id) ?? null,
+    }));
+
+    return NextResponse.json({ ...result.data, data: enriched });
   } catch (e) {
     return toErrorResponse(e);
   }
