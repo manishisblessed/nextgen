@@ -95,9 +95,20 @@ type AssignedUser = {
   role: string;
 };
 
+type BrandRate = {
+  provider: string;
+  paymentMode: string;
+  mdrType: string;
+  mdrValue: number;
+  mdrValueT0: number;
+  minAmount: number;
+  maxAmount: number;
+};
+
 type Meta = {
   providersByKind: Record<string, Array<{ provider: string; name: string }>>;
   posCompanies: string[];
+  brandRatesByCompany: Record<string, BrandRate[]>;
 };
 
 // ---------------------------------------------------------------------------
@@ -131,7 +142,7 @@ function fmtBand(min: number, max: number): string {
 
 export default function SchemeManagementPage() {
   const [schemes, setSchemes] = useState<Scheme[]>([]);
-  const [meta, setMeta] = useState<Meta>({ providersByKind: {}, posCompanies: [] });
+  const [meta, setMeta] = useState<Meta>({ providersByKind: {}, posCompanies: [], brandRatesByCompany: {} });
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"active" | "all">("active");
@@ -150,10 +161,18 @@ export default function SchemeManagementPage() {
         fetch("/api/admin/schemes/meta"),
       ]);
       const sData = await sRes.json();
-      const metaData = await metaRes.json();
       if (Array.isArray(sData.schemes)) setSchemes(sData.schemes);
-      if (metaData.providersByKind)
-        setMeta({ providersByKind: metaData.providersByKind, posCompanies: metaData.posCompanies ?? [] });
+      if (metaRes.ok) {
+        const metaData = await metaRes.json();
+        if (metaData.providersByKind)
+          setMeta({
+            providersByKind: metaData.providersByKind,
+            posCompanies: metaData.posCompanies ?? [],
+            brandRatesByCompany: metaData.brandRatesByCompany ?? {},
+          });
+      } else {
+        notify("Failed to load dropdown metadata", false);
+      }
     } catch {
       notify("Failed to load schemes", false);
     } finally {
@@ -668,6 +687,7 @@ function SchemeCard({
           schemeId={scheme.id}
           editing={mdrModal.editing}
           companies={meta.posCompanies}
+          brandRatesByCompany={meta.brandRatesByCompany}
           onClose={() => setMdrModal(null)}
           onSaved={(msg) => {
             setMdrModal(null);
@@ -914,12 +934,14 @@ function MdrRateModal({
   schemeId,
   editing,
   companies,
+  brandRatesByCompany,
   onClose,
   onSaved,
 }: {
   schemeId: string;
   editing: MdrSlab | null;
   companies: string[];
+  brandRatesByCompany: Record<string, BrandRate[]>;
   onClose: () => void;
   onSaved: (msg: string) => void;
 }) {
@@ -954,8 +976,25 @@ function MdrRateModal({
   const [commSuper, setCommSuper] = useState(
     String(editing ? (editing.commissionType === "PERCENT" ? editing.commissionSuperDistributor * 100 : editing.commissionSuperDistributor) : 0)
   );
+  const [applyScope, setApplyScope] = useState<"single" | "global">("single");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pre-fill vendor charges from brand rates when company changes (new slabs only).
+  useEffect(() => {
+    if (isEdit || !company) return;
+    const rates = brandRatesByCompany[company];
+    if (!rates || rates.length === 0) return;
+    // Pick best match: prefer exact paymentMode, then wildcard "*".
+    const exact = rates.find((r) => r.paymentMode === paymentMode);
+    const wildcard = rates.find((r) => r.paymentMode === "*");
+    const pick = exact ?? wildcard ?? rates[0];
+    if (!pick) return;
+    const isPercent = pick.mdrType === "PERCENT";
+    setMdrType(pick.mdrType as RateType);
+    setVendorT1(String(isPercent ? Number(pick.mdrValue) * 100 : Number(pick.mdrValue)));
+    setVendorT0(String(isPercent ? Number(pick.mdrValueT0) * 100 : Number(pick.mdrValueT0)));
+  }, [company, paymentMode, isEdit, brandRatesByCompany]);
 
   function toStored(type: RateType, raw: string): number {
     const n = Number(raw);
@@ -988,12 +1027,22 @@ function MdrRateModal({
       const res = await fetch(`/api/admin/schemes/${schemeId}/mdr-slabs`, {
         method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        // serviceKind = the acquiring rail (POS/PG/QR/UPI) priced by this row.
-        body: JSON.stringify(isEdit ? { slabId: editing!.id, ...dims } : { serviceKind, ...dims }),
+        body: JSON.stringify(
+          isEdit
+            ? { slabId: editing!.id, ...dims }
+            : { serviceKind, ...dims, global: applyScope === "global" }
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Save failed");
-      onSaved(isEdit ? "MDR rate updated." : "MDR rate added.");
+      if (applyScope === "global" && data.created) {
+        const msg = data.skipped > 0
+          ? `MDR rate added to ${data.created} scheme(s). ${data.skipped} skipped (overlap).`
+          : `MDR rate added to all ${data.created} scheme(s).`;
+        onSaved(msg);
+      } else {
+        onSaved(isEdit ? "MDR rate updated." : "MDR rate added.");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -1018,6 +1067,39 @@ function MdrRateModal({
         </div>
         <div className="space-y-4 p-5">
           {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
+
+          {!isEdit && (
+            <div className="flex items-center gap-3 rounded-xl border border-ink-100 bg-ink-50/50 px-3 py-2.5">
+              <span className="text-xs font-semibold uppercase tracking-widest text-ink-500">Apply to</span>
+              <button
+                type="button"
+                onClick={() => setApplyScope("single")}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  applyScope === "single"
+                    ? "bg-ink-900 text-white shadow-sm"
+                    : "text-ink-500 hover:bg-ink-100"
+                }`}
+              >
+                This scheme
+              </button>
+              <button
+                type="button"
+                onClick={() => setApplyScope("global")}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  applyScope === "global"
+                    ? "bg-orange-600 text-white shadow-sm"
+                    : "text-ink-500 hover:bg-ink-100"
+                }`}
+              >
+                All schemes
+              </button>
+              {applyScope === "global" && (
+                <span className="ml-auto text-xs text-orange-600">
+                  This configuration will be applied to every active scheme
+                </span>
+              )}
+            </div>
+          )}
 
           <div>
             <Label>Rail</Label>

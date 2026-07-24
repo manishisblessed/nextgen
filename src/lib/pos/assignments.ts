@@ -25,7 +25,7 @@ const MAX_PAGES = 50; // safety bound: up to 5,000 machines per sync
 type ExternalMachineRow = ExternalPosMachine;
 
 /** Map an external machine into the columns we persist locally. */
-function toSyncedFields(m: ExternalMachineRow) {
+function toSyncedFields(m: ExternalMachineRow, company?: string) {
   return {
     mid: m.mid ?? null,
     tid: m.tid ?? null,
@@ -36,6 +36,7 @@ function toSyncedFields(m: ExternalMachineRow) {
     location: m.location ?? null,
     city: m.city ?? null,
     state: m.state ?? null,
+    company: company?.trim() || null,
     meta: m as unknown as object,
     syncedAt: new Date(),
   };
@@ -66,6 +67,8 @@ export async function syncPosMachines(): Promise<PosSyncResult> {
     const machines = res.data.data ?? [];
     if (machines.length === 0) break;
 
+    const company = res.data.company;
+
     const externalIds = machines.map((m) => m.id);
     for (const id of externalIds) seenIds.add(id);
 
@@ -81,7 +84,7 @@ export async function syncPosMachines(): Promise<PosSyncResult> {
       const slice = machines.slice(i, i + BATCH);
       await Promise.all(
         slice.map((m) => {
-          const fields = toSyncedFields(m);
+          const fields = toSyncedFields(m, company);
           return prisma.posMachine.upsert({
             where: { externalId: m.id },
             update: fields,

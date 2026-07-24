@@ -215,7 +215,7 @@ export async function GET(req: Request) {
   const anchorIds = [
     ...new Set(
       invites
-        .map((i) => i.userId ?? i.parentId)
+        .flatMap((i) => [i.userId, i.parentId])
         .filter((id): id is string => Boolean(id))
     ),
   ];
@@ -243,6 +243,24 @@ export async function GET(req: Request) {
       if (inv.userId) {
         // Anchor is the registered invitee — its ancestors are the upline.
         upline = flattenUpline(anchor);
+        // Fallback: if the registered user has no parent chain, try the
+        // invite's original parentId (covers cases where parentId wasn't
+        // propagated to the User record).
+        if (upline.length === 0 && inv.parentId && inv.parentId !== inv.userId) {
+          const fallback = anchorMap.get(inv.parentId);
+          if (fallback) {
+            upline = [
+              {
+                id: fallback.id,
+                name: fallback.name,
+                role: fallback.role as UplineNode["role"],
+                userCode: fallback.userCode ?? null,
+                shopName: fallback.shopName ?? null,
+              },
+              ...flattenUpline(fallback),
+            ];
+          }
+        }
       } else {
         // Anchor is the immediate parent — include it plus its ancestors.
         upline = [
@@ -257,8 +275,17 @@ export async function GET(req: Request) {
         ];
       }
     }
+
+    // Include the registered user's userCode if available.
+    let registeredUserCode: string | null = null;
+    if (inv.userId) {
+      const regUser = anchorMap.get(inv.userId);
+      if (regUser) registeredUserCode = regUser.userCode ?? null;
+    }
+
     return {
       ...inv,
+      userCode: registeredUserCode,
       upline: upline.map((n) => ({
         role: n.role,
         name: n.name,

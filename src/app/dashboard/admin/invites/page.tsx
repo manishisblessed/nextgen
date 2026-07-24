@@ -49,6 +49,7 @@ type Invite = {
   role: string;
   status: string;
   parentId: string | null;
+  userCode: string | null;
   createdAt: string;
   expiresAt: string;
   registeredAt: string | null;
@@ -286,6 +287,9 @@ export default function AdminInvitesPage() {
                   <td className="px-4 py-3">
                     <div className="font-medium text-ink-900">{inv.name || inv.email}</div>
                     <div className="text-xs text-ink-500">{inv.phone}</div>
+                    {inv.userCode && (
+                      <div className="mt-0.5 text-xs font-medium text-brand-600">{inv.userCode}</div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-ink-700">
                     {inv.role.replace("_", " ")}

@@ -35,6 +35,8 @@ const SlabBody = z.object({
   commissionDistributor: z.number().nonnegative().default(0),
   commissionMaster: z.number().nonnegative().default(0),
   commissionSuperDistributor: z.number().nonnegative().default(0),
+  // When true, the slab is created across ALL active schemes (not just this one).
+  global: z.boolean().default(false),
 });
 
 /**
@@ -98,24 +100,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const scheme = await prisma.scheme.findUnique({ where: { id: params.id }, select: { id: true } });
-  if (!scheme) return NextResponse.json({ error: "Scheme not found" }, { status: 404 });
-
   const b = parsed.data;
-  const overlap = await validateMdrSlab(
-    params.id,
-    b.serviceKind,
-    b.paymentMode,
-    { minAmount: b.minAmount, maxAmount: b.maxAmount },
-    undefined,
-    {
-      company: b.company ?? null,
-      cardType: b.cardType ?? null,
-      brandType: b.brandType ?? null,
-      classification: b.classification ?? null,
-    }
-  );
-  if (overlap) return NextResponse.json({ error: overlap }, { status: 400 });
+  const { global: isGlobal, ...slabFields } = b;
+
+  // Resolve target scheme(s).
+  const targetSchemeIds: string[] = [];
+  if (isGlobal) {
+    const allSchemes = await prisma.scheme.findMany({
+      where: { active: true },
+      select: { id: true },
+    });
+    if (allSchemes.length === 0)
+      return NextResponse.json({ error: "No active schemes found" }, { status: 404 });
+    for (const s of allSchemes) targetSchemeIds.push(s.id);
+  } else {
+    const scheme = await prisma.scheme.findUnique({ where: { id: params.id }, select: { id: true } });
+    if (!scheme) return NextResponse.json({ error: "Scheme not found" }, { status: 404 });
+    targetSchemeIds.push(params.id);
+  }
 
   const floorErr = await validateMdrAgainstFloor({
     serviceKind: b.serviceKind,
@@ -129,29 +131,72 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const marginErr = validateMarginVsCommission(b);
   if (marginErr) return NextResponse.json({ error: marginErr }, { status: 400 });
 
-  const slab = await prisma.mdrSlab.create({
-    data: {
-      schemeId: params.id,
-      ...b,
-      company: b.company ?? null,
-      cardType: b.cardType ?? null,
-      brandType: b.brandType ?? null,
-      classification: b.classification ?? null,
-    },
-  });
+  // Validate overlap and create for each target scheme.
+  const created: string[] = [];
+  const skipped: string[] = [];
+  for (const sid of targetSchemeIds) {
+    const overlap = await validateMdrSlab(
+      sid,
+      b.serviceKind,
+      b.paymentMode,
+      { minAmount: b.minAmount, maxAmount: b.maxAmount },
+      undefined,
+      {
+        company: b.company ?? null,
+        cardType: b.cardType ?? null,
+        brandType: b.brandType ?? null,
+        classification: b.classification ?? null,
+      }
+    );
+    if (overlap) {
+      skipped.push(sid);
+      continue;
+    }
+
+    const slab = await prisma.mdrSlab.create({
+      data: {
+        schemeId: sid,
+        ...slabFields,
+        company: slabFields.company ?? null,
+        cardType: slabFields.cardType ?? null,
+        brandType: slabFields.brandType ?? null,
+        classification: slabFields.classification ?? null,
+      },
+    });
+    created.push(slab.id);
+  }
 
   await prisma.auditLog.create({
     data: {
       userId: admin.id,
-      action: "mdr_slab.created",
+      action: isGlobal ? "mdr_slab.created_global" : "mdr_slab.created",
       entity: "MdrSlab",
-      entityId: slab.id,
-      meta: { schemeId: params.id, ...b },
+      entityId: created[0] ?? "none",
+      meta: {
+        schemeId: isGlobal ? targetSchemeIds : params.id,
+        created: created.length,
+        skipped: skipped.length,
+        ...slabFields,
+      },
       ip: clientIp(req),
     },
   });
 
-  return NextResponse.json({ ok: true, slabId: slab.id }, { status: 201 });
+  if (created.length === 0)
+    return NextResponse.json(
+      { error: "All target schemes already have an overlapping MDR slab for this configuration." },
+      { status: 400 }
+    );
+
+  return NextResponse.json(
+    {
+      ok: true,
+      slabId: created[0],
+      created: created.length,
+      skipped: skipped.length,
+    },
+    { status: 201 }
+  );
 }
 
 const UpdateBody = z.object({
