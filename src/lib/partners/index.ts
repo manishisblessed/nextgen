@@ -5,7 +5,7 @@
  * Each vertical is resolved at request time so toggling
  * `PARTNER_*_ENABLED` does not require a rebuild.
  */
-import { flags } from "../env";
+import { flags, isProd } from "../env";
 import * as mock from "./mock";
 import { paysprintAeps, paysprintConfigured, paysprintDmt } from "./paysprint";
 import { razorpayPayout, razorpayPayoutConfigured, razorpayUpi, razorpayUpiConfigured } from "./razorpay";
@@ -15,6 +15,7 @@ import { samedayBbps, samedayBbpsConfigured } from "./sameday-bbps";
 import { samedaySettlementConfigured } from "./sameday-settlement";
 import { samedaySettlementPayout } from "./sameday-payout";
 import { rechargekitConfigured } from "./sameday-rechargekit";
+import { rechargekitDirectConfigured } from "./rechargekit-direct";
 import { leegalityConfigured } from "./leegality";
 import { msg91Configured, msg91Sms } from "./msg91";
 import { resendConfigured, resendEmail } from "./resend";
@@ -165,6 +166,27 @@ export function getPartner<V extends Vertical>(v: V): ProviderMap[V] {
   throw new Error(`Unknown vertical: ${v as string}`);
 }
 
+/**
+ * True when a resolved provider is a mock/stub adapter (its name is prefixed
+ * `MOCK-`). Mock adapters simulate success without moving real money, so any
+ * money-crediting rail MUST refuse to settle through one in production — see
+ * `assertRealMoneyProvider`.
+ */
+export function isMockProvider(p: { name: string }): boolean {
+  return p.name.toUpperCase().startsWith("MOCK");
+}
+
+/**
+ * Guard for money-crediting rails (wallet top-up, payin capture): refuse to
+ * proceed when the resolved provider is a mock and we are running in production.
+ * This makes it physically impossible to mint wallet balance without a real
+ * collector, even if a `PARTNER_*_ENABLED` flag is misconfigured. Throws the
+ * caller-supplied error so each rail can surface its own message/status.
+ */
+export function assertRealMoneyProvider(p: { name: string }, makeError: () => Error): void {
+  if (isProd && isMockProvider(p)) throw makeError();
+}
+
 /** For /api/healthz and the admin "Integrations" page. */
 export function partnerStatus() {
   return {
@@ -190,6 +212,7 @@ export function partnerStatus() {
     otpVerify: { live: isTwilioOtpEnabled(), provider: isTwilioOtpEnabled() ? "TWILIO_VERIFY" : "NONE" },
     settlement: { live: flags.settlement && samedaySettlementConfigured(), provider: flags.settlement && samedaySettlementConfigured() ? "SAMEDAY" : "NONE" },
     rechargekit: { live: flags.rechargekit && rechargekitConfigured(), provider: flags.rechargekit && rechargekitConfigured() ? "SAMEDAY_RECHARGEKIT" : "NONE" },
+    rechargekitDirect: { live: flags.rechargekitDirect && rechargekitDirectConfigured(), provider: flags.rechargekitDirect && rechargekitDirectConfigured() ? "RECHARGEKIT_DIRECT" : "NONE" },
     esign:    { live: flags.esign && leegalityConfigured(), provider: flags.esign && leegalityConfigured() ? "LEEGALITY" : "NONE" }
   };
 }

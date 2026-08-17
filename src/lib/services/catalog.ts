@@ -56,6 +56,7 @@ export const SERVICE_KEYS = {
   VERIFICATION: "verify_ekychub",
   VIRTUAL_ACCOUNT: "virtual_account",
   RECHARGEKIT_CC: "rechargekit_cc",
+  RECHARGEKIT_DIRECT: "rechargekit_direct",
 } as const;
 
 export type ServiceKey = (typeof SERVICE_KEYS)[keyof typeof SERVICE_KEYS];
@@ -77,6 +78,7 @@ export const SERVICE_KEY_TO_HREF: Record<string, string> = {
   [SERVICE_KEYS.BBPS_BULKPE]: "/dashboard/bill-pay/bbps-2",
   [SERVICE_KEYS.BBPS_CREDIT_CARD]: "/dashboard/bill-pay/credit-card",
   [SERVICE_KEYS.RECHARGEKIT_CC]: "/dashboard/bill-pay/cc-pay",
+  [SERVICE_KEYS.RECHARGEKIT_DIRECT]: "/dashboard/bill-pay/offline-cc-pay",
   [SERVICE_KEYS.DMT]: "/dashboard/money-transfer",
   [SERVICE_KEYS.TRAVEL]: "/dashboard/travel/flight",
   [SERVICE_KEYS.VIRTUAL_ACCOUNT]: "/dashboard/virtual-account",
@@ -99,6 +101,7 @@ const SERVICE_HREF_PREFIXES: Array<[prefix: string, key: string]> = [
   ["/dashboard/bill-pay/bbps-2", SERVICE_KEYS.BBPS_BULKPE],
   ["/dashboard/bill-pay/credit-card", SERVICE_KEYS.BBPS_CREDIT_CARD],
   ["/dashboard/bill-pay/cc-pay", SERVICE_KEYS.RECHARGEKIT_CC],
+  ["/dashboard/bill-pay/offline-cc-pay", SERVICE_KEYS.RECHARGEKIT_DIRECT],
   ["/dashboard/bill-pay", SERVICE_KEYS.BBPS],
   ["/dashboard/money-transfer", SERVICE_KEYS.DMT],
   ["/dashboard/travel", SERVICE_KEYS.TRAVEL],
@@ -261,6 +264,16 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     enabled: true,
     note: "Direct credit card payment via Same Day RechargeKit (CC-2). Full 16-digit card number + bank details — no bill fetch needed.",
     sortOrder: 94,
+  },
+  {
+    key: SERVICE_KEYS.RECHARGEKIT_DIRECT,
+    name: "Offline CC Bill Payment",
+    type: "SERVICE",
+    kind: "BBPS",
+    provider: "RECHARGEKIT",
+    enabled: true,
+    note: "Direct credit card payment via the RechargeKit API (offline rail — no Same Day wrapper). Full 16-digit card number + bank details, IMPS/NEFT transfer type, no bill fetch needed.",
+    sortOrder: 95,
   },
   {
     key: SERVICE_KEYS.TRAVEL,

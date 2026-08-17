@@ -23,6 +23,8 @@ export const BBPS_PRICE_SCOPES = {
   BBPS_CREDIT_CARD: SERVICE_KEYS.BBPS_CREDIT_CARD,
   /** Credit Card Bill Payment-2 (cc-pay) — Same Day RechargeKit. */
   RECHARGEKIT_CC: SERVICE_KEYS.RECHARGEKIT_CC,
+  /** Offline CC Bill Payment (offline-cc-pay) — direct RechargeKit API. */
+  RECHARGEKIT_DIRECT: SERVICE_KEYS.RECHARGEKIT_DIRECT,
   /** Unified Bill Payment Platform (bbps-2) — BulkPe. */
   BBPS_BULKPE: SERVICE_KEYS.BBPS_BULKPE,
 } as const;
@@ -36,6 +38,10 @@ const SCOPE_FAMILY: Record<string, "SAMEDAY" | "BULKPE"> = {
   [BBPS_PRICE_SCOPES.BBPS_SAMEDAY]: "SAMEDAY",
   [BBPS_PRICE_SCOPES.BBPS_CREDIT_CARD]: "SAMEDAY",
   [BBPS_PRICE_SCOPES.RECHARGEKIT_CC]: "SAMEDAY",
+  // Direct RechargeKit is priced independently via its own scope key; the family
+  // fallback points at SAMEDAY so existing CC rate cards/slabs still apply until
+  // a dedicated card is pinned to this product.
+  [BBPS_PRICE_SCOPES.RECHARGEKIT_DIRECT]: "SAMEDAY",
   [BBPS_PRICE_SCOPES.BBPS_BULKPE]: "BULKPE",
 };
 
@@ -82,6 +88,7 @@ const CREDIT_CARD_SERVICE = "BILL_CREDIT_CARD";
 const CC_ONLY_SCOPES = new Set<string>([
   BBPS_PRICE_SCOPES.BBPS_CREDIT_CARD,
   BBPS_PRICE_SCOPES.RECHARGEKIT_CC,
+  BBPS_PRICE_SCOPES.RECHARGEKIT_DIRECT,
 ]);
 const UTILITY_ONLY_SCOPES = new Set<string>([
   BBPS_PRICE_SCOPES.BBPS_SAMEDAY,

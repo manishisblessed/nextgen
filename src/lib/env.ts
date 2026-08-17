@@ -49,6 +49,9 @@ const schema = z.object({
   PARTNER_POS_ENABLED: z.string().default("false"),
   PARTNER_SETTLEMENT_ENABLED: z.string().default("false"),
   PARTNER_RECHARGEKIT_ENABLED: z.string().default("false"),
+  // Direct RechargeKit rail (Offline CC Bill Payment) — bypasses Same Day and
+  // calls the RechargeKit API directly with a Bearer token.
+  PARTNER_RECHARGEKIT_DIRECT_ENABLED: z.string().default("false"),
   PARTNER_ESIGN_ENABLED: z.string().default("false"),
 
   // Same Day Solution — POS Partner API
@@ -75,6 +78,12 @@ const schema = z.object({
   // Falls back to POS key pair when unset. Gated by flags.rechargekit.
   SAMEDAY_RECHARGEKIT_API_KEY: z.string().min(1).optional(),
   SAMEDAY_RECHARGEKIT_API_SECRET: z.string().min(1).optional(),
+
+  // Direct RechargeKit API — "Offline CC Bill Payment". Talks straight to
+  // RechargeKit (no Same Day HMAC wrapper); auth via Authorization: Bearer.
+  // Gated by flags.rechargekitDirect (PARTNER_RECHARGEKIT_DIRECT_ENABLED).
+  RECHARGEKIT_DIRECT_BASE_URL: z.string().url().default("https://v2bapi.rechargkit.biz"),
+  RECHARGEKIT_DIRECT_API_TOKEN: z.string().min(1).optional(),
 
   // Phase 3 — settlement automation. A daily worker job sweeps the Same Day
   // partner-wallet balance above the float you keep, into a verified account.
@@ -252,6 +261,7 @@ export const flags = {
   settlement: env.PARTNER_SETTLEMENT_ENABLED === "true",
   settlementAutosweep: env.SETTLEMENT_AUTOSWEEP_ENABLED === "true",
   rechargekit: env.PARTNER_RECHARGEKIT_ENABLED === "true",
+  rechargekitDirect: env.PARTNER_RECHARGEKIT_DIRECT_ENABLED === "true",
   esign: env.PARTNER_ESIGN_ENABLED === "true",
 
   // Security toggles

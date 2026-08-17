@@ -19,6 +19,7 @@ const NO_STAFF_BYPASS_KEYS = new Set<string>([
   SERVICE_KEYS.BBPS_CREDIT_CARD,
   SERVICE_KEYS.PAYOUT,
   SERVICE_KEYS.RECHARGEKIT_CC,
+  SERVICE_KEYS.RECHARGEKIT_DIRECT,
 ]);
 
 export class ServiceDisabledError extends Error {
