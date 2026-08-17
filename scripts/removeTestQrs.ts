@@ -101,7 +101,7 @@ async function main() {
       console.error(`  ✗ cloudinary ${q.label} (${q.imagePublicId}): ${(e as Error).message}`);
     }
     if (FORCE && q._count.claims > 0) {
-      await prisma.qrClaim.deleteMany({ where: { staticQrId: q.id } });
+      await prisma.qrClaim.deleteMany({ where: { qrId: q.id } });
     }
     await prisma.staticQr.delete({ where: { id: q.id } });
     console.log(`  ✓ deleted QR ${q.label}`);
