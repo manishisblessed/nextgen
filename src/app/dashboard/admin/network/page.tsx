@@ -287,6 +287,8 @@ export default function NetworkManagerPage() {
         }}
       />
 
+      <DefaultServicesPanel tier={tier} onDone={notify} />
+
       <DataTable
         columns={columns}
         data={rows}
@@ -462,6 +464,118 @@ function BulkServicesPanel({
           setConfirmAction(null);
         }}
       />
+    </div>
+  );
+}
+
+/* -------------------------------- default services for NEW tier signups */
+
+function DefaultServicesPanel({
+  tier,
+  onDone,
+}: {
+  tier: string;
+  onDone: (msg: string, ok: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [services, setServices] = useState<ServiceOption[]>([]);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetch("/api/admin/network/default-services")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setServices((d.services ?? []).map((s: ServiceOption) => ({ key: s.key, name: s.name })));
+        const forTier: string[] = d.defaults?.[tier] ?? [];
+        setSelectedKeys(new Set(forTier));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [open, tier]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/network/default-services", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: tier, serviceKeys: Array.from(selectedKeys) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Save failed");
+      onDone(
+        `Default services for new ${tier.replace(/_/g, " ").toLowerCase()}s saved (${selectedKeys.size} selected).`,
+        true
+      );
+    } catch (e) {
+      onDone(e instanceof Error ? e.message : "Save failed", false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-ink-100 bg-white">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-5 py-3.5 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold text-ink-800">
+          <Sparkles className="h-4 w-4 text-brand-600" />
+          Default services for new {tier.replace(/_/g, " ").toLowerCase()} signups
+        </span>
+        <Badge>{open ? "collapse" : "expand"}</Badge>
+      </button>
+      {open && (
+        <div className="border-t border-ink-100 p-5">
+          <p className="mb-3 text-xs text-ink-500">
+            Newly created / onboarded {tier.replace(/_/g, " ").toLowerCase()}s start with exactly
+            these services enabled. Leave empty to start them with no services (enable manually per
+            user). This does not change existing users.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {services.map((s) => {
+              const on = selectedKeys.has(s.key);
+              return (
+                <button
+                  key={s.key}
+                  onClick={() =>
+                    setSelectedKeys((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(s.key)) next.delete(s.key);
+                      else next.add(s.key);
+                      return next;
+                    })
+                  }
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                    on
+                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                      : "border-ink-200 text-ink-500 hover:border-ink-300"
+                  }`}
+                >
+                  {s.name}
+                </button>
+              );
+            })}
+            {services.length === 0 && (
+              <p className="text-xs text-ink-400">
+                {loading ? "Loading service catalog…" : "No services available."}
+              </p>
+            )}
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <Button size="sm" disabled={saving || loading} onClick={save}>
+              {saving ? "Saving…" : "Save defaults"}
+            </Button>
+            <span className="text-xs text-ink-400">{selectedKeys.size} selected</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
