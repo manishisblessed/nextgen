@@ -187,6 +187,35 @@ export function assertRealMoneyProvider(p: { name: string }, makeError: () => Er
   if (isProd && isMockProvider(p)) throw makeError();
 }
 
+/**
+ * Verticals that move REAL money. A mock adapter on any of these simulates
+ * success without a bank/PSP actually moving funds, so in production every one
+ * of these MUST resolve to a real provider:
+ *   - `upi`    mints wallet balance on a "PAID" collection (self-funding risk)
+ *   - `payout` / `aeps` / `dmt` / `bbps` push money OUT (phantom "success")
+ * See `moneyRailsOnMock` for the deployment tripwire that enforces this.
+ */
+export const MONEY_VERTICALS = ["upi", "payout", "aeps", "dmt", "bbps"] as const;
+
+/**
+ * Returns the money verticals currently backed by a MOCK adapter (e.g.
+ * `["upi"]`); empty when every money rail is real. The root cause of the
+ * phantom-balance incident was a money rail silently running on a mock in
+ * production, so this is surfaced by the startup tripwire (`src/instrumentation.ts`)
+ * and `/api/healthz` — a misconfigured mock can never hide again.
+ */
+export function moneyRailsOnMock(): Vertical[] {
+  const onMock: Vertical[] = [];
+  for (const v of MONEY_VERTICALS) {
+    try {
+      if (isMockProvider(getPartner(v))) onMock.push(v);
+    } catch {
+      // A vertical that throws to resolve is, by definition, not a live mock.
+    }
+  }
+  return onMock;
+}
+
 /** For /api/healthz and the admin "Integrations" page. */
 export function partnerStatus() {
   return {

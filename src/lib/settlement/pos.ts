@@ -388,6 +388,120 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
   };
 }
 
+export type PosReversalInput = {
+  /** Canonical capture ref (SDPOS:<tid>:<rrn>) shared by capture + reversal. */
+  transactionRef: string;
+  /** New terminal state reported by Same Day. */
+  status: "VOIDED" | "REFUNDED";
+  reason?: string | null;
+  reversedAt?: Date | string | null;
+  /** Where the reversal was learned — audit only. */
+  source: "WEBHOOK" | "SWEEP";
+};
+
+export type PosReversalResult = {
+  outcome:
+    | "NO_ENTRY" // display-only reversal (never settled/queued) — mirror flipped
+    | "PENDING_CANCELLED" // a queued entry was voided before it could pay out
+    | "SETTLED_FLAGGED" // money already left — flagged for manual clawback
+    | "ALREADY_REVERSED"; // idempotent no-op
+  wasSettled?: boolean;
+  netAmount?: number;
+  userId?: string;
+};
+
+/**
+ * Reconcile a POS capture that was later VOIDED / REFUNDED upstream (Same Day
+ * POS API v2). Invoked by BOTH the real-time reversal webhook and the mirror
+ * reconciliation sweep, so it must be fully idempotent.
+ *
+ * It NEVER silently debits a wallet:
+ *   • No settlement entry  → the swipe never queued/settled; just flip the
+ *     display mirror to VOIDED/REFUNDED so it stops counting as success.
+ *   • PENDING entry        → move it to REVERSED so the T+1 / instant crons skip
+ *     it. No money moved — nothing to claw back.
+ *   • SETTLED entry        → the net was already credited (walletTxnId set). We
+ *     move it to REVERSED and stamp the reason, but leave the clawback to the
+ *     admin Reversals desk (the retailer may already have spent the funds, and
+ *     wallet balances are non-negative). `wasSettled` flags it for that queue.
+ *
+ * The display mirror is always flipped (best-effort) so a reversed swipe never
+ * shows as CAPTURED again, even when there is no settlement side.
+ */
+export async function handlePosReversal(input: PosReversalInput): Promise<PosReversalResult> {
+  const reversedAt = input.reversedAt ? new Date(input.reversedAt) : new Date();
+  const reversedAtValid = !Number.isNaN(reversedAt.getTime());
+  const at = reversedAtValid ? reversedAt : new Date();
+  const reason = input.reason?.trim() || `sameday:${input.status.toLowerCase()}`;
+
+  // 1. Flip the display read-model so it stops counting as a successful capture.
+  //    updateMany is a no-op when the row hasn't been mirrored yet; the sweep
+  //    will create it as VOIDED/REFUNDED on its next pass (v2 retains it).
+  await prisma.posTransactionMirror.updateMany({
+    where: { transactionRef: input.transactionRef },
+    data: { status: input.status, reversedAt: at, reversalReason: reason },
+  });
+
+  // 2. Reconcile the settlement side.
+  const entry = await prisma.posSettlementEntry.findUnique({
+    where: { transactionRef: input.transactionRef },
+  });
+
+  if (!entry) {
+    await auditReversal(input, "NO_ENTRY", at, reason, null);
+    return { outcome: "NO_ENTRY" };
+  }
+
+  if (entry.status === "REVERSED") {
+    return { outcome: "ALREADY_REVERSED", userId: entry.userId };
+  }
+
+  const wasSettled = entry.status === "SETTLED" && !!entry.walletTxnId;
+
+  await prisma.posSettlementEntry.update({
+    where: { id: entry.id },
+    data: { status: "REVERSED", reversedAt: at, reversalReason: reason },
+  });
+
+  const outcome = wasSettled ? "SETTLED_FLAGGED" : "PENDING_CANCELLED";
+  await auditReversal(input, outcome, at, reason, entry.userId);
+
+  return {
+    outcome,
+    wasSettled,
+    netAmount: toNumber(dec(entry.netAmount as never)),
+    userId: entry.userId,
+  };
+}
+
+async function auditReversal(
+  input: PosReversalInput,
+  outcome: PosReversalResult["outcome"],
+  reversedAt: Date,
+  reason: string,
+  userId: string | null
+): Promise<void> {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        action: "pos.reversal",
+        entity: "PosSettlementEntry",
+        entityId: input.transactionRef,
+        meta: {
+          status: input.status,
+          outcome,
+          reason,
+          reversedAt: reversedAt.toISOString(),
+          source: input.source,
+          userId,
+        },
+      },
+    });
+  } catch {
+    // Audit is best-effort — never fail the reconciliation on a log write.
+  }
+}
+
 /**
  * POS commission distribution (cascade model): each ancestor earns the MDR
  * margin between their child's Scheme MDR and their own, net of 2% TDS.

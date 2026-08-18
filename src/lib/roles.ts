@@ -37,6 +37,7 @@ import {
   BookOpenCheck,
   Timer,
   Undo2,
+  RotateCcw,
   ReceiptText,
   LineChart,
   ScanSearch,
@@ -114,6 +115,7 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "brands", label: "Brands & MDR" },
   { href: "settlement-ops", label: "Settlement Ops" },
   { href: "pos-settlement", label: "POS Settlement" },
+  { href: "pos-reversals", label: "POS Reversals" },
   { href: "reversals", label: "Reversal Desk" },
   { href: "aeps", label: "AEPS Centre" },
   { href: "qr", label: "QR Collections" },
@@ -156,6 +158,7 @@ const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/aeps", label: "AEPS Centre", icon: Fingerprint, badge: "New" },
   { href: "/dashboard/admin/pos-rental", label: "POS Rental & Billing", icon: ReceiptText, badge: "New" },
   { href: "/dashboard/admin/pos-settlement", label: "POS Settlement", icon: CreditCard, badge: "New" },
+  { href: "/dashboard/admin/pos-reversals", label: "POS Reversals", icon: RotateCcw, badge: "New" },
   // NOTE: "Company Earnings" (the Revenue Wallet) is deliberately NOT here — it
   // is owner-only and injected into the master-admin menu via masterAdminMoneyOps.
   { href: "/dashboard/admin/commission-report", label: "Commission Distributed", icon: HandCoins, badge: "New" },
