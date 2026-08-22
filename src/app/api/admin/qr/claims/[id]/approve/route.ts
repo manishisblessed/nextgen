@@ -22,7 +22,8 @@ const Body = z
   })
   .strict();
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");

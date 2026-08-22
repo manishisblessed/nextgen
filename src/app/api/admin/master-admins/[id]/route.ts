@@ -17,10 +17,8 @@ const PatchBody = z
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let caller;
   try {
     caller = await requireRole("MASTER_ADMIN");
@@ -130,10 +128,8 @@ export async function PATCH(
   return NextResponse.json({ ok: true, masterAdmin: updated });
 }
 
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let caller;
   try {
     caller = await requireRole("MASTER_ADMIN");

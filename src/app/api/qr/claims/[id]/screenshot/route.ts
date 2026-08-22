@@ -14,7 +14,8 @@ import { prisma } from "@/lib/db";
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let user;
   try {
     user = await requireAuth();

@@ -36,7 +36,8 @@ const UpdateBody = z
     { message: "imagePublicId and imageUrl must be updated together", path: ["imageUrl"] }
   );
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
@@ -134,7 +135,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ ok: true, slider: serializeSlider(updated) });
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");

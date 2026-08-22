@@ -19,7 +19,8 @@ const Body = z.object({
 });
 
 /** PATCH — checker decision (approve/reject) or maker cancel. */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireAuth();

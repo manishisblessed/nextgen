@@ -23,10 +23,8 @@ const Query = z.object({
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  req: Request,
-  { params }: { params: { userId: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ userId: string }> }) {
+  const params = await props.params;
   try {
     const admin = await requireRole("ADMIN", "MASTER_ADMIN");
     const ip = clientIp(req);

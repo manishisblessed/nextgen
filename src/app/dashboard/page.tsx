@@ -6,6 +6,8 @@ import { RetailerOverview } from "@/components/dashboard/overview/RetailerOvervi
 import { DistributorOverview } from "@/components/dashboard/overview/DistributorOverview";
 import { MasterOverview } from "@/components/dashboard/overview/MasterOverview";
 import { AdminOverview } from "@/components/dashboard/overview/AdminOverview";
+import { TodaysBusinessOverview } from "@/components/dashboard/overview/TodaysBusinessOverview";
+import { BUSINESS_OVERVIEW_TAB } from "@/lib/roles";
 
 export default function DashboardHomePage() {
   const { data: session } = useSession();
@@ -23,19 +25,40 @@ export default function DashboardHomePage() {
     loggedInAt: Date.now(),
   };
 
-  switch (displayRole) {
-    case "master-admin":
-    case "admin":
-    case "sub-admin":
-    case "finance":
-      return <AdminOverview session={legacySession as any} />;
-    case "super-distributor":
-    case "master-distributor":
-      return <MasterOverview session={legacySession as any} />;
-    case "distributor":
-      return <DistributorOverview session={legacySession as any} />;
-    case "retailer":
-    default:
-      return <RetailerOverview session={legacySession as any} />;
-  }
+  // "Today's Business Overview" — master-admin always; ADMIN/SUPPORT only when
+  // explicitly granted the business-overview tab (User.allowedTabs). Kept as an
+  // additive section above the existing role overview, which is left untouched.
+  const dbRole = session.user.role;
+  const allowedTabs = session.user.allowedTabs ?? [];
+  const canSeeBusinessOverview =
+    dbRole === "MASTER_ADMIN" ||
+    ((dbRole === "ADMIN" || dbRole === "SUPPORT") &&
+      allowedTabs.includes(BUSINESS_OVERVIEW_TAB));
+
+  const overview = (() => {
+    switch (displayRole) {
+      case "master-admin":
+      case "admin":
+      case "sub-admin":
+      case "finance":
+        return <AdminOverview session={legacySession as any} />;
+      case "super-distributor":
+      case "master-distributor":
+        return <MasterOverview session={legacySession as any} />;
+      case "distributor":
+        return <DistributorOverview session={legacySession as any} />;
+      case "retailer":
+      default:
+        return <RetailerOverview session={legacySession as any} />;
+    }
+  })();
+
+  if (!canSeeBusinessOverview) return overview;
+
+  return (
+    <div className="space-y-8">
+      <TodaysBusinessOverview />
+      {overview}
+    </div>
+  );
 }

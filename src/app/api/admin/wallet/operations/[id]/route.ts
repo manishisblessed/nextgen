@@ -19,7 +19,8 @@ const ActionBody = z.object({
 });
 
 /** PATCH — approve / reject / cancel a staged wallet operation. */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireAuth();

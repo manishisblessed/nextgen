@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
  * Lets a parent (DT/MD/SD) see exactly where their onboardee is stuck and what
  * is pending, WITHOUT exposing any documents or raw KYC PII (status-only).
  */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 

@@ -19,10 +19,8 @@ export const dynamic = "force-dynamic";
  *   1. the caller must be the direct parent (or an admin) of `[id]`, and
  *   2. the document `[docId]` must actually belong to `[id]`.
  */
-export async function GET(
-  req: Request,
-  { params }: { params: { id: string; docId: string } }
-) {
+export async function GET(req: Request, props: { params: Promise<{ id: string; docId: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 

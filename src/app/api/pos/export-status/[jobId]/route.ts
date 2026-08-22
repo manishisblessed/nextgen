@@ -10,10 +10,8 @@ export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { jobId: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ jobId: string }> }) {
+  const params = await props.params;
   let user;
   try {
     user = await requireAuth();

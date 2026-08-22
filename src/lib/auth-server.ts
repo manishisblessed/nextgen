@@ -386,7 +386,7 @@ export async function requireAuth(): Promise<SessionUser> {
   }
 
   // 2. Try Bearer token (mobile / API)
-  const h = headers();
+  const h = await headers();
   const auth = h.get("authorization");
   if (auth?.startsWith("Bearer ")) {
     const user = verifyMobileToken(auth.slice(7));

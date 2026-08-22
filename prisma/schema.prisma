@@ -201,6 +201,8 @@ model User {
   tdsEntries            TdsLedgerEntry[]      @relation("TdsPayee")
   posSettlements        PosSettlementEntry[]  @relation("PosSettlements")
   pgSettlements         PgSettlementEntry[]   @relation("PgSettlements")
+  posManualSlips        PosManualSlip[]       @relation("PosManualSlipUploader")
+  posManualSlipsReviewed PosManualSlip[]      @relation("PosManualSlipReviewer")
   networkTransfersOut   NetworkWalletTransfer[] @relation("NetworkTransfersOut")
   networkTransfersIn    NetworkWalletTransfer[] @relation("NetworkTransfersIn")
   transfersAsSubject    HierarchyTransfer[]     @relation("TransferSubject")
@@ -1897,6 +1899,11 @@ model UserLimit {
   settlementPerTxnCap  Decimal? @db.Decimal(14, 2)
   settlementTier       String? // display label, e.g. "TIER_1", "GOLD"
 
+  // Max NET POS instant-settlement (₹) this user may take per IST day. Applied
+  // on top of the global instant pool (settlement.pos_instant.dailyLimitAmount);
+  // the stricter of the two wins. null = only the global pool constrains them.
+  instantDailyCap Decimal? @db.Decimal(14, 2)
+
   note        String?
   updatedById String?
   createdAt   DateTime @default(now())
@@ -2421,6 +2428,66 @@ model PosSettlementEntry {
   @@index([status, createdAt])
   @@index([status, capturedAt])
   @@index([brandId])
+}
+
+/// Manual POS slip submission (Yes Bank & other no-API terminals).
+///
+/// These acquirers give us NO capture webhook/API, so the retailer manually
+/// uploads the physical transaction slip for a terminal ASSIGNED to them. Each
+/// slip is admin-verified before ANY money exists in the system:
+///
+///   PENDING  → retailer uploaded, awaiting admin review (invisible to POS Fleet)
+///   APPROVED → an admin authorised it → a PosTransactionMirror (CAPTURED) row is
+///              created so it appears in POS Fleet, and handlePosCapture() prices
+///              MDR + creates the PosSettlementEntry the retailer then settles
+///              (instant or T+1) exactly like an API-sourced capture.
+///   REJECTED → admin declined with a reason shown to the retailer, who may
+///              re-upload. No mirror row, no settlement entry — never in the fleet.
+///
+/// The slip image/PDF is stored privately in Cloudinary (admins view via a
+/// short-lived signed URL). transactionRef is the canonical settlement/mirror
+/// key ("MPOS:<tid>:<slipId>"), set on approval so the whole downstream money
+/// path (payin, settlement, commission, TDS) is shared with the automatic flow.
+model PosManualSlip {
+  id             String @id @default(cuid())
+  uploaderUserId String
+  uploader       User   @relation("PosManualSlipUploader", fields: [uploaderUserId], references: [id])
+
+  // Terminal the slip belongs to. machineId is a plain reference (matching
+  // PosSettlementEntry.machineId) — the assignment is validated at upload time.
+  machineId String
+  tid       String
+
+  grossAmount Decimal   @db.Decimal(14, 2)
+  paymentMode String    @default("CARD") // CARD | UPI | NFC | BHARATQR
+  rrn         String? // acquirer RRN / reference number from the slip
+  authCode    String? // approval / auth code from the slip
+  cardType    String? // CREDIT | DEBIT | PREPAID (optional pricing dimension)
+  brandType   String? // VISA | MASTERCARD | RUPAY | ... (optional)
+  txnTime     DateTime? // when the swipe happened (drives the T+1 settlement day)
+
+  // Slip evidence — private Cloudinary asset (jpg/jpeg/png/pdf).
+  slipPublicId     String
+  slipFormat       String?
+  slipResourceType String  @default("image") // image | raw (pdf)
+
+  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  rejectionReason String?
+  reviewedById    String?
+  reviewedBy      User?     @relation("PosManualSlipReviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+
+  // Set on approval — links the slip to what it became downstream.
+  transactionRef    String? @unique // canonical mirror/settlement key (MPOS:<tid>:<id>)
+  settlementEntryId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([uploaderUserId, status])
+  @@index([status, createdAt])
+  @@index([machineId])
+  @@index([tid])
 }
 
 // PG (payment gateway) acquirer settlement entry — the PG analogue of

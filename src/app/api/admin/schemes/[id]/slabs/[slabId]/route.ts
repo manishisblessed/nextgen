@@ -30,10 +30,8 @@ const UpdateBody = z
   })
   .strict();
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string; slabId: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string; slabId: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");
@@ -111,10 +109,8 @@ export async function PATCH(
   return NextResponse.json({ ok: true, slab: serializeSlab(updated) });
 }
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: { id: string; slabId: string } }
-) {
+export async function DELETE(_req: Request, props: { params: Promise<{ id: string; slabId: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");

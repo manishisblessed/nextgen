@@ -11,10 +11,8 @@ const UpdateBody = z.object({
   enabledServices: z.array(z.string()),
 });
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
 
@@ -45,10 +43,8 @@ export async function GET(
   }
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
 

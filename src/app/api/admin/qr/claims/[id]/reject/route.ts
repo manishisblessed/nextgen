@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 
 const Body = z.object({ note: z.string().min(3).max(500) }).strict();
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");

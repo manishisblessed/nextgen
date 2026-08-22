@@ -246,7 +246,7 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
 
   // Price MDR against the brand rate card (or legacy scheme). Refuse to settle
   // unpriced money — park it so admin can add a rate and replay the webhook.
-  const priced = await priceMdr({
+  let priced = await priceMdr({
     userId,
     brandId,
     provider,
@@ -257,8 +257,30 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
   });
   if (!priced) return { status: "NO_SCHEME" };
 
-  const netAmount = round(sub(input.grossAmount, priced.mdrAmount));
+  let netAmount = round(sub(input.grossAmount, priced.mdrAmount));
   if (!gt(netAmount, 0)) return { status: "SKIPPED" };
+
+  // Instant daily-limit gate: an auto-instant capture that would exceed the
+  // retailer's remaining instant budget (global pool ∩ per-user cap) is
+  // downgraded to the next-day T+1 sweep instead of crediting now. Re-price at
+  // the T1 rate so the parked entry carries the correct (cheaper) MDR/net.
+  let effectiveMode: "INSTANT" | "T1" = mode;
+  if (mode === "INSTANT" && toNumber(netAmount) > (await remainingInstantBudget(userId))) {
+    const t1Priced = await priceMdr({
+      userId,
+      brandId,
+      provider,
+      paymentMode,
+      grossAmount: input.grossAmount,
+      settlementType: "T1",
+      dims,
+    });
+    if (!t1Priced) return { status: "NO_SCHEME" };
+    effectiveMode = "T1";
+    priced = t1Priced;
+    netAmount = round(sub(input.grossAmount, priced.mdrAmount));
+    if (!gt(netAmount, 0)) return { status: "SKIPPED" };
+  }
 
   // NOTE: the company PAYIN monitor is credited at MIRROR INGEST (see
   // src/lib/pos/mirror.ts), the first time a capture row lands as CAPTURED, so
@@ -269,7 +291,7 @@ export async function handlePosCapture(input: PosCaptureInput): Promise<PosCaptu
   const capturedAt = input.capturedAt ? new Date(input.capturedAt) : new Date();
   const capturedAtValid = !Number.isNaN(capturedAt.getTime());
 
-  if (mode === "INSTANT") {
+  if (effectiveMode === "INSTANT") {
     // Instant settlement — credit the wallet now. If the credit fails mid-flight
     // (e.g. a transient ledger error), park a PENDING/INSTANT entry so the
     // instant safety-net cron retries it; the pos-settle:<ref> idempotency key
@@ -604,6 +626,81 @@ function startOfTodayIst(now = new Date()): Date {
   return new Date(startIstMs - 5.5 * 60 * 60 * 1000);
 }
 
+/** Sentinel returned by {@link remainingInstantBudget} when no cap constrains the user. */
+export const INSTANT_BUDGET_UNLIMITED = Number.MAX_SAFE_INTEGER;
+
+/**
+ * NET POS instant-settlement (₹) already settled TODAY (IST). Counts only
+ * INSTANT-mode entries that actually credited (status SETTLED); reversed entries
+ * flip to REVERSED and so fall out automatically. Pass `userId` for a single
+ * user's usage, omit it for the platform-wide pool.
+ */
+export async function instantUsedToday(userId?: string): Promise<number> {
+  const agg = await prisma.posSettlementEntry.aggregate({
+    where: {
+      mode: "INSTANT",
+      status: "SETTLED",
+      settledAt: { gte: startOfTodayIst() },
+      ...(userId ? { userId } : {}),
+    },
+    _sum: { netAmount: true },
+  });
+  return toNumber(agg._sum.netAmount ?? 0);
+}
+
+export type InstantLimitUsage = {
+  /** Global pool enabled? */
+  globalEnabled: boolean;
+  /** Global pool size (₹ net) per IST day. */
+  globalLimit: number;
+  /** Global net instant-settled today across all users (₹). */
+  globalUsed: number;
+  /** Global remaining (₹, never negative). */
+  globalRemaining: number;
+};
+
+/** Platform-wide instant pool usage snapshot for the admin dashboard. */
+export async function getInstantLimitUsage(): Promise<InstantLimitUsage> {
+  const cfg = await getSetting("settlement.pos_instant");
+  const globalUsed = await instantUsedToday();
+  const globalRemaining = cfg.dailyLimitEnabled
+    ? Math.max(0, cfg.dailyLimitAmount - globalUsed)
+    : Infinity;
+  return {
+    globalEnabled: cfg.dailyLimitEnabled,
+    globalLimit: cfg.dailyLimitAmount,
+    globalUsed,
+    globalRemaining: globalRemaining === Infinity ? INSTANT_BUDGET_UNLIMITED : globalRemaining,
+  };
+}
+
+/**
+ * Remaining NET instant-settlement budget (₹) for `userId` right now — the
+ * MINIMUM of the global daily pool's remaining and this user's own daily cap's
+ * remaining (each ignored when not configured). Returns
+ * {@link INSTANT_BUDGET_UNLIMITED} when neither constrains the user.
+ */
+export async function remainingInstantBudget(userId: string): Promise<number> {
+  const cfg = await getSetting("settlement.pos_instant");
+  let remaining = Infinity;
+
+  if (cfg.dailyLimitEnabled) {
+    remaining = Math.min(remaining, cfg.dailyLimitAmount - (await instantUsedToday()));
+  }
+
+  const userLimit = await prisma.userLimit.findUnique({
+    where: { userId },
+    select: { instantDailyCap: true },
+  });
+  if (userLimit?.instantDailyCap != null) {
+    const cap = toNumber(dec(userLimit.instantDailyCap as never));
+    remaining = Math.min(remaining, cap - (await instantUsedToday(userId)));
+  }
+
+  if (remaining === Infinity) return INSTANT_BUDGET_UNLIMITED;
+  return Math.max(0, remaining);
+}
+
 type PendingEntry = {
   id: string;
   transactionRef: string;
@@ -763,7 +860,25 @@ export async function instantSettleEntries(
   let totalAmount = 0;
   const results: InstantSettleResult["results"] = [];
 
+  // Daily instant-settlement budget (min of global pool + this user's cap).
+  // Decremented as we credit so a single request can't blow past the cap; any
+  // entry that no longer fits is left PENDING for the next-day T+1 sweep.
+  let budget = await remainingInstantBudget(userId);
+
   for (const entry of entries) {
+    // Gate on the capture-time net (a close proxy for the instant net) so we
+    // stop before exhausting the pool. Once nothing fits, the rest roll to T+1.
+    const expectedNet = toNumber(entry.netAmount);
+    if (budget <= 0 || expectedNet > budget) {
+      skipped++;
+      results.push({
+        id: entry.id,
+        transactionRef: entry.transactionRef,
+        status: "SKIPPED",
+        reason: "daily instant settlement limit reached — will auto-settle on T+1",
+      });
+      continue;
+    }
     try {
       const net = await settleEntry(entry, "T0", SETTLED_VIA.INSTANT_BUTTON);
       if (net === null) {
@@ -778,6 +893,7 @@ export async function instantSettleEntries(
       }
       settled++;
       totalAmount += net;
+      budget -= net;
       results.push({ id: entry.id, transactionRef: entry.transactionRef, status: "SETTLED", netAmount: net });
     } catch {
       failed++;
@@ -933,6 +1049,12 @@ export async function runPosT1SettlementSweep(): Promise<{
  * an entry was replayed). Runs frequently; each entry settles at most once via
  * the pos-settle:<ref> ledger idempotency key. MDR is re-verified against the
  * brand's current instant (T0) rate before crediting.
+ *
+ * NOT gated by the daily instant limit: an INSTANT/PENDING entry only exists
+ * because a capture was already APPROVED for instant settlement (within budget)
+ * but its wallet credit failed mid-flight. Re-gating here could strand that
+ * money forever (the T+1 cron ignores INSTANT-mode rows). It still counts
+ * toward the pool once it settles, via instantUsedToday().
  */
 export async function runPosInstantSettlementSweep(): Promise<{
   processed: number;

@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
  * Machine tracking view — full detail, assignment timeline, and rental
  * subscription history for one terminal.
  */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT", "FINANCE");
 

@@ -65,7 +65,12 @@ export async function GET(req: Request) {
           scheme: { select: { id: true, name: true } },
           parent: { select: { id: true, name: true, role: true, userCode: true } },
           userLimit: {
-            select: { settlementTier: true, settlementDailyCap: true, walletCap: true },
+            select: {
+              settlementTier: true,
+              settlementDailyCap: true,
+              instantDailyCap: true,
+              walletCap: true,
+            },
           },
           settlementConfig: { select: { autoSettleEnabled: true, pausedUntil: true } },
           _count: { select: { children: true } },
@@ -103,6 +108,10 @@ export async function GET(req: Request) {
         parent: u.parent,
         settlementTier: u.userLimit?.settlementTier ?? null,
         walletCap: u.userLimit?.walletCap != null ? toNumber(dec(u.userLimit.walletCap)) : null,
+        settlementDailyCap:
+          u.userLimit?.settlementDailyCap != null ? toNumber(dec(u.userLimit.settlementDailyCap)) : null,
+        instantDailyCap:
+          u.userLimit?.instantDailyCap != null ? toNumber(dec(u.userLimit.instantDailyCap)) : null,
         autoSettle: u.settlementConfig?.autoSettleEnabled ?? true,
         settlementPaused:
           !!u.settlementConfig?.pausedUntil && u.settlementConfig.pausedUntil > new Date(),

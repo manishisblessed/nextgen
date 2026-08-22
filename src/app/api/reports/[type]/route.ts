@@ -34,7 +34,8 @@ function parseDate(value: string | undefined, endOfDay = false): Date | null {
   return d;
 }
 
-export async function GET(req: Request, { params }: { params: { type: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ type: string }> }) {
+  const params = await props.params;
   let user;
   try {
     user = await requireAuth();
@@ -76,7 +77,7 @@ export async function GET(req: Request, { params }: { params: { type: string } }
     // Audit trail — only the sensitive case (a full data export) is logged.
     // Routine paginated views are high-frequency reads and would flood the log.
     if (reportParams.forExport) {
-      const h = headers();
+      const h = await headers();
       await prisma.auditLog
         .create({
           data: {

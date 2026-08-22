@@ -14,7 +14,8 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 /** GET — full network-manager detail for one user. */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT", "FINANCE");
     const u = await prisma.user.findFirst({
@@ -73,6 +74,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
                 u.userLimit.settlementPerTxnCap != null
                   ? toNumber(dec(u.userLimit.settlementPerTxnCap))
                   : null,
+              instantDailyCap:
+                u.userLimit.instantDailyCap != null
+                  ? toNumber(dec(u.userLimit.instantDailyCap))
+                  : null,
               settlementTier: u.userLimit.settlementTier,
               note: u.userLimit.note,
             }
@@ -109,6 +114,7 @@ const Body = z.discriminatedUnion("action", [
     dailyTxnCountCap: z.number().int().positive().nullable().optional(),
     settlementDailyCap: z.number().positive().nullable().optional(),
     settlementPerTxnCap: z.number().positive().nullable().optional(),
+    instantDailyCap: z.number().positive().nullable().optional(),
     settlementTier: z.string().max(40).nullable().optional(),
     note: z.string().max(300).nullable().optional(),
   }),
@@ -141,7 +147,8 @@ const Body = z.discriminatedUnion("action", [
 ]);
 
 /** PATCH — network-manager per-user actions (scheme, limits, password, settlement). */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");

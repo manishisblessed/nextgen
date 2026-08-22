@@ -144,7 +144,7 @@ export function GpsPhotoCapture({
   phaseRef.current = phase;
   const errorKindRef = useRef(errorKind);
   errorKindRef.current = errorKind;
-  const startRef = useRef<() => Promise<void>>();
+  const startRef = useRef<() => Promise<void>>(undefined);
 
   useEffect(() => {
     return watchMediaPermissions({ audio: false }, (s) => {

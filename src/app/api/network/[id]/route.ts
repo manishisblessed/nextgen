@@ -36,7 +36,8 @@ const displayStatus = (s: string) => {
  * turnover, commission earned, downline size) plus profile + scheme so a
  * parent can supervise a child's business at a glance.
  */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 
@@ -160,10 +161,8 @@ const SUSPEND_ACTIONS = ["network.user.suspend", "user.suspend"];
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 

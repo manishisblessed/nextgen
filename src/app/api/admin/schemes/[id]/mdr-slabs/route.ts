@@ -296,7 +296,8 @@ function validatePosCommissionEquality(
 }
 
 /** POST — add an MDR slab to a scheme (band-overlap validated). */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");
@@ -493,7 +494,8 @@ const UpdateBody = z.object({
 });
 
 /** PATCH — edit an MDR slab's values/dimensions (band-overlap revalidated). */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");
@@ -699,7 +701,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 const DeleteBody = z.object({ slabId: z.string().min(1) });
 
 /** DELETE — remove an MDR slab. */
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");

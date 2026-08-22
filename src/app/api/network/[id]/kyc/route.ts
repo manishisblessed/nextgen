@@ -24,7 +24,8 @@ export const dynamic = "force-dynamic";
  * Document/asset previews are re-pointed at the parent-scoped, ownership-checked
  * document endpoint so private S3 selfies/videos resolve without the admin route.
  */
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 

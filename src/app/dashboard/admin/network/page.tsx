@@ -48,6 +48,8 @@ type NetworkUser = {
   parent: { id: string; name: string; role: string; userCode: string | null } | null;
   settlementTier: string | null;
   walletCap: number | null;
+  settlementDailyCap: number | null;
+  instantDailyCap: number | null;
   autoSettle: boolean;
   settlementPaused: boolean;
   children: number;
@@ -599,7 +601,12 @@ function UserDrawer({
   const [schemeId, setSchemeId] = useState(user.scheme?.id ?? "");
   const [walletCap, setWalletCap] = useState(user.walletCap != null ? String(user.walletCap) : "");
   const [settlementTier, setSettlementTier] = useState(user.settlementTier ?? "");
-  const [settlementDailyCap, setSettlementDailyCap] = useState("");
+  const [settlementDailyCap, setSettlementDailyCap] = useState(
+    user.settlementDailyCap != null ? String(user.settlementDailyCap) : ""
+  );
+  const [instantDailyCap, setInstantDailyCap] = useState(
+    user.instantDailyCap != null ? String(user.instantDailyCap) : ""
+  );
   const [autoSettle, setAutoSettle] = useState(user.autoSettle);
   const [busy, setBusy] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<string | null>(null);
@@ -1028,6 +1035,13 @@ function UserDrawer({
               className={inputCls}
             />
             <input
+              type="number"
+              placeholder="Instant settle daily cap ₹"
+              value={instantDailyCap}
+              onChange={(e) => setInstantDailyCap(e.target.value)}
+              className={inputCls}
+            />
+            <input
               placeholder="Tier label (e.g. GOLD)"
               value={settlementTier}
               onChange={(e) => setSettlementTier(e.target.value)}
@@ -1042,6 +1056,7 @@ function UserDrawer({
                     action: "setLimits",
                     walletCap: walletCap ? Number(walletCap) : null,
                     settlementDailyCap: settlementDailyCap ? Number(settlementDailyCap) : null,
+                    instantDailyCap: instantDailyCap ? Number(instantDailyCap) : null,
                     settlementTier: settlementTier || null,
                   });
                   onChanged("Limits updated.", true);
@@ -1053,6 +1068,10 @@ function UserDrawer({
               Save limits
             </Button>
           </div>
+          <p className="mt-2 text-xs text-ink-400">
+            Instant settle daily cap limits how much (net) this user can instant-settle per day, on top of the global
+            pool. Leave blank for no per-user cap.
+          </p>
         </Section>
 
         {/* Settlement */}

@@ -264,6 +264,13 @@ export async function upsertMirrorFromWebhook(input: {
   externalId?: number | null;
   txnTime?: Date | null;
   raw?: unknown;
+  /**
+   * Provenance label for the created row. Defaults to WEBHOOK (the real-time
+   * capture webhook). The admin-verified manual-slip flow passes "MANUAL" so the
+   * automatic settlement sweep can skip these rows (their settlement entry is
+   * created explicitly at approval, not by the sweep).
+   */
+  source?: string;
 }): Promise<void> {
   const terminalId = clean(input.terminalId);
   if (!input.transactionRef || !terminalId) return;
@@ -309,7 +316,7 @@ export async function upsertMirrorFromWebhook(input: {
     create: {
       transactionRef: input.transactionRef,
       currency: "INR",
-      source: "WEBHOOK",
+      source: input.source ?? "WEBHOOK",
       raw: (input.raw ?? undefined) as Prisma.InputJsonValue | undefined,
       ...shared,
     },

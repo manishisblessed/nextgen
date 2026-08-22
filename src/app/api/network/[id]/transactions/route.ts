@@ -30,7 +30,8 @@ function formatService(service: string, operator: string | null): string {
  * unrestricted. Supports the same status / free-text filters as the caller's
  * own transactions feed.
  */
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 

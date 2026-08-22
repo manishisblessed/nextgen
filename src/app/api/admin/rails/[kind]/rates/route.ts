@@ -80,7 +80,8 @@ const RateBody = z.object({
 });
 
 /** POST — add a rail (PG/QR) MDR rate for a provider (band-overlap validated). */
-export async function POST(req: Request, { params }: { params: { kind: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ kind: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");
@@ -179,7 +180,8 @@ const UpdateBody = z.object({
 });
 
 /** PATCH — edit a rail MDR rate (band-overlap revalidated). */
-export async function PATCH(req: Request, { params }: { params: { kind: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ kind: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");
@@ -278,7 +280,8 @@ export async function PATCH(req: Request, { params }: { params: { kind: string }
 const DeleteBody = z.object({ rateId: z.string().min(1) });
 
 /** DELETE — remove a rail MDR rate. */
-export async function DELETE(req: Request, { params }: { params: { kind: string } }) {
+export async function DELETE(req: Request, props: { params: Promise<{ kind: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");

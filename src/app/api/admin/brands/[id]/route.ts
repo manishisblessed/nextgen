@@ -9,7 +9,8 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 /** GET — one brand with its MDR rate card. */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT", "FINANCE");
     const brand = await prisma.brand.findUnique({
@@ -68,7 +69,8 @@ const PatchBody = z.object({
 });
 
 /** PATCH — update brand metadata / active / settlement mode. */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");
@@ -117,7 +119,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 }
 
 /** DELETE — remove a brand with no linked machines (rates cascade). */
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN");

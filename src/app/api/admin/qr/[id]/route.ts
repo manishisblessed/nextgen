@@ -34,7 +34,8 @@ const Body = z
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: "No fields to update" });
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireRole("MASTER_ADMIN", "ADMIN");

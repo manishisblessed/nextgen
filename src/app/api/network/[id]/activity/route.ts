@@ -34,7 +34,8 @@ function labelFor(action: string): string {
  * plus actions taken on their account (freeze, scheme change, wallet ops).
  * Scoped to the caller's downline; admins are unrestricted.
  */
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 

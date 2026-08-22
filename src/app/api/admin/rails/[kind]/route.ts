@@ -18,7 +18,8 @@ function parseRail(kind: string): "PG" | "QR" | "BBPS" | "PAYOUT" | null {
  * sourced from ServiceRoute (kind = PG/QR); any provider that has rates but is
  * no longer a configured route is still surfaced so its rates remain editable.
  */
-export async function GET(_req: Request, { params }: { params: { kind: string } }) {
+export async function GET(_req: Request, props: { params: Promise<{ kind: string }> }) {
+  const params = await props.params;
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT", "FINANCE");
     const rail = parseRail(params.kind);

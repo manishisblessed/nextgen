@@ -21,7 +21,8 @@ const ActionBody = z.object({
 });
 
 /** PATCH — recover (force an immediate sweep) or release an active lien. */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let admin;
   try {
     admin = await requireAuth();

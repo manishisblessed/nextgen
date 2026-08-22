@@ -24,11 +24,12 @@ export function generateStaticParams() {
   return Object.keys(legalDocuments).map((slug) => ({ slug }));
 }
 
-export function generateMetadata({
-  params
-}: {
-  params: { slug: string };
-}): Metadata {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ slug: string }>;
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   const doc = legalDocuments[params.slug];
   if (!doc) return { title: "Legal" };
   return {
@@ -39,11 +40,12 @@ export function generateMetadata({
 
 const otherDocs = Object.values(legalDocuments);
 
-export default function LegalPage({
-  params
-}: {
-  params: { slug: string };
-}) {
+export default async function LegalPage(
+  props: {
+    params: Promise<{ slug: string }>;
+  }
+) {
+  const params = await props.params;
   const doc = legalDocuments[params.slug];
   if (!doc) notFound();
 

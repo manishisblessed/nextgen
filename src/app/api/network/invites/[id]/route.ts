@@ -22,10 +22,8 @@ export const dynamic = "force-dynamic";
  *
  * Guard: strictly the invite's own creator (`invitedById === caller`).
  */
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function GET(_req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 
@@ -86,10 +84,8 @@ const PatchBody = z.object({
  * Guard: strictly the invite's own creator (`invitedById === caller`) and only
  * while `userId` is null (once registered, the account is managed elsewhere).
  */
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await requireAuth();
 
