@@ -10,6 +10,13 @@ applications:
             # Build-time tooling (typescript, @types/*, eslint) lives there.
             - npm ci --cache .npm --prefer-offline --include=dev
             - npx prisma generate
+            # Apply any pending Prisma migrations to the production database
+            # BEFORE building. Amplify exposes console env vars (DATABASE_URL /
+            # DIRECT_URL) at build time, and `migrate deploy` uses directUrl for
+            # DDL. This is idempotent — it only runs migrations not yet recorded
+            # in _prisma_migrations and never resets data. Without this, new
+            # tables (e.g. JoinRequest) never reach prod and their pages 500.
+            - npx prisma migrate deploy
         build:
           commands:
             # AWS Amplify exposes console env vars at BUILD time but does NOT
