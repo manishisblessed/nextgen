@@ -106,9 +106,59 @@ log "Applying database migrations..."
 npx prisma migrate deploy
 
 # ── Step 6: Build ─────────────────────────────────────────────────────
+# `next build` is memory-hungry. On a small instance it aborts with a V8
+# OOM ("Aborted (core dumped)"). Because of `set -o pipefail` above, that
+# failure kills this script BEFORE the PM2 restart (step 7), so PM2 keeps
+# serving the OLD build and the deploy silently has no effect. Two guards:
+#   1. Ensure some swap headroom so the kernel doesn't hard-OOM.
+#   2. Raise Node's heap ceiling for the build.
+# Both are best-effort and never abort the deploy on their own.
 
 log "Building Next.js app..."
-npm run build 2>&1 | tail -5
+
+swap_mb=$(free -m 2>/dev/null | awk '/^Swap:/ {print $2}')
+if [ "${swap_mb:-0}" -lt 2048 ]; then
+  avail_gb=$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')
+  if [ -f /swapfile ]; then
+    sudo swapon /swapfile 2>/dev/null || true
+    echo "  Re-enabled existing /swapfile (swap now: $(free -m | awk '/^Swap:/ {print $2}')MB)"
+  elif [ "${avail_gb:-0}" -ge 6 ]; then
+    swap_size=4G
+    if [ "${avail_gb:-0}" -lt 8 ]; then swap_size=2G; fi
+    warn "Swap is ${swap_mb:-0}MB — creating a ${swap_size} swapfile at /swapfile..."
+    if sudo fallocate -l "$swap_size" /swapfile && sudo chmod 600 /swapfile \
+       && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile; then
+      grep -q '^/swapfile ' /etc/fstab \
+        || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+      echo "  Swap enabled: $(free -m | awk '/^Swap:/ {print $2}')MB"
+    else
+      warn "Could not create swapfile — build may OOM. Add swap or resize the instance."
+    fi
+  else
+    warn "Low swap (${swap_mb:-0}MB) and only ${avail_gb:-?}G free disk — build may OOM. Free disk or resize the instance."
+  fi
+else
+  echo "  Swap OK: ${swap_mb}MB"
+fi
+
+# Capture the build to a log and inspect the REAL exit code. Piping straight
+# into `tail` (as before) let `pipefail` abort the script with no explanation,
+# so failures looked like silent no-ops while PM2 kept the old build live.
+BUILD_LOG="$LOG_DIR/build-$(date +%Y%m%d-%H%M%S).log"
+set +e
+NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}" npm run build >"$BUILD_LOG" 2>&1
+build_rc=$?
+set -e
+tail -8 "$BUILD_LOG"
+if [ "$build_rc" -ne 0 ]; then
+  echo ""
+  if grep -qiE 'out of memory|Aborted \(core dumped\)|JavaScript heap|Reached heap limit|Runtime_MapGrow' "$BUILD_LOG"; then
+    fail "Build FAILED — OUT OF MEMORY.\n   The PREVIOUS build is STILL running; nothing new was deployed.\n   Add swap / free disk / resize the instance, then re-run this script:\n     free -h && df -h /\n     sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile\n     echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab\n   Full log: $BUILD_LOG"
+  else
+    fail "Build FAILED (exit $build_rc).\n   The PREVIOUS build is STILL running; nothing new was deployed.\n   Full log: $BUILD_LOG"
+  fi
+fi
+echo "  Build OK — log: $BUILD_LOG"
 
 # ── Step 7: Restart PM2 ──────────────────────────────────────────────
 
