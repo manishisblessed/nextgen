@@ -24,8 +24,15 @@ export const dynamic = "force-dynamic";
  *   BBPS   → Transaction (BILL_*)  (amount)
  *   Payout → PayoutRequest         (amount)
  * "Today" is the current IST business day (istDayBounds), matching the app's
- * existing reporting convention. Statuses use each model's real status values,
- * mapped to user-friendly Success / Pending / Failed buckets.
+ * existing reporting convention. For POS/PG the day is measured by the actual
+ * transaction time (capturedAt, falling back to createdAt) so a capture that is
+ * pull-ingested late still lands on its real business day.
+ *
+ * Statuses use each model's real status values, mapped to user-friendly
+ * Success / Pending / Failed buckets. The headline rupee AMOUNT reflects
+ * COMPLETED business only (successful / settled rows) so pending captures
+ * awaiting settlement and failed/reversed rows never inflate the figure — the
+ * transaction COUNT still reflects all activity, broken out by status.
  *
  * Access: master-admin always; ADMIN / SUPPORT (sub-admin) only when granted the
  * "business-overview" tab (User.allowedTabs) — the same permission mechanism the
@@ -41,7 +48,13 @@ function canView(user: { role: string; allowedTabs?: string[] | null }): boolean
 }
 
 type ServiceToday = {
+  /** Rupee value of COMPLETED business only (success/settled rows). Headline. */
   amount: number;
+  /** Rupee value still awaiting settlement / in-flight (pending rows). */
+  pendingAmount: number;
+  /** Rupee value of failed / reversed rows (money did not move). */
+  failedAmount: number;
+  /** Total activity across every status. */
   count: number;
   success: number;
   pending: number;
@@ -51,6 +64,8 @@ type ServiceToday = {
 type Bucket = "success" | "pending" | "failed";
 
 type Window = { dayStart: Date; dayEnd: Date };
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** Normalize a Prisma groupBy-by-status result into flat rows. */
 function normalize(
@@ -64,18 +79,36 @@ function normalize(
   }));
 }
 
-/** Fold status-grouped rows into a single card summary. */
+/**
+ * Fold status-grouped rows into a single card summary. `amount` is the value of
+ * COMPLETED business only (rows whose status maps to "success"); pending/failed
+ * contribute to their counts but never to the headline rupee figure. `count` is
+ * total activity across every status.
+ */
 function summarize(
   rows: Array<{ status: string; count: number; amount: number }>,
   classify: (status: string) => Bucket
 ): ServiceToday {
-  const out: ServiceToday = { amount: 0, count: 0, success: 0, pending: 0, failed: 0 };
+  const out: ServiceToday = {
+    amount: 0,
+    pendingAmount: 0,
+    failedAmount: 0,
+    count: 0,
+    success: 0,
+    pending: 0,
+    failed: 0,
+  };
   for (const r of rows) {
-    out.amount += r.amount;
+    const bucket = classify(r.status);
     out.count += r.count;
-    out[classify(r.status)] += r.count;
+    out[bucket] += r.count;
+    if (bucket === "success") out.amount += r.amount;
+    else if (bucket === "pending") out.pendingAmount += r.amount;
+    else out.failedAmount += r.amount;
   }
-  out.amount = Math.round(out.amount * 100) / 100;
+  out.amount = round2(out.amount);
+  out.pendingAmount = round2(out.pendingAmount);
+  out.failedAmount = round2(out.failedAmount);
   return out;
 }
 
@@ -103,21 +136,39 @@ const classifyPayout = (s: string): Bucket =>
     : "pending";
 
 function addServiceTotals(parts: ServiceToday[]): ServiceToday {
-  const total: ServiceToday = { amount: 0, count: 0, success: 0, pending: 0, failed: 0 };
+  const total: ServiceToday = {
+    amount: 0,
+    pendingAmount: 0,
+    failedAmount: 0,
+    count: 0,
+    success: 0,
+    pending: 0,
+    failed: 0,
+  };
   for (const p of parts) {
     total.amount += p.amount;
+    total.pendingAmount += p.pendingAmount;
+    total.failedAmount += p.failedAmount;
     total.count += p.count;
     total.success += p.success;
     total.pending += p.pending;
     total.failed += p.failed;
   }
-  total.amount = Math.round(total.amount * 100) / 100;
+  total.amount = round2(total.amount);
+  total.pendingAmount = round2(total.pendingAmount);
+  total.failedAmount = round2(total.failedAmount);
   return total;
 }
 
-/** Per-rail business done within a window (records created in the window). */
+/** Per-rail business done within a window. */
 async function aggregateServices(w: Window) {
   const range = { gte: w.dayStart, lte: w.dayEnd };
+  // POS/PG record the real transaction time on capturedAt; bucket by it so a
+  // late pull-ingested capture lands on its true business day (legacy rows with
+  // no capturedAt fall back to createdAt). Mirrors the settlement crons.
+  const capturedRange = {
+    OR: [{ capturedAt: range }, { capturedAt: null, createdAt: range }],
+  };
 
   const [qrRows, posRows, pgRows, bbpsRows, payoutRows] = await Promise.all([
     prisma.qrClaim.groupBy({
@@ -128,13 +179,13 @@ async function aggregateServices(w: Window) {
     }),
     prisma.posSettlementEntry.groupBy({
       by: ["status"],
-      where: { createdAt: range },
+      where: capturedRange,
       _count: true,
       _sum: { grossAmount: true },
     }),
     prisma.pgSettlementEntry.groupBy({
       by: ["status"],
-      where: { createdAt: range },
+      where: capturedRange,
       _count: true,
       _sum: { grossAmount: true },
     }),
@@ -189,19 +240,27 @@ async function aggregateSettlementToday(w: Window): Promise<number> {
   );
 }
 
-/** Business awaiting settlement right now (not time-boxed to today). */
-async function aggregatePending(): Promise<number> {
+/**
+ * Net still owed from TODAY's business — the portion of today's captures that has
+ * not yet settled into wallets. Time-boxed to the same IST day as the rest of the
+ * overview so every figure on the panel answers "today".
+ */
+async function aggregatePendingToday(w: Window): Promise<number> {
+  const range = { gte: w.dayStart, lte: w.dayEnd };
+  const capturedRange = {
+    OR: [{ capturedAt: range }, { capturedAt: null, createdAt: range }],
+  };
   const [pos, pg, qr] = await Promise.all([
     prisma.posSettlementEntry.aggregate({
-      where: { status: "PENDING" },
+      where: { status: "PENDING", ...capturedRange },
       _sum: { netAmount: true },
     }),
     prisma.pgSettlementEntry.aggregate({
-      where: { status: "PENDING" },
+      where: { status: "PENDING", ...capturedRange },
       _sum: { netAmount: true },
     }),
     prisma.qrClaim.aggregate({
-      where: { status: "SETTLEABLE" },
+      where: { status: "SETTLEABLE", createdAt: range },
       _sum: { amount: true },
     }),
   ]);
@@ -245,7 +304,7 @@ export async function GET() {
       aggregateServices(today),
       aggregateServices(yesterday),
       aggregateSettlementToday(today),
-      aggregatePending(),
+      aggregatePendingToday(today),
       getRevenueReport({ from: today.ymd, to: today.ymd })
         .then((r) => r.totals.platformRevenue)
         .catch(() => 0),

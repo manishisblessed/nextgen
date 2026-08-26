@@ -20,9 +20,10 @@ type WalletData = {
     direction: string;
     reason: string;
     amount: number;
-    balanceAfter: number;
+    balanceAfter: number | null;
     note: string | null;
     createdAt: string;
+    memo?: boolean;
   }>;
 };
 
@@ -34,11 +35,18 @@ const TXN_ICON_MAP: Record<string, { icon: string; color: string }> = {
   FUND_CREDIT: { icon: "wallet-outline", color: "#7c3aed" },
   FUND_DEBIT: { icon: "wallet-outline", color: "#f59e0b" },
   TOPUP: { icon: "add-circle-outline", color: "#0ea5e9" },
+  PAYOUT_HOLD: { icon: "lock-closed-outline", color: "#f59e0b" },
+  PAYOUT_RELEASE: { icon: "arrow-undo-outline", color: "#6b7280" },
 };
 
 function txnVisual(direction: string, reason: string) {
   return TXN_ICON_MAP[reason] ?? TXN_ICON_MAP[direction] ?? { icon: "swap-horizontal-outline", color: "#6b7280" };
 }
+
+const MEMO_LABELS: Record<string, string> = {
+  PAYOUT_HOLD: "Payout hold placed",
+  PAYOUT_RELEASE: "Payout hold released",
+};
 
 export default function Home() {
   const router = useRouter();
@@ -186,6 +194,12 @@ export default function Home() {
             )}
             {(wallet?.recentTxns ?? []).slice(0, 5).map((t, i) => {
               const vis = txnVisual(t.direction, t.reason);
+              // Reservation memos (hold/release) are display-only: they never move
+              // the balance, so we mute the amount and show no running balance.
+              const isMemo = t.memo === true;
+              const title = isMemo
+                ? MEMO_LABELS[t.reason] ?? t.reason.replace(/_/g, " ")
+                : t.reason.replace(/_/g, " ");
               return (
                 <View
                   key={t.id}
@@ -198,22 +212,40 @@ export default function Home() {
                     <Ionicons name={vis.icon as keyof typeof Ionicons.glyphMap} size={18} color={vis.color} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.txnTitle}>{t.reason.replace(/_/g, " ")}</Text>
+                    <Text style={styles.txnTitle}>{title}</Text>
                     <Text style={styles.txnSub}>
                       {t.note ?? t.reason} · {formatDate(t.createdAt)}
                     </Text>
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.txnAmt}>
-                      {t.direction === "CREDIT" ? "+" : "-"}{formatINR(Number(t.amount))}
-                    </Text>
+                    {isMemo ? (
+                      <Text style={[styles.txnAmt, { color: colors.ink[400] }]}>
+                        {formatINR(Number(t.amount))}
+                      </Text>
+                    ) : (
+                      <Text style={styles.txnAmt}>
+                        {t.direction === "CREDIT" ? "+" : "-"}{formatINR(Number(t.amount))}
+                      </Text>
+                    )}
                     <Text
                       style={[
                         styles.txnStatus,
-                        { color: t.direction === "CREDIT" ? colors.emerald[700] : colors.ink[500] }
+                        {
+                          color: isMemo
+                            ? colors.ink[400]
+                            : t.direction === "CREDIT"
+                            ? colors.emerald[700]
+                            : colors.ink[500]
+                        }
                       ]}
                     >
-                      Bal: {formatINR(Number(t.balanceAfter))}
+                      {t.balanceAfter == null
+                        ? isMemo
+                          ? t.direction === "DEBIT"
+                            ? "On hold"
+                            : "Released"
+                          : "Bal: —"
+                        : `Bal: ${formatINR(Number(t.balanceAfter))}`}
                     </Text>
                   </View>
                 </View>

@@ -76,7 +76,11 @@ export function RechargeForm({
         return null;
       }
       setPinOpen(false);
+      // PROCESSING/INITIATED = provider accepted but not yet confirmed. Show a
+      // pending receipt (never a success claim) so the agent doesn't re-charge.
+      const pending = data.status === "PROCESSING" || data.status === "INITIATED";
       setResult({
+        status: pending ? "PENDING" : "SUCCESS",
         refId: data.refId,
         service: `${serviceTitle} — ${operator}`,
         amount: Number(amount),

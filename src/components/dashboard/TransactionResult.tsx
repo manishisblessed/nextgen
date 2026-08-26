@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, X, Copy, Download } from "lucide-react";
+import { CheckCircle2, Clock, X, Copy, Download } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/lib/useAuth";
@@ -18,9 +18,16 @@ export type TxnResult = {
   amount: number;
   customer?: string;
   meta?: Record<string, string | number>;
+  /** Defaults to SUCCESS. PENDING = provider accepted but not yet confirmed. */
+  status?: "SUCCESS" | "PENDING";
 } | null;
 
 function buildReceiptHtml(r: NonNullable<TxnResult>, userCode?: string | null): string {
+  const pending = r.status === "PENDING";
+  const headStyle = pending
+    ? "background:linear-gradient(135deg,#d97706,#b45309)"
+    : "background:linear-gradient(135deg,#059669,#047857)";
+  const headTitle = pending ? "Transaction Pending" : "Transaction Successful";
   const date = new Date().toLocaleString("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -34,8 +41,8 @@ function buildReceiptHtml(r: NonNullable<TxnResult>, userCode?: string | null): 
         .join("")
     : "";
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt — ${r.refId}</title>
-<style>@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}.r{max-width:400px;margin:24px auto;font-family:system-ui,sans-serif;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden}.hdr{background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:32px 24px;text-align:center}.hdr h2{margin:0 0 4px;font-size:18px;font-weight:600}.hdr .amt{font-size:28px;font-weight:700;margin:8px 0 2px}.hdr .svc{font-size:12px;opacity:.8}.body{padding:20px 24px}table{width:100%;border-collapse:collapse}tr+tr{border-top:1px solid #f3f4f6}.foot{text-align:center;padding:16px 24px;font-size:11px;color:#999;border-top:1px dashed #e5e7eb}</style></head>
-<body><div class="r"><div class="hdr"><h2>Transaction Successful</h2><div class="amt">₹${r.amount.toLocaleString("en-IN")}</div><div class="svc">${r.service}</div></div>
+<style>@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}.r{max-width:400px;margin:24px auto;font-family:system-ui,sans-serif;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden}.hdr{${headStyle};color:#fff;padding:32px 24px;text-align:center}.hdr h2{margin:0 0 4px;font-size:18px;font-weight:600}.hdr .amt{font-size:28px;font-weight:700;margin:8px 0 2px}.hdr .svc{font-size:12px;opacity:.8}.body{padding:20px 24px}table{width:100%;border-collapse:collapse}tr+tr{border-top:1px solid #f3f4f6}.foot{text-align:center;padding:16px 24px;font-size:11px;color:#999;border-top:1px dashed #e5e7eb}</style></head>
+<body><div class="r"><div class="hdr"><h2>${headTitle}</h2><div class="amt">₹${r.amount.toLocaleString("en-IN")}</div><div class="svc">${r.service}</div></div>
 <div class="body"><table><tr><td style="padding:6px 0;color:#666;font-size:13px">Reference ID</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px;font-family:monospace">${r.refId}</td></tr>
 ${r.customer ? `<tr><td style="padding:6px 0;color:#666;font-size:13px">Customer</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${r.customer}</td></tr>` : ""}
 ${metaRows}
@@ -70,6 +77,8 @@ export function TransactionResult({
 
   if (!result) return null;
 
+  const pending = result.status === "PENDING";
+
   function copy() {
     if (!result) return;
     navigator.clipboard.writeText(result.refId);
@@ -93,12 +102,18 @@ export function TransactionResult({
           <X className="h-4 w-4" />
         </button>
 
-        <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 px-6 py-8 text-center text-white">
+        <div
+          className={`px-6 py-8 text-center text-white ${
+            pending
+              ? "bg-gradient-to-br from-amber-500 to-amber-700"
+              : "bg-gradient-to-br from-emerald-500 to-emerald-700"
+          }`}
+        >
           <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/20 backdrop-blur">
-            <CheckCircle2 className="h-9 w-9" />
+            {pending ? <Clock className="h-9 w-9" /> : <CheckCircle2 className="h-9 w-9" />}
           </span>
           <p className="mt-4 font-display text-lg font-semibold">
-            Transaction successful
+            {pending ? "Transaction pending" : "Transaction successful"}
           </p>
           <p className="mt-1 text-3xl font-bold">
             ₹{result.amount.toLocaleString("en-IN")}
@@ -149,6 +164,16 @@ export function TransactionResult({
                 <span className="text-sm font-medium text-ink-900">{v}</span>
               </div>
             ))}
+
+          {pending && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                We&rsquo;re confirming this with the operator. Check Transaction History before
+                retrying to avoid a duplicate charge.
+              </span>
+            </div>
+          )}
 
           <p className="pt-1 text-center text-xs font-semibold text-emerald-600">
             {payByLine(userCode)}

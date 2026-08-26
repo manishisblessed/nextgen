@@ -82,7 +82,11 @@ export async function POST(req: Request) {
         })
     });
 
-    return NextResponse.json(result, { status: result.status === "SUCCESS" ? 200 : 502 });
+    // PROCESSING/INITIATED are async-pending (accepted, provider not yet terminal)
+    // → 202 Accepted, never 502. Only a genuine FAILED is an upstream error.
+    const httpStatus =
+      result.status === "SUCCESS" ? 200 : result.status === "FAILED" ? 502 : 202;
+    return NextResponse.json(result, { status: httpStatus });
   } catch (e) {
     return toErrorResponse(e);
   }

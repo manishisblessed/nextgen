@@ -26,7 +26,6 @@ import {
   Plus,
   Printer,
   RefreshCw,
-  Search,
   Send,
   ShieldCheck,
   Sparkles,
@@ -460,6 +459,7 @@ export default function PayoutPage() {
                 refreshAll();
               }}
               onError={setError}
+              onRefresh={refreshAll}
             />
           </motion.div>
         )}
@@ -780,19 +780,25 @@ type PayoutResult = {
   status: PayoutStatus;
   createdAt: string;
   utr?: string | null;
+  failureReason?: string | null;
   reference?: string | null;
 };
+
+const TERMINAL_STATUSES: PayoutStatus[] = ["SUCCESS", "FAILED", "REJECTED", "REVERSED"];
+const isTerminalStatus = (s: PayoutStatus) => TERMINAL_STATUSES.includes(s);
 
 function ProcessPayoutWizard({
   beneficiaries,
   spendable,
   onDone,
   onError,
+  onRefresh,
 }: {
   beneficiaries: Beneficiary[];
   spendable: number;
   onDone: () => void;
   onError: (msg: string | null) => void;
+  onRefresh?: () => void;
 }) {
   const [step, setStep] = useState<WizardStep>("select-account");
   const [selected, setSelected] = useState<Beneficiary | null>(null);
@@ -1074,7 +1080,7 @@ function ProcessPayoutWizard({
   }
 
   if (step === "result" && result) {
-    return <PayoutReceipt result={result} onDone={onDone} />;
+    return <PayoutReceipt result={result} onDone={onDone} onRefresh={onRefresh} />;
   }
 
   return null;
@@ -1125,14 +1131,73 @@ function InfoTile({ label, value, mono }: { label: string; value: string; mono?:
 // Receipt view (WhatsApp / Copy / Download / Print)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PayoutReceipt({ result, onDone }: { result: PayoutResult; onDone: () => void }) {
+function PayoutReceipt({
+  result,
+  onDone,
+  onRefresh,
+}: {
+  result: PayoutResult;
+  onDone: () => void;
+  onRefresh?: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   const { session } = useAuth();
   const payBy = session?.userCode
     ? `Pay by NxtGenPay by RT Code - ${session.userCode}`
     : "Pay by NxtGenPay";
-  const isSuccess = result.status === "SUCCESS";
-  const isFailed = result.status === "FAILED" || result.status === "REJECTED" || result.status === "REVERSED";
+
+  // A payout is disbursed asynchronously (approval → worker → BulkPe), so the
+  // status returned at submit time is almost always non-terminal. Poll the live
+  // record until it settles so the receipt reflects the true outcome instead of
+  // being frozen on "processing".
+  const [live, setLive] = useState<PayoutResult>(result);
+  const settled = isTerminalStatus(live.status);
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
+
+  useEffect(() => {
+    if (settled) return;
+    let active = true;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 40; // ~2 min at 3s cadence
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      attempts += 1;
+      try {
+        const res = await fetch(`/api/payout/${live.id}`);
+        if (res.ok && active) {
+          const json = await res.json();
+          const p = json.payout as Partial<PayoutResult> & { status: PayoutStatus };
+          setLive((prev) => ({
+            ...prev,
+            status: p.status,
+            utr: p.utr ?? prev.utr,
+            failureReason: p.failureReason ?? prev.failureReason,
+            totalDebit: typeof p.totalDebit === "number" ? p.totalDebit : prev.totalDebit,
+          }));
+          if (isTerminalStatus(p.status)) {
+            onRefreshRef.current?.(); // refresh wallet snapshot (held → spendable)
+            return;
+          }
+        }
+      } catch {
+        // transient — keep polling until the attempt cap
+      }
+      if (active && attempts < MAX_ATTEMPTS) timer = setTimeout(poll, 3000);
+    };
+
+    timer = setTimeout(poll, 3000);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [settled, live.id]);
+
+  const isSuccess = live.status === "SUCCESS";
+  const isFailed =
+    live.status === "FAILED" || live.status === "REJECTED" || live.status === "REVERSED";
+  const isPolling = !settled;
 
   const headerGradient = isSuccess
     ? "from-emerald-500 to-emerald-700"
@@ -1141,14 +1206,14 @@ function PayoutReceipt({ result, onDone }: { result: PayoutResult; onDone: () =>
     : "from-amber-500 to-amber-600";
 
   const summaryText = `Payout Receipt
-Status: ${STATUS_LABEL[result.status]}
-Amount: ₹${result.amount.toFixed(2)}
-Beneficiary: ${result.beneficiaryName}
-Account: ****${result.accountLast4}
+Status: ${STATUS_LABEL[live.status]}
+Amount: ₹${live.amount.toFixed(2)}
+Beneficiary: ${live.beneficiaryName}
+Account: ****${live.accountLast4}
 Mode: IMPS
-${result.utr ? `UTR: ${result.utr}\n` : ""}Reference: ${result.reference || result.id}
-Charges (incl. GST): ₹${(result.serviceCharge + result.gst).toFixed(2)}
-Date: ${new Date(result.createdAt).toLocaleString("en-IN")}
+${live.utr ? `UTR: ${live.utr}\n` : ""}Reference: ${live.reference || live.id}
+Charges (incl. GST): ₹${(live.serviceCharge + live.gst).toFixed(2)}
+Date: ${new Date(live.createdAt).toLocaleString("en-IN")}
 
 ${payBy}`;
 
@@ -1168,30 +1233,56 @@ ${payBy}`;
           {isSuccess ? <CheckCircle2 className="h-9 w-9" /> : isFailed ? <XCircle className="h-9 w-9" /> : <Clock className="h-9 w-9" />}
         </motion.div>
         <h3 className="font-display text-xl font-bold">
-          {isSuccess ? "Payout submitted" : isFailed ? "Payout failed" : "Payout processing"}
+          {isSuccess ? "Payout successful" : isFailed ? "Payout failed" : "Payout processing"}
         </h3>
-        <p className="mt-1 text-sm text-white/80">
-          {result.status === "PENDING_APPROVAL" ? "Awaiting approval by the checker" : result.status === "APPROVED" ? "Processing your payout" : STATUS_LABEL[result.status]}
+        <p className="mt-1 flex items-center justify-center gap-1.5 text-sm text-white/80">
+          {isPolling && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {live.status === "PENDING_APPROVAL"
+            ? "Awaiting approval by the checker"
+            : live.status === "APPROVED"
+            ? "Processing your payout"
+            : live.status === "PROCESSING"
+            ? "Sending to the bank…"
+            : STATUS_LABEL[live.status]}
         </p>
-        <p className="mt-3 font-display text-3xl font-bold">{inr2(result.amount)}</p>
+        <p className="mt-3 font-display text-3xl font-bold">{inr2(live.amount)}</p>
       </div>
 
       <div className="p-6">
+        {/* A failed/rejected/reversed payout returns the held amount to the wallet.
+            Make that explicit so the retailer never thinks the money is lost. */}
+        {isFailed && (
+          <div className="mb-5 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            <div className="text-sm">
+              <p className="font-semibold text-emerald-800">Amount returned to your wallet</p>
+              <p className="mt-0.5 text-xs text-emerald-700">
+                {inr2(live.totalDebit)} has been released back to your spendable balance — no money
+                left your wallet.
+              </p>
+              {live.failureReason && (
+                <p className="mt-1 text-xs text-rose-600">Reason: {live.failureReason}</p>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="mb-5 border-t-2 border-dashed border-ink-200" />
 
         <div className="space-y-2">
-          <ReceiptRow label="Beneficiary" value={result.beneficiaryName} />
-          <ReceiptRow label="Account" value={`****${result.accountLast4}`} mono />
+          <ReceiptRow label="Status" value={STATUS_LABEL[live.status]} strong />
+          <ReceiptRow label="Beneficiary" value={live.beneficiaryName} />
+          <ReceiptRow label="Account" value={`****${live.accountLast4}`} mono />
           <ReceiptRow label="Mode" value="IMPS" />
-          {result.utr && <ReceiptRow label="UTR" value={result.utr} mono copy />}
-          <ReceiptRow label="Reference" value={result.reference || result.id} mono copy />
-          <ReceiptRow label="Amount" value={inr2(result.amount)} />
-          <ReceiptRow label="Service charge" value={inr2(result.serviceCharge)} />
-          <ReceiptRow label={`GST (18%)`} value={inr2(result.gst)} />
-          <ReceiptRow label="Total debit" value={inr2(result.totalDebit)} strong />
+          {live.utr && <ReceiptRow label="UTR" value={live.utr} mono copy />}
+          <ReceiptRow label="Reference" value={live.reference || live.id} mono copy />
+          <ReceiptRow label="Amount" value={inr2(live.amount)} />
+          <ReceiptRow label="Service charge" value={inr2(live.serviceCharge)} />
+          <ReceiptRow label={`GST (18%)`} value={inr2(live.gst)} />
+          <ReceiptRow label="Total debit" value={inr2(live.totalDebit)} strong />
           <ReceiptRow
             label="Date"
-            value={new Date(result.createdAt).toLocaleString("en-IN", {
+            value={new Date(live.createdAt).toLocaleString("en-IN", {
               dateStyle: "medium",
               timeStyle: "short",
             })}
@@ -1229,7 +1320,7 @@ ${payBy}`;
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = `payout_${result.reference || result.id}.txt`;
+              a.download = `payout_${live.reference || live.id}.txt`;
               a.click();
               URL.revokeObjectURL(url);
             }}
@@ -1238,20 +1329,21 @@ ${payBy}`;
             icon={<Printer className="h-5 w-5" />}
             label="Print"
             color="bg-ink-100 text-ink-800 hover:bg-ink-200"
-            onClick={() => printReceipt(result, summaryText, headerGradient, payBy)}
+            onClick={() => printReceipt(live, summaryText, headerGradient, payBy)}
           />
         </div>
+
+        {isPolling && (
+          <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-ink-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Tracking live status — this updates automatically.
+          </p>
+        )}
 
         <div className="mt-6 flex gap-2">
           <Button variant="outline" className="flex-1" onClick={onDone}>
             Done
           </Button>
-          {result.status === "PROCESSING" && (
-            <Button className="flex-1" onClick={onDone}>
-              <Search className="h-4 w-4" />
-              Check status
-            </Button>
-          )}
         </div>
       </div>
     </motion.div>

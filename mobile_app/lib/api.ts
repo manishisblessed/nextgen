@@ -66,26 +66,33 @@ export const api = {
         direction: string;
         reason: string;
         amount: number;
-        balanceAfter: number;
+        // Null for payout reservation memos — a hold/release never moves the balance.
+        balanceAfter: number | null;
         note: string | null;
         createdAt: string;
+        memo?: boolean;
       }>;
-    }>("/api/wallet"),
+    }>("/api/wallet?memos=1"),
 
-  getTransactions: (page = 1) =>
-    request<{
-      transactions: Array<{
+  // Service transaction feed (recharge / DMT / AEPS / UPI / BBPS …). The server
+  // returns display-ready rows scoped to the signed-in user; `status` filtering
+  // and search can be pushed down, but the screen also filters client-side.
+  getTransactions: (opts?: { status?: string; q?: string; limit?: number }) => {
+    const p = new URLSearchParams();
+    if (opts?.status && opts.status !== "All") p.set("status", opts.status);
+    if (opts?.q) p.set("q", opts.q);
+    p.set("limit", String(opts?.limit ?? 200));
+    return request<{
+      ok: boolean;
+      data: Array<{
         id: string;
-        refId: string;
         service: string;
         amount: number;
-        fee: number;
+        status: "Success" | "Pending" | "Failed";
+        date: string;
+        customer: string;
         commission: number;
-        status: string;
-        customer: string | null;
-        operator: string | null;
-        createdAt: string;
       }>;
-      total: number;
-    }>(`/api/wallet/transactions?page=${page}&pageSize=20`),
+    }>(`/api/transactions?${p.toString()}`);
+  },
 };

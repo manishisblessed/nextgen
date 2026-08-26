@@ -39,7 +39,7 @@ export default function AePSScreen() {
         type: mode,
       });
       setRefId(res.refId);
-      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PROCESSING" || res.status === "INITIATED" ? "Pending" : "Success");
       setResultMsg(mode === "withdrawal" ? `Cash dispensed for ${aadhaar.slice(-4) || "XXXX"}` : "Request processed");
     } catch (e) {
       setRefId("");

@@ -17,15 +17,12 @@ import { api } from "@/lib/api";
 
 type Txn = {
   id: string;
-  refId: string;
   service: string;
   amount: number;
-  fee: number;
+  status: "Success" | "Pending" | "Failed";
+  date: string;
+  customer: string;
   commission: number;
-  status: string;
-  customer: string | null;
-  operator: string | null;
-  createdAt: string;
 };
 
 const SERVICE_ICON: Record<string, { icon: string; color: string }> = {
@@ -39,11 +36,14 @@ const SERVICE_ICON: Record<string, { icon: string; color: string }> = {
 };
 
 function txnVisual(service: string) {
-  return SERVICE_ICON[service] ?? { icon: "swap-horizontal-outline", color: "#6b7280" };
+  // Server sends a display label like "Recharge - Airtel"; key the icon off the
+  // leading service word.
+  const key = service.split(/[\s-]/)[0]?.toUpperCase() ?? "";
+  return SERVICE_ICON[key] ?? { icon: "swap-horizontal-outline", color: "#6b7280" };
 }
 
-const filters = ["All", "SUCCESS", "PENDING", "FAILED"] as const;
-const filterLabels: Record<string, string> = { All: "All", SUCCESS: "Success", PENDING: "Pending", FAILED: "Failed" };
+const filters = ["All", "Success", "Pending", "Failed"] as const;
+const filterLabels: Record<string, string> = { All: "All", Success: "Success", Pending: "Pending", Failed: "Failed" };
 
 export default function TransactionsScreen() {
   const [q, setQ] = useState("");
@@ -55,9 +55,9 @@ export default function TransactionsScreen() {
 
   const fetchTxns = useCallback(async () => {
     try {
-      const data = await api.getTransactions(1);
-      setTxns(data.transactions);
-      setTotal(data.total);
+      const data = await api.getTransactions();
+      setTxns(data.data);
+      setTotal(data.data.length);
     } catch {
       // keep existing data on failure
     } finally {
@@ -80,9 +80,8 @@ export default function TransactionsScreen() {
         const lq = q.toLowerCase();
         if (
           !t.service.toLowerCase().includes(lq) &&
-          !t.refId.toLowerCase().includes(lq) &&
-          !(t.customer ?? "").toLowerCase().includes(lq) &&
-          !(t.operator ?? "").toLowerCase().includes(lq)
+          !t.id.toLowerCase().includes(lq) &&
+          !t.customer.toLowerCase().includes(lq)
         ) return false;
       }
       return true;
@@ -91,14 +90,6 @@ export default function TransactionsScreen() {
 
   const totalAmt = items.reduce((s, t) => s + t.amount, 0);
   const totalCom = items.reduce((s, t) => s + t.commission, 0);
-
-  function formatDate(iso: string) {
-    const d = new Date(iso);
-    const now = new Date();
-    const isToday = d.toDateString() === now.toDateString();
-    const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-    return isToday ? `Today · ${time}` : `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · ${time}`;
-  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={["top"]}>
@@ -156,7 +147,7 @@ export default function TransactionsScreen() {
             </View>
           )}
           {items.map((t) => (
-            <TxnCard key={t.id} t={t} formatDate={formatDate} />
+            <TxnCard key={t.id} t={t} />
           ))}
         </ScrollView>
       )}
@@ -164,19 +155,20 @@ export default function TransactionsScreen() {
   );
 }
 
-function TxnCard({ t, formatDate }: { t: Txn; formatDate: (iso: string) => string }) {
+function TxnCard({ t }: { t: Txn }) {
   const vis = txnVisual(t.service);
   const tone =
-    t.status === "SUCCESS" ? colors.emerald : t.status === "PENDING" ? colors.amber : colors.rose;
+    t.status === "Success" ? colors.emerald : t.status === "Pending" ? colors.amber : colors.rose;
+  const hasCustomer = t.customer && t.customer !== "—";
   return (
     <Card style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={[styles.icon, { backgroundColor: vis.color + "22" }]}>
         <Ionicons name={vis.icon as keyof typeof Ionicons.glyphMap} size={20} color={vis.color} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.txnTitle}>{t.service}{t.operator ? ` · ${t.operator}` : ""}</Text>
-        <Text style={styles.txnSub}>{t.refId}{t.customer ? ` · ${t.customer}` : ""}</Text>
-        <Text style={styles.txnDate}>{formatDate(t.createdAt)}</Text>
+        <Text style={styles.txnTitle}>{t.service}</Text>
+        <Text style={styles.txnSub}>{t.id}{hasCustomer ? ` · ${t.customer}` : ""}</Text>
+        <Text style={styles.txnDate}>{t.date}</Text>
       </View>
       <View style={{ alignItems: "flex-end" }}>
         <Text style={styles.txnAmt}>{formatINR(t.amount)}</Text>

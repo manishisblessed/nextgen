@@ -9,6 +9,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FileDown,
+  Lock,
+  Undo2,
 } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { Input, Select } from "@/components/ui/Input";
@@ -22,11 +24,14 @@ type WalletTxn = {
   direction: "CREDIT" | "DEBIT";
   reason: string;
   amount: number;
-  balanceAfter: number;
+  /** Null for reservation memos — a hold/release never moves the balance. */
+  balanceAfter: number | null;
   note: string | null;
   refType: string | null;
   refId: string | null;
   createdAt: string;
+  /** True for synthetic payout hold/release rows (display-only, no balance impact). */
+  memo?: boolean;
 };
 
 type LedgerData = {
@@ -50,6 +55,8 @@ const REASON_LABELS: Record<string, string> = {
   FEE: "Fee",
   PENALTY: "Penalty",
   PAYOUT: "Payout",
+  PAYOUT_HOLD: "Funds on hold (payout)",
+  PAYOUT_RELEASE: "Hold released (payout)",
   SETTLEMENT: "Settlement",
   AEPS_SETTLEMENT: "AePS settlement",
   RENTAL: "POS rental",
@@ -75,6 +82,7 @@ export default function LedgerPage() {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(PAGE_SIZE),
+        memos: "1",
       });
       if (direction !== "All") params.set("direction", direction);
       if (reason !== "All") params.set("reason", reason);
@@ -215,21 +223,40 @@ export default function LedgerPage() {
                 </tr>
               ) : (
                 data.txns.map((t) => (
-                  <tr key={t.id} className="hover:bg-ink-50/40">
+                  <tr
+                    key={t.id}
+                    className={t.memo ? "bg-ink-50/30 hover:bg-ink-50/60" : "hover:bg-ink-50/40"}
+                  >
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2">
-                        {t.direction === "CREDIT" ? (
-                          <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
-                            <ArrowDownLeft className="h-3.5 w-3.5" />
-                          </span>
+                        {t.memo ? (
+                          <>
+                            <span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-50 text-amber-600">
+                              {t.direction === "DEBIT" ? (
+                                <Lock className="h-3.5 w-3.5" />
+                              ) : (
+                                <Undo2 className="h-3.5 w-3.5" />
+                              )}
+                            </span>
+                            <Badge variant="warning">
+                              {t.direction === "DEBIT" ? "HELD" : "RELEASED"}
+                            </Badge>
+                          </>
+                        ) : t.direction === "CREDIT" ? (
+                          <>
+                            <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
+                              <ArrowDownLeft className="h-3.5 w-3.5" />
+                            </span>
+                            <Badge variant="success">CREDIT</Badge>
+                          </>
                         ) : (
-                          <span className="grid h-7 w-7 place-items-center rounded-lg bg-rose-50 text-rose-600">
-                            <ArrowUpRight className="h-3.5 w-3.5" />
-                          </span>
+                          <>
+                            <span className="grid h-7 w-7 place-items-center rounded-lg bg-rose-50 text-rose-600">
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </span>
+                            <Badge variant="danger">DEBIT</Badge>
+                          </>
                         )}
-                        <Badge variant={t.direction === "CREDIT" ? "success" : "danger"}>
-                          {t.direction}
-                        </Badge>
                       </div>
                     </td>
                     <td className="px-5 py-3">
@@ -241,13 +268,25 @@ export default function LedgerPage() {
                     </td>
                     <td
                       className={`px-5 py-3 text-right font-semibold ${
-                        t.direction === "CREDIT" ? "text-emerald-700" : "text-rose-700"
+                        t.memo
+                          ? "text-ink-400"
+                          : t.direction === "CREDIT"
+                          ? "text-emerald-700"
+                          : "text-rose-700"
                       }`}
                     >
-                      {t.direction === "CREDIT" ? "+" : "−"}
+                      {t.memo ? "" : t.direction === "CREDIT" ? "+" : "−"}
                       {formatINR(t.amount)}
                     </td>
-                    <td className="px-5 py-3 text-right text-ink-600">{formatINR(t.balanceAfter)}</td>
+                    <td className="px-5 py-3 text-right text-ink-600">
+                      {t.balanceAfter == null ? (
+                        <span className="text-ink-300" title="A reservation does not change your balance">
+                          —
+                        </span>
+                      ) : (
+                        formatINR(t.balanceAfter)
+                      )}
+                    </td>
                     <td className="px-5 py-3 text-xs text-ink-500 whitespace-nowrap">
                       {new Date(t.createdAt).toLocaleString("en-IN", {
                         dateStyle: "medium",

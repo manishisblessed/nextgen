@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
   IndianRupee,
@@ -25,6 +26,8 @@ import { formatINR, formatNumber, cn } from "@/lib/utils";
 
 type ServiceToday = {
   amount: number;
+  pendingAmount: number;
+  failedAmount: number;
   count: number;
   success: number;
   pending: number;
@@ -59,6 +62,28 @@ const accents: Record<Accent, string> = {
   emerald: "from-emerald-500 to-emerald-700",
   violet: "from-violet-500 to-violet-700",
 };
+
+/**
+ * Every card drills into the unified report system pre-filtered to the SAME IST
+ * day (`date`) the panel is summarising, so the detailed view always matches the
+ * headline figure. All targets are rendered by ReportView, which reads the
+ * `from`/`to` query params.
+ */
+function cardLinks(date: string) {
+  const day = `from=${date}&to=${date}`;
+  return {
+    total: `/dashboard/reports/summary?${day}`,
+    qr: `/dashboard/reports/qr?${day}`,
+    pos: `/dashboard/reports/pos?${day}`,
+    bbps: `/dashboard/reports/bill-payment?${day}`,
+    pg: `/dashboard/reports/pg?${day}`,
+    payout: `/dashboard/reports/payout?${day}`,
+    settlement: `/dashboard/reports/wallet-settlement?${day}`,
+    pending: `/dashboard/reports/wallet-settlement?${day}`,
+    revenue: `/dashboard/reports/commission?${day}`,
+    growth: `/dashboard/reports/summary?${day}`,
+  } as const;
+}
 
 export function TodaysBusinessOverview() {
   const [data, setData] = useState<BusinessOverview | null>(null);
@@ -102,7 +127,9 @@ export function TodaysBusinessOverview() {
             Today&apos;s Business Overview
           </h2>
           <p className="text-sm text-ink-500">
-            Platform business done today across all major services
+            Platform business done today across all major services. Headline amounts
+            are <span className="font-semibold text-ink-600">completed</span> business;
+            pending &amp; failed are shown separately.
           </p>
         </div>
         <button
@@ -130,40 +157,82 @@ export function TodaysBusinessOverview() {
           </button>
         </div>
       ) : data ? (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <TotalBusinessCard data={data.total} />
-            <ServiceBusinessCard label="QR Today" icon={QrCode} accent="violet" data={data.qr} />
-            <ServiceBusinessCard label="POS Today" icon={Monitor} accent="emerald" data={data.pos} />
-            <ServiceBusinessCard label="BBPS Today" icon={ReceiptText} accent="accent" data={data.bbps} />
-            <ServiceBusinessCard label="PG Today" icon={CreditCard} accent="brand" data={data.pg} />
-            <ServiceBusinessCard label="Payout Today" icon={Landmark} accent="accent" data={data.payout} />
-          </div>
+        (() => {
+          const links = cardLinks(data.date);
+          return (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                <TotalBusinessCard data={data.total} href={links.total} />
+                <ServiceBusinessCard label="QR Today" icon={QrCode} accent="violet" data={data.qr} href={links.qr} />
+                <ServiceBusinessCard label="POS Today" icon={Monitor} accent="emerald" data={data.pos} href={links.pos} />
+                <ServiceBusinessCard label="BBPS Today" icon={ReceiptText} accent="accent" data={data.bbps} href={links.bbps} />
+                <ServiceBusinessCard label="PG Today" icon={CreditCard} accent="brand" data={data.pg} href={links.pg} />
+                <ServiceBusinessCard label="Payout Today" icon={Landmark} accent="accent" data={data.payout} href={links.payout} />
+              </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              label="Today's Settlement"
-              value={formatINR(data.summary.settlementToday)}
-              icon={Banknote}
-              accent="emerald"
-            />
-            <StatCard
-              label="Pending Amount"
-              value={formatINR(data.summary.pendingAmount)}
-              icon={Clock}
-              accent="accent"
-            />
-            <StatCard
-              label="Commission / Revenue"
-              value={formatINR(data.summary.commissionRevenue)}
-              icon={CircleDollarSign}
-              accent="violet"
-            />
-            <GrowthCard summary={data.summary} />
-          </div>
-        </>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard
+                  label="Settled Today (net)"
+                  value={formatINR(data.summary.settlementToday)}
+                  icon={Banknote}
+                  accent="emerald"
+                  href={links.settlement}
+                />
+                <StatCard
+                  label="Pending Settlement (today)"
+                  value={formatINR(data.summary.pendingAmount)}
+                  icon={Clock}
+                  accent="accent"
+                  href={links.pending}
+                />
+                <StatCard
+                  label="Commission / Revenue"
+                  value={formatINR(data.summary.commissionRevenue)}
+                  icon={CircleDollarSign}
+                  accent="violet"
+                  href={links.revenue}
+                />
+                <GrowthCard summary={data.summary} href={links.growth} />
+              </div>
+            </>
+          );
+        })()
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Rupee breakdown for the value that is NOT in the headline (pending/failed), so
+ * every amount on the card is traceable — e.g. a POS card reading ₹0 completed
+ * still shows the "₹8,50,165 pending" it is waiting to settle.
+ */
+function AmountBreakdown({ data, onDark = false }: { data: ServiceToday; onDark?: boolean }) {
+  const parts: Array<{ key: string; text: string; tone: string }> = [];
+  if (data.pendingAmount > 0) {
+    parts.push({
+      key: "pending",
+      text: `${formatINR(data.pendingAmount)} pending`,
+      tone: onDark ? "text-white/85" : "text-amber-700",
+    });
+  }
+  if (data.failedAmount > 0) {
+    parts.push({
+      key: "failed",
+      text: `${formatINR(data.failedAmount)} failed`,
+      tone: onDark ? "text-white/85" : "text-rose-600",
+    });
+  }
+  if (parts.length === 0) return null;
+  return (
+    <p className="mt-2 text-[11px] font-medium">
+      {parts.map((p, i) => (
+        <span key={p.key} className={p.tone}>
+          {i > 0 && <span className={onDark ? "text-white/50" : "text-ink-300"}> · </span>}
+          {p.text}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -191,14 +260,19 @@ function ServiceBusinessCard({
   icon: Icon,
   accent,
   data,
+  href,
 }: {
   label: string;
   icon: LucideIcon;
   accent: Accent;
   data: ServiceToday;
+  href: string;
 }) {
   return (
-    <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all">
+    <Link
+      href={href}
+      className="group block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+    >
       <div className="flex items-start justify-between">
         <span
           className={cn(
@@ -219,13 +293,17 @@ function ServiceBusinessCard({
         {formatINR(data.amount)}
       </p>
       <StatusPills data={data} />
-    </div>
+      <AmountBreakdown data={data} />
+    </Link>
   );
 }
 
-function TotalBusinessCard({ data }: { data: ServiceToday }) {
+function TotalBusinessCard({ data, href }: { data: ServiceToday; href: string }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-4 text-white shadow-glow">
+    <Link
+      href={href}
+      className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-4 text-white shadow-glow transition-all hover:-translate-y-0.5 hover:shadow-glow focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+    >
       <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
       <div className="flex items-start justify-between">
         <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/15">
@@ -253,26 +331,45 @@ function TotalBusinessCard({ data }: { data: ServiceToday }) {
           {formatNumber(data.failed)} Failed
         </span>
       </div>
-    </div>
+      <AmountBreakdown data={data} onDark />
+    </Link>
   );
 }
 
-function GrowthCard({ summary }: { summary: BusinessOverview["summary"] }) {
+/**
+ * Format a period-over-period change for display. Growth can be unbounded on the
+ * upside (yesterday ≈ 0), so cap the readout at ±999% to avoid absurd figures
+ * like "+850065%". Losses are naturally floored at -100%.
+ */
+function formatGrowth(pct: number | null, state: GrowthState): string {
+  if (state === "new") return "New";
+  if (pct === null) return "0%";
+  const rounded = Math.round(pct * 10) / 10;
+  if (rounded >= 1000) return "+999%+";
+  if (rounded <= -1000) return "-999%+";
+  return `${rounded > 0 ? "+" : ""}${rounded.toFixed(1)}%`;
+}
+
+function GrowthCard({
+  summary,
+  href,
+}: {
+  summary: BusinessOverview["summary"];
+  href: string;
+}) {
   const { growthPct, growthState } = summary;
 
-  const display =
-    growthState === "new"
-      ? "New"
-      : growthPct === null
-      ? "0%"
-      : `${growthPct > 0 ? "+" : ""}${growthPct.toFixed(1)}%`;
+  const display = formatGrowth(growthPct, growthState);
 
   const positive = growthState === "up" || growthState === "new";
   const Icon = growthState === "down" ? TrendingDown : TrendingUp;
   const accent: Accent = growthState === "down" ? "accent" : "emerald";
 
   return (
-    <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm">
+    <Link
+      href={href}
+      className="group block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+    >
       <div className="flex items-start justify-between">
         <span
           className={cn(
@@ -298,6 +395,6 @@ function GrowthCard({ summary }: { summary: BusinessOverview["summary"] }) {
       <p className="mt-1 text-[11px] text-ink-500">
         Yesterday: {formatINR(summary.yesterdayTotal)}
       </p>
-    </div>
+    </Link>
   );
 }

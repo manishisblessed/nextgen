@@ -14,16 +14,19 @@ import { RefreshCw, Download, Search, Lock } from "lucide-react";
 type Entry = {
   id: string;
   userId: string;
-  user: { userCode: string | null; name: string; email: string; shopName: string | null; role: string };
+  user: { userCode: string | null; name: string; email: string; shopName: string | null; role: string } | null;
   walletType: string;
   direction: "CREDIT" | "DEBIT";
   reason: string;
   amount: number;
-  balanceAfter: number;
+  /** Null for payout reservation memos — a hold/release never moves the balance. */
+  balanceAfter: number | null;
   refType: string | null;
   refId: string | null;
   note: string | null;
   createdAt: string;
+  /** True for synthetic payout hold/release rows (display-only, no balance impact). */
+  memo?: boolean;
 };
 
 /** Roles whose wallets can never be liened (matches the lien API guard). */
@@ -43,6 +46,8 @@ const WALLET_REASONS = [
   "FEE",
   "PENALTY",
   "PAYOUT",
+  "PAYOUT_HOLD",
+  "PAYOUT_RELEASE",
   "SETTLEMENT",
   "AEPS_SETTLEMENT",
   "RENTAL",
@@ -88,7 +93,7 @@ export default function LedgerExplorerPage() {
 
   const buildParams = useCallback(
     (extra?: Record<string, string>) => {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), memos: "1" });
       if (userId) params.set("userId", userId);
       else if (q) params.set("q", q);
       if (walletType !== "all") params.set("walletType", walletType);
@@ -145,10 +150,10 @@ export default function LedgerExplorerPage() {
       render: (r) => (
         <div>
           <p className="font-semibold text-ink-900">
-            {r.user.name}
-            {r.user.userCode && <span className="ml-2 font-medium text-brand-600">{r.user.userCode}</span>}
+            {r.user?.name ?? "—"}
+            {r.user?.userCode && <span className="ml-2 font-medium text-brand-600">{r.user.userCode}</span>}
           </p>
-          <p className="text-[11px] text-ink-500">{r.user.shopName ?? r.user.email}</p>
+          <p className="text-[11px] text-ink-500">{r.user?.shopName ?? r.user?.email}</p>
         </div>
       ),
     },
@@ -160,27 +165,40 @@ export default function LedgerExplorerPage() {
     {
       key: "direction",
       header: "Type",
-      render: (r) => (
-        <Badge variant={r.direction === "CREDIT" ? "success" : "danger"}>{r.direction}</Badge>
-      ),
+      render: (r) =>
+        r.memo ? (
+          <Badge variant="warning">{r.direction === "DEBIT" ? "HELD" : "RELEASED"}</Badge>
+        ) : (
+          <Badge variant={r.direction === "CREDIT" ? "success" : "danger"}>{r.direction}</Badge>
+        ),
     },
     { key: "reason", header: "Reason", render: (r) => r.reason.replace(/_/g, " ") },
     {
       key: "amount",
       header: "Amount",
       align: "right",
-      render: (r) => (
-        <span className={r.direction === "CREDIT" ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
-          {r.direction === "CREDIT" ? "+" : "−"}
-          {formatINR(r.amount)}
-        </span>
-      ),
+      render: (r) =>
+        r.memo ? (
+          <span className="font-medium text-ink-400">{formatINR(r.amount)}</span>
+        ) : (
+          <span className={r.direction === "CREDIT" ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
+            {r.direction === "CREDIT" ? "+" : "−"}
+            {formatINR(r.amount)}
+          </span>
+        ),
     },
     {
       key: "balanceAfter",
       header: "Balance after",
       align: "right",
-      render: (r) => formatINR(r.balanceAfter),
+      render: (r) =>
+        r.balanceAfter == null ? (
+          <span className="text-ink-300" title="A reservation does not change the balance">
+            —
+          </span>
+        ) : (
+          formatINR(r.balanceAfter)
+        ),
     },
     {
       key: "refType",
@@ -205,7 +223,8 @@ export default function LedgerExplorerPage() {
       key: "actions",
       header: "",
       render: (r) =>
-        !canLien || STAFF_ROLES.includes(r.user.role) ? null : (
+        // Memos are display-only reservations, not real transactions — no lien.
+        r.memo || !canLien || !r.user || STAFF_ROLES.includes(r.user.role) ? null : (
           <Button
             size="sm"
             variant="outline"
@@ -398,7 +417,7 @@ function PlaceLienModal({
       onClose={onClose}
       eyebrow="Admin · Money"
       title="Place lien"
-      subtitle={`On ${entry.user.name} · against ${refType} #${refId.slice(0, 14)}`}
+      subtitle={`On ${entry.user?.name ?? "user"} · against ${refType} #${refId.slice(0, 14)}`}
       size="md"
       footer={
         <>
@@ -418,7 +437,7 @@ function PlaceLienModal({
     >
       <div className="space-y-4">
         <div className="rounded-xl border border-ink-100 bg-ink-50/50 p-3 text-[13px] text-ink-600">
-          Freezes funds on <b className="text-ink-800">{entry.user.name}</b> and eagerly recovers
+          Freezes funds on <b className="text-ink-800">{entry.user?.name ?? "this user"}</b> and eagerly recovers
           them (and all future credits) into the Company Suspense account until fully recovered. The
           freeze is invisible to the user; the recovery shows as
           &ldquo;Recovery against txn #…&rdquo;.

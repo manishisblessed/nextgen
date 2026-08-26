@@ -265,7 +265,7 @@ export function RechargekitCCForm() {
           : "PIN verification failed";
       }
 
-      if (data.status === "PROCESSING") {
+      if (data.status === "PROCESSING" || data.status === "INITIATED") {
         setPinOpen(false);
         setPollStatus("Payment is being processed…");
         setPolling({

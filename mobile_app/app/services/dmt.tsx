@@ -36,7 +36,7 @@ export default function DMTScreen() {
         mode,
       });
       setRefId(res.refId);
-      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PROCESSING" || res.status === "INITIATED" ? "Pending" : "Success");
       setResultMsg(`To ${name || "Beneficiary"} · A/C ${acct.slice(-4) || "XXXX"} · ${ifsc || "IFSC"}`);
     } catch (e) {
       setRefId("");

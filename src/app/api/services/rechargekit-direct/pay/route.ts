@@ -136,10 +136,12 @@ export async function POST(req: Request) {
         }),
     });
 
+    // PROCESSING/INITIATED are async-pending (accepted, provider not yet terminal)
+    // → 202 Accepted, never 502. Only a genuine FAILED is an upstream error.
     const httpStatus =
       result.status === "SUCCESS"
         ? 200
-        : result.status === "PROCESSING"
+        : result.status === "PROCESSING" || result.status === "INITIATED"
           ? 202
           : 502;
 

@@ -188,7 +188,7 @@ export function RechargekitDirectCCForm() {
           : "PIN verification failed";
       }
 
-      if (data.status === "PROCESSING") {
+      if (data.status === "PROCESSING" || data.status === "INITIATED") {
         setPinOpen(false);
         setProcessing(
           "Payment is being processed. Check your transaction history for the final status — do NOT re-submit."

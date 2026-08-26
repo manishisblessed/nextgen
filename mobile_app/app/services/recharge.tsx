@@ -70,7 +70,7 @@ export default function RechargeScreen() {
         type: type === "mobile" ? "PREPAID" : type.toUpperCase(),
       });
       setRefId(res.refId);
-      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PENDING" ? "Pending" : "Success");
+      setResultStatus(res.status === "FAILED" ? "Failed" : res.status === "PROCESSING" || res.status === "INITIATED" ? "Pending" : "Success");
       setResultMsg(`${operator} · ${num || "—"}`);
     } catch (e) {
       setRefId("");
