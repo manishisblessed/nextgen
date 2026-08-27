@@ -57,6 +57,7 @@ async function resolveVerifiedAccount(beneficiary: {
   name: string;
   accountNumber: string;
   ifsc: string;
+  mobile?: string;
 }): Promise<PartnerResult<{ accountId: string }>> {
   const listed = await settlementListAccounts();
   if (!listed.ok) return listed;
@@ -79,6 +80,9 @@ async function resolveVerifiedAccount(beneficiary: {
     accountNumber: beneficiary.accountNumber,
     ifscCode: beneficiary.ifsc,
     accountHolderName: beneficiary.name,
+    // Same Day validates a non-blank contact_details.mobile at transfer time,
+    // so a beneficiary registered without one can never receive a transfer.
+    contactMobile: beneficiary.mobile,
   });
   if (!added.ok) return added;
   if (added.data.verificationStatus !== "SUCCESS") {
@@ -108,6 +112,7 @@ export const samedaySettlementPayout: PayoutProvider = {
       name: input.beneficiary.name,
       accountNumber: input.beneficiary.accountNumber,
       ifsc: input.beneficiary.ifsc,
+      mobile: input.beneficiary.mobile,
     });
     if (!account.ok) return account;
 

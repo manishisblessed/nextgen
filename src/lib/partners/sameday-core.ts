@@ -87,10 +87,18 @@ export async function samedayRequest<T extends { success?: boolean }>(
     });
     const json = (await res.json().catch(() => ({}))) as T & SamedayError;
     if (!res.ok || json.success === false) {
+      // Same Day is inconsistent: some failures nest under `error`, others put a
+      // human message at the top level (e.g. "contact_details.mobile can not be
+      // blank" comes back HTTP 200 + success:false + top-level `message`). Read
+      // both so the real reason surfaces instead of a bare "HTTP_200: OK".
+      const topMessage = typeof json.message === "string" ? json.message : undefined;
+      const topCode = typeof (json as { code?: unknown }).code === "string"
+        ? (json as { code: string }).code
+        : undefined;
       return {
         ok: false,
-        code: json.error?.code || `HTTP_${res.status}`,
-        message: json.error?.message || res.statusText || "Same Day request failed",
+        code: json.error?.code || topCode || `HTTP_${res.status}`,
+        message: json.error?.message || topMessage || res.statusText || "Same Day request failed",
         raw: json,
       };
     }

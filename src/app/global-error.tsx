@@ -2,6 +2,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
+import { isChunkLoadError, reloadOnceForChunkError } from "@/lib/isChunkLoadError";
 
 export default function GlobalError({
   error,
@@ -10,9 +11,18 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const chunkError = isChunkLoadError(error);
+
   useEffect(() => {
-    Sentry.captureException(error);
-  }, [error]);
+    // A stale chunk means the app was updated under the user's feet — recover
+    // automatically with a hard reload instead of surfacing a dead end. Only
+    // report genuine faults to Sentry.
+    if (chunkError) {
+      reloadOnceForChunkError();
+    } else {
+      Sentry.captureException(error);
+    }
+  }, [error, chunkError]);
 
   return (
     <html lang="en">
@@ -39,13 +49,15 @@ export default function GlobalError({
             }}
           >
             <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "#111" }}>
-              Something went wrong
+              {chunkError ? "Updating to the latest version" : "Something went wrong"}
             </h2>
             <p style={{ marginTop: 8, color: "#666", fontSize: 14 }}>
-              {error.message || "An unexpected error occurred."}
+              {chunkError
+                ? "A new version is available. Reloading to get the latest — this only takes a moment."
+                : error.message || "An unexpected error occurred."}
             </p>
             <button
-              onClick={reset}
+              onClick={() => (chunkError ? window.location.reload() : reset())}
               style={{
                 marginTop: 20,
                 padding: "10px 24px",
@@ -58,7 +70,7 @@ export default function GlobalError({
                 fontSize: 14,
               }}
             >
-              Try again
+              {chunkError ? "Reload now" : "Try again"}
             </button>
           </div>
         </div>

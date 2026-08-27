@@ -228,8 +228,14 @@ export async function reversePayout(
   return { reversed };
 }
 
+/** Normalize a phone to the bare 10-digit form providers expect (drops +91 etc.). */
+function toContactMobile(phone: string | null | undefined): string | undefined {
+  const digits = (phone ?? "").replace(/\D/g, "").slice(-10);
+  return digits.length === 10 ? digits : undefined;
+}
+
 /** Build the decrypted beneficiary block for the provider call. */
-function beneficiaryFor(row: PayoutRequest) {
+function beneficiaryFor(row: PayoutRequest, contactMobile?: string) {
   if (row.mode === "UPI") {
     return { name: row.beneficiaryName, vpa: decryptField(row.accountNumber) };
   }
@@ -237,6 +243,9 @@ function beneficiaryFor(row: PayoutRequest) {
     name: row.beneficiaryName,
     accountNumber: decryptField(row.accountNumber),
     ifsc: row.ifsc ? decryptField(row.ifsc) : undefined,
+    // Same Day requires a non-blank contact mobile on the registered account or
+    // the transfer is rejected; the requester's own mobile is always present.
+    mobile: contactMobile,
   };
 }
 
@@ -267,7 +276,7 @@ export async function processPayoutInitiate(payoutRequestId: string): Promise<vo
 
   const user = await prisma.user.findUnique({
     where: { id: row.userId },
-    select: { userCode: true },
+    select: { userCode: true, phone: true },
   });
 
   const provider = getPartner("payout");
@@ -283,7 +292,7 @@ export async function processPayoutInitiate(payoutRequestId: string): Promise<vo
     userId: row.userId,
     mode: row.mode,
     amount: toNumber(row.amount),
-    beneficiary: beneficiaryFor(row),
+    beneficiary: beneficiaryFor(row, toContactMobile(user?.phone)),
     purpose: user?.userCode
       ? `Pay by NxtGenPay by RT Code - ${user.userCode}`
       : `Pay by NxtGenPay ${row.userId}`,
