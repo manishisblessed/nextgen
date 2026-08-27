@@ -234,6 +234,18 @@ function toContactMobile(phone: string | null | undefined): string | undefined {
   return digits.length === 10 ? digits : undefined;
 }
 
+/**
+ * Human-facing failure reason for a payout. Providers return a machine code
+ * (e.g. "HTTP_200", "NETWORK") alongside a message; users should only ever see
+ * the message — never the code. The raw code + payload is still persisted on
+ * the row's `response` for ops/debugging. Falls back to a generic line when the
+ * provider gave no usable message.
+ */
+function payoutFailureReason(res: { code: string; message: string }): string {
+  const msg = (res.message ?? "").trim();
+  return msg || "Payout could not be completed right now. Please try again shortly or contact support.";
+}
+
 /** Build the decrypted beneficiary block for the provider call. */
 function beneficiaryFor(row: PayoutRequest, contactMobile?: string) {
   if (row.mode === "UPI") {
@@ -317,7 +329,7 @@ export async function processPayoutInitiate(payoutRequestId: string): Promise<vo
 
   if (!res.ok) {
     await finalizePayoutFailure(payoutRequestId, {
-      failureReason: `${res.code}: ${res.message}`,
+      failureReason: payoutFailureReason(res),
       response: res.raw,
     });
     return;
