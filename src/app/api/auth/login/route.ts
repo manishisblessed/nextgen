@@ -28,11 +28,50 @@ const LocationSchema = z.object({
   accuracy: z.number().optional(),
 });
 
+const PUBLIC_ROLES = ["retailer", "distributor", "master-distributor", "super-distributor"] as const;
+type PublicRole = (typeof PUBLIC_ROLES)[number];
+
+/** Map the public login role selector to the DB role enum. */
+const PUBLIC_ROLE_TO_DB: Record<PublicRole, string> = {
+  retailer: "RETAILER",
+  distributor: "DISTRIBUTOR",
+  "master-distributor": "MASTER_DISTRIBUTOR",
+  "super-distributor": "SUPER_DISTRIBUTOR",
+};
+
+/** Network partner roles — allowed only through the public /login portal. */
+const NETWORK_DB_ROLES = new Set([
+  "RETAILER",
+  "DISTRIBUTOR",
+  "MASTER_DISTRIBUTOR",
+  "SUPER_DISTRIBUTOR",
+]);
+
+/** Internal staff roles — allowed only through the admin consoles. */
+const STAFF_DB_ROLES = new Set(["ADMIN", "SUPPORT", "FINANCE", "MASTER_ADMIN"]);
+
+const ROLE_LABELS: Record<string, string> = {
+  RETAILER: "Retailer",
+  DISTRIBUTOR: "Distributor",
+  MASTER_DISTRIBUTOR: "Master Distributor",
+  SUPER_DISTRIBUTOR: "Super Distributor",
+  ADMIN: "Admin",
+  SUPPORT: "Sub-Admin",
+  FINANCE: "Finance",
+  MASTER_ADMIN: "Master Admin",
+};
+
 const Body = z.object({
   identifier: z.string().min(3).max(120),
   password: z.string().min(1).max(200),
   location: LocationSchema,
   captchaToken: z.string().max(4000).optional(),
+  // The role picked on the public login page. Optional so non-web clients
+  // (e.g. mobile) can still authenticate without a selector.
+  role: z.enum(PUBLIC_ROLES).optional(),
+  // Which portal the request came from. "network" = public partner login,
+  // "staff" = admin consoles. Optional for backward compatibility (mobile).
+  portal: z.enum(["network", "staff"]).optional(),
 });
 
 /**
@@ -59,7 +98,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { identifier, password, location, captchaToken } = parsed.data;
+  const { identifier, password, location, captchaToken, role: selectedRole, portal } = parsed.data;
   const normalized = normalizeIdentifier(identifier);
 
   try {
@@ -114,6 +153,78 @@ export async function POST(req: Request) {
         { error: loginBlock.error, code: loginBlock.code },
         { status: 403 }
       );
+    }
+
+    // Credentials are valid at this point, so it's safe to tell the user
+    // which role/portal their account belongs to.
+    //
+    // 1) Strict portal separation: network partners (retailer/DT/MD/SD) may
+    //    only sign in through the public portal, and internal staff
+    //    (admin/sub-admin/finance/master-admin) only through the admin
+    //    consoles. A retailer can never authenticate as staff, and vice versa.
+    if (portal === "network" && !NETWORK_DB_ROLES.has(user.role)) {
+      await logSecurityEvent({
+        action: "auth.login_portal_mismatch",
+        severity: "warn",
+        userId: user.id,
+        entity: "User",
+        entityId: user.id,
+        ip,
+        userAgent,
+        meta: { portal, actualRole: user.role },
+      });
+      return NextResponse.json(
+        {
+          error: "This portal is for network partners only. Staff accounts must use the admin console.",
+          code: "PORTAL_MISMATCH",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (portal === "staff" && !STAFF_DB_ROLES.has(user.role)) {
+      await logSecurityEvent({
+        action: "auth.login_portal_mismatch",
+        severity: "warn",
+        userId: user.id,
+        entity: "User",
+        entityId: user.id,
+        ip,
+        userAgent,
+        meta: { portal, actualRole: user.role },
+      });
+      return NextResponse.json(
+        {
+          error: "This console is for staff accounts only. Network partners must use the main login.",
+          code: "PORTAL_MISMATCH",
+        },
+        { status: 403 }
+      );
+    }
+
+    // 2) On the public portal, the picked role must match the account's role.
+    if (selectedRole) {
+      const expectedDbRole = PUBLIC_ROLE_TO_DB[selectedRole];
+      if (user.role !== expectedDbRole) {
+        await logSecurityEvent({
+          action: "auth.login_role_mismatch",
+          severity: "warn",
+          userId: user.id,
+          entity: "User",
+          entityId: user.id,
+          ip,
+          userAgent,
+          meta: { selectedRole, actualRole: user.role },
+        });
+        const actualLabel = ROLE_LABELS[user.role] ?? "a different role";
+        return NextResponse.json(
+          {
+            error: `Wrong role selected. This account is registered as ${actualLabel}. Please select ${actualLabel} and try again.`,
+            code: "ROLE_MISMATCH",
+          },
+          { status: 403 }
+        );
+      }
     }
 
     // Successful credential check — clear lockout counter.

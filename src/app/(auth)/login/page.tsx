@@ -98,6 +98,8 @@ function LoginForm({ location }: { location: LocationData }) {
         body: JSON.stringify({
           identifier: identifier.trim(),
           password,
+          role,
+          portal: "network",
           location: { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy },
           captchaToken,
         }),

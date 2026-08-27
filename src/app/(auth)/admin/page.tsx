@@ -70,6 +70,7 @@ function AdminLoginForm({ location }: { location: LocationData }) {
         body: JSON.stringify({
           identifier: email.trim(),
           password,
+          portal: "staff",
           location: { lat: location.latitude, lng: location.longitude, accuracy: location.accuracy },
         }),
       });
