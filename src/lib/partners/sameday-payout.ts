@@ -41,15 +41,19 @@ function toTenDigitMobile(mobile: string | undefined): string {
 }
 
 /**
- * Same Day rejects transfers to an account registered without a contact mobile
- * with a top-level "The 'mobile' field in 'contact_details' can not be blank"
- * (HTTP 200 + success:false). Detect that specific failure so we can repair the
- * stale account and retry, rather than surfacing a dead-end error to the user.
+ * Same Day rejects transfers to an account whose contact_details is missing a
+ * mobile OR an email with a top-level "The '<field>' field in 'contact_details'
+ * can not be blank" (HTTP 200 + success:false). Detect either so we can repair
+ * the stale account and retry, rather than surfacing a dead-end to the user.
  */
-function isBlankContactMobileError(res: { message?: string; raw?: unknown }): boolean {
+function isBlankContactDetailError(res: { message?: string; raw?: unknown }): boolean {
   const raw = res.raw && typeof res.raw === "object" ? JSON.stringify(res.raw) : "";
   const msg = `${res.message ?? ""} ${raw}`.toLowerCase();
-  return msg.includes("contact_details") && msg.includes("mobile") && msg.includes("blank");
+  return (
+    msg.includes("contact_details") &&
+    msg.includes("blank") &&
+    (msg.includes("mobile") || msg.includes("email"))
+  );
 }
 
 export { samedaySettlementConfigured as samedayPayoutConfigured } from "./sameday-settlement";
@@ -127,15 +131,17 @@ async function resolveVerifiedAccount(beneficiary: {
 }
 
 /**
- * Repair an existing Same Day account registered WITHOUT a contact mobile.
+ * Repair an existing Same Day account registered with blank contact_details
+ * (missing mobile and/or email).
  *
- * Older accounts were added before we captured a mobile, so Same Day rejects
- * every transfer to them ("contact_details.mobile can not be blank"). Neither
- * reuse path (beneficiary-book verify or resolveVerifiedAccount) re-adds an
- * existing account, so the missing mobile is otherwise unfixable. We delete the
- * stale account and re-register it — carrying the mobile — as a TRUSTED account
- * (₹0, no re-penny-drop) since the bank already confirmed these exact details
- * during beneficiary verification. Returns the fresh account id for a retry.
+ * Older accounts were added before we sent full contact details, so Same Day
+ * rejects every transfer to them ("contact_details.<field> can not be blank").
+ * Neither reuse path (beneficiary-book verify or resolveVerifiedAccount) re-adds
+ * an existing account, so the gap is otherwise unfixable. We delete the stale
+ * account and re-register it — carrying mobile + email (email defaulted in the
+ * settlement adapter) — as a TRUSTED account (₹0, no re-penny-drop) since the
+ * bank already confirmed these exact details during beneficiary verification.
+ * Returns the fresh account id for a retry.
  */
 async function reregisterWithMobile(beneficiary: {
   name: string;
@@ -205,9 +211,10 @@ export const samedaySettlementPayout: PayoutProvider = {
 
     let r = await transfer(account.data.accountId);
 
-    // Self-heal a stale, mobile-less account: the transfer was rejected (no
-    // money moved), so re-register with the mobile and retry exactly once.
-    if (!r.ok && isBlankContactMobileError(r)) {
+    // Self-heal a stale account missing a contact mobile/email: the transfer was
+    // rejected (no money moved), so re-register with full contact details and
+    // retry exactly once.
+    if (!r.ok && isBlankContactDetailError(r)) {
       const healed = await reregisterWithMobile(beneficiary);
       if (!healed.ok) return healed;
       r = await transfer(healed.data.accountId);
