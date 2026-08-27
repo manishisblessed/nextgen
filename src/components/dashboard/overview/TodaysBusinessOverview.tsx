@@ -73,8 +73,12 @@ function cardLinks(date: string) {
   const day = `from=${date}&to=${date}`;
   return {
     total: `/dashboard/reports/summary?${day}`,
-    qr: `/dashboard/reports/qr?${day}`,
-    pos: `/dashboard/reports/pos?${day}`,
+    // QR Today is collection/settlement business — deep-link to the QR Settlement
+    // Report (per-claim), NOT the QR-codes inventory report.
+    qr: `/dashboard/qr?tab=report&${day}`,
+    // POS Today is settlement/turnover business — deep-link to the POS Settlement
+    // Report (per-transaction, from PosSettlementEntry), NOT the machines inventory.
+    pos: `/dashboard/pos?tab=report&${day}`,
     bbps: `/dashboard/reports/bill-payment?${day}`,
     pg: `/dashboard/reports/pg?${day}`,
     payout: `/dashboard/reports/payout?${day}`,

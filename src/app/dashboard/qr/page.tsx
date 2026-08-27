@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import {
@@ -299,9 +299,16 @@ export default function QrCollectionsPage() {
   const [instantEnabled, setInstantEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Deep-link support (?tab=report&from=&to=) from the "QR Today" overview card.
+  const deepLink = useMemo(() => {
+    if (typeof window === "undefined") return { tab: null as string | null, from: null as string | null, to: null as string | null };
+    const sp = new URLSearchParams(window.location.search);
+    return { tab: sp.get("tab"), from: sp.get("from"), to: sp.get("to") };
+  }, []);
+
   // Retailers switch between "Collect & Claim" and "Settlement Report"; everyone
   // else is pinned to the report (they have no QR/claim surface).
-  const [tab, setTab] = useState<"collect" | "report">("collect");
+  const [tab, setTab] = useState<"collect" | "report">(deepLink.tab === "report" ? "report" : "collect");
   const activeTab: "collect" | "report" = isRetailer ? tab : "report";
 
   // Claim form
@@ -652,7 +659,7 @@ export default function QrCollectionsPage() {
           Loading…
         </div>
       ) : activeTab === "report" ? (
-        <QrSettlementReportTab />
+        <QrSettlementReportTab initialFrom={deepLink.from} initialTo={deepLink.to} />
       ) : (
       <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

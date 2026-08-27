@@ -121,10 +121,32 @@ function fmtTime(iso: string) {
 
 type Tab = "machines" | "transactions" | "settlements" | "report" | "free-rent" | "upload-slip";
 
+const VALID_TABS: Tab[] = [
+  "machines",
+  "transactions",
+  "settlements",
+  "report",
+  "free-rent",
+  "upload-slip",
+];
+
+/** Read deep-link params (?tab=&from=&to=) from the URL once, SSR-safe. */
+function readPosDeepLink(): { tab: Tab | null; from: string | null; to: string | null } {
+  if (typeof window === "undefined") return { tab: null, from: null, to: null };
+  const sp = new URLSearchParams(window.location.search);
+  const tab = sp.get("tab");
+  return {
+    tab: tab && (VALID_TABS as string[]).includes(tab) ? (tab as Tab) : null,
+    from: sp.get("from"),
+    to: sp.get("to"),
+  };
+}
+
 export default function PosPage() {
   const { data: authSession } = useSession();
   const isRetailer = (authSession?.user as { role?: string } | undefined)?.role === "RETAILER";
-  const [activeTab, setActiveTab] = useState<Tab>("transactions");
+  const deepLink = useMemo(readPosDeepLink, []);
+  const [activeTab, setActiveTab] = useState<Tab>(deepLink.tab ?? "transactions");
 
   const tabs = useMemo(() => {
     const base: { id: Tab; label: string; icon: typeof ArrowLeftRight }[] = [
@@ -176,7 +198,7 @@ export default function PosPage() {
       ) : activeTab === "upload-slip" ? (
         <ManualSlipTab />
       ) : activeTab === "report" ? (
-        <SettlementReportTab />
+        <SettlementReportTab initialFrom={deepLink.from} initialTo={deepLink.to} />
       ) : activeTab === "free-rent" ? (
         <FreeRentTab />
       ) : (
