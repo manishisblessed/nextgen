@@ -7,6 +7,16 @@ import { istDayBounds } from "@/lib/reports/daily";
 import { BILL_SERVICE_CODES } from "@/lib/reports/registry";
 import { getRevenueReport } from "@/lib/reports/revenue";
 import { BUSINESS_OVERVIEW_TAB } from "@/lib/roles";
+import {
+  addServiceTotals,
+  classifyPayout,
+  classifyPg,
+  classifyPos,
+  classifyQr,
+  classifyTxn,
+  normalize,
+  summarize,
+} from "@/lib/dashboard/rails";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -47,118 +57,7 @@ function canView(user: { role: string; allowedTabs?: string[] | null }): boolean
   return false;
 }
 
-type ServiceToday = {
-  /** Rupee value of COMPLETED business only (success/settled rows). Headline. */
-  amount: number;
-  /** Rupee value still awaiting settlement / in-flight (pending rows). */
-  pendingAmount: number;
-  /** Rupee value of failed / reversed rows (money did not move). */
-  failedAmount: number;
-  /** Total activity across every status. */
-  count: number;
-  success: number;
-  pending: number;
-  failed: number;
-};
-
-type Bucket = "success" | "pending" | "failed";
-
 type Window = { dayStart: Date; dayEnd: Date };
-
-const round2 = (n: number): number => Math.round(n * 100) / 100;
-
-/** Normalize a Prisma groupBy-by-status result into flat rows. */
-function normalize(
-  rows: Array<{ status: string; _count: number; _sum: Record<string, unknown> }>,
-  amountField: string
-): Array<{ status: string; count: number; amount: number }> {
-  return rows.map((r) => ({
-    status: String(r.status),
-    count: typeof r._count === "number" ? r._count : 0,
-    amount: toNumber(dec((r._sum?.[amountField] as never) ?? 0)),
-  }));
-}
-
-/**
- * Fold status-grouped rows into a single card summary. `amount` is the value of
- * COMPLETED business only (rows whose status maps to "success"); pending/failed
- * contribute to their counts but never to the headline rupee figure. `count` is
- * total activity across every status.
- */
-function summarize(
-  rows: Array<{ status: string; count: number; amount: number }>,
-  classify: (status: string) => Bucket
-): ServiceToday {
-  const out: ServiceToday = {
-    amount: 0,
-    pendingAmount: 0,
-    failedAmount: 0,
-    count: 0,
-    success: 0,
-    pending: 0,
-    failed: 0,
-  };
-  for (const r of rows) {
-    const bucket = classify(r.status);
-    out.count += r.count;
-    out[bucket] += r.count;
-    if (bucket === "success") out.amount += r.amount;
-    else if (bucket === "pending") out.pendingAmount += r.amount;
-    else out.failedAmount += r.amount;
-  }
-  out.amount = round2(out.amount);
-  out.pendingAmount = round2(out.pendingAmount);
-  out.failedAmount = round2(out.failedAmount);
-  return out;
-}
-
-const classifyQr = (s: string): Bucket =>
-  s === "SETTLED" || s === "APPROVED"
-    ? "success"
-    : s === "REJECTED" || s === "CLAWED_BACK"
-    ? "failed"
-    : "pending";
-
-const classifyPos = (s: string): Bucket =>
-  s === "SETTLED" ? "success" : s === "FAILED" || s === "REVERSED" ? "failed" : "pending";
-
-const classifyPg = (s: string): Bucket =>
-  s === "SETTLED" ? "success" : s === "FAILED" ? "failed" : "pending";
-
-const classifyTxn = (s: string): Bucket =>
-  s === "SUCCESS" ? "success" : s === "FAILED" || s === "REFUNDED" ? "failed" : "pending";
-
-const classifyPayout = (s: string): Bucket =>
-  s === "SUCCESS"
-    ? "success"
-    : s === "FAILED" || s === "REJECTED" || s === "REVERSED"
-    ? "failed"
-    : "pending";
-
-function addServiceTotals(parts: ServiceToday[]): ServiceToday {
-  const total: ServiceToday = {
-    amount: 0,
-    pendingAmount: 0,
-    failedAmount: 0,
-    count: 0,
-    success: 0,
-    pending: 0,
-    failed: 0,
-  };
-  for (const p of parts) {
-    total.amount += p.amount;
-    total.pendingAmount += p.pendingAmount;
-    total.failedAmount += p.failedAmount;
-    total.count += p.count;
-    total.success += p.success;
-    total.pending += p.pending;
-    total.failed += p.failed;
-  }
-  total.amount = round2(total.amount);
-  total.pendingAmount = round2(total.pendingAmount);
-  total.failedAmount = round2(total.failedAmount);
-  return total;
-}
 
 /** Per-rail business done within a window. */
 async function aggregateServices(w: Window) {

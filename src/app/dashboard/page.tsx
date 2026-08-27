@@ -7,6 +7,7 @@ import { DistributorOverview } from "@/components/dashboard/overview/Distributor
 import { MasterOverview } from "@/components/dashboard/overview/MasterOverview";
 import { AdminOverview } from "@/components/dashboard/overview/AdminOverview";
 import { TodaysBusinessOverview } from "@/components/dashboard/overview/TodaysBusinessOverview";
+import { NetworkOverview } from "@/components/dashboard/overview/NetworkOverview";
 import { BUSINESS_OVERVIEW_TAB } from "@/lib/roles";
 
 export default function DashboardHomePage() {
@@ -53,11 +54,20 @@ export default function DashboardHomePage() {
     }
   })();
 
-  if (!canSeeBusinessOverview) return overview;
+  // Distributor tiers (SD / MD / DT) get the hierarchical Network Business
+  // Overview — activity of the entities directly under them, each row rolling up
+  // that member's whole subtree. Rendered above their existing role overview.
+  const isNetworkTier =
+    displayRole === "super-distributor" ||
+    displayRole === "master-distributor" ||
+    displayRole === "distributor";
+
+  if (!canSeeBusinessOverview && !isNetworkTier) return overview;
 
   return (
     <div className="space-y-8">
-      <TodaysBusinessOverview />
+      {canSeeBusinessOverview && <TodaysBusinessOverview />}
+      {isNetworkTier && <NetworkOverview />}
       {overview}
     </div>
   );
