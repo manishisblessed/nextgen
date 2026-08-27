@@ -91,10 +91,9 @@ export async function samedayRequest<T extends { success?: boolean }>(
       // human message at the top level (e.g. "contact_details.mobile can not be
       // blank" comes back HTTP 200 + success:false + top-level `message`). Read
       // both so the real reason surfaces instead of a bare "HTTP_200: OK".
-      const topMessage = typeof json.message === "string" ? json.message : undefined;
-      const topCode = typeof (json as { code?: unknown }).code === "string"
-        ? (json as { code: string }).code
-        : undefined;
+      const flat = json as unknown as Record<string, unknown>;
+      const topMessage = typeof flat.message === "string" ? flat.message : undefined;
+      const topCode = typeof flat.code === "string" ? flat.code : undefined;
       return {
         ok: false,
         code: json.error?.code || topCode || `HTTP_${res.status}`,
