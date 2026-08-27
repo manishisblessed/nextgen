@@ -89,11 +89,19 @@ async function resolveVerifiedAccount(beneficiary: {
     (a) => a.accountNumber === beneficiary.accountNumber && a.ifscCode === beneficiary.ifsc
   );
   if (existing) {
-    if (!existing.isVerified) {
+    // Same Day allows transfers to BOTH penny-drop verified AND trusted
+    // (skip-verified, status SKIPPED) accounts, so either is usable — including
+    // ones our own self-heal re-registered as trusted. Only a genuinely
+    // in-flight penny-drop defers the payout; a FAILED drop is a hard stop.
+    const usable = existing.isVerified || existing.verificationStatus === "SKIPPED";
+    if (!usable) {
+      const failed = existing.verificationStatus === "FAILED";
       return {
         ok: false,
-        code: "VERIFICATION_PENDING",
-        message: "Beneficiary account is awaiting penny-drop verification at Same Day — retry shortly",
+        code: failed ? "VERIFICATION_FAILED" : "VERIFICATION_PENDING",
+        message: failed
+          ? "Beneficiary account verification failed at Same Day — delete and re-add the account"
+          : "Beneficiary account is awaiting penny-drop verification at Same Day — retry shortly",
       };
     }
     return { ok: true, data: { accountId: existing.id } };
