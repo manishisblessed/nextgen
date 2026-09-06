@@ -9,6 +9,14 @@ import { needsSuccessorApproval } from "@/lib/declaration/types";
 import { getRequiredDocTypes, docTypeLabel } from "@/lib/onboarding/requiredDocuments";
 import { generateNextUserCode } from "@/lib/userCode";
 import { defaultServicesForRole } from "@/lib/settings";
+import {
+  checkIdentityAvailability,
+  requestIdentityException,
+  identityDuplicateMessage,
+  IDENTITY_DUPLICATE_CODES,
+  IDENTITY_FIELD_LABELS,
+  type IdentityFieldKey,
+} from "@/lib/security/identityExceptions";
 
 const RegisterBody = z.object({
   name: z.string().min(2).max(100),
@@ -124,62 +132,54 @@ export async function POST(
     );
   }
 
-  // ── Fraud gate: enforce one-identity-per-user across all KYC & shop fields ──
+  // ── Fraud gate: enforce identity uniqueness (application layer) ─────────────
+  // A master-admin may pre-approve value-scoped IdentityException rows so the
+  // SAME identity can onboard up to four accounts (one per network tier). If a
+  // duplicate is blocked but approvable, we file a PENDING request for review.
   const excludeUserId = invite.userId ?? undefined;
 
-  const duplicateChecks: { field: string; value: string | undefined; model: "kyc" | "user" }[] = [
-    { field: "panNumber", value: data.panNumber?.toUpperCase(), model: "kyc" },
-    { field: "aadhaarNumber", value: data.aadhaarNumber, model: "kyc" },
-    { field: "bankAccountNumber", value: data.bankAccountNumber, model: "kyc" },
-    { field: "gstin", value: data.gstin?.toUpperCase(), model: "kyc" },
-    { field: "msmeNumber", value: data.msmeNumber, model: "kyc" },
-    { field: "shopName", value: data.shopName, model: "user" },
+  const identityChecks: { fieldKey: IdentityFieldKey; value: string | undefined }[] = [
+    { fieldKey: "panNumber", value: data.panNumber?.toUpperCase() },
+    { fieldKey: "aadhaarNumber", value: data.aadhaarNumber },
+    { fieldKey: "bankAccountNumber", value: data.bankAccountNumber },
+    { fieldKey: "gstin", value: data.gstin?.toUpperCase() },
+    { fieldKey: "msmeNumber", value: data.msmeNumber },
+    { fieldKey: "shopName", value: data.shopName },
   ];
 
-  const fieldLabels: Record<string, string> = {
-    panNumber: "PAN number",
-    aadhaarNumber: "Aadhaar number",
-    bankAccountNumber: "bank account number",
-    gstin: "GST number",
-    msmeNumber: "Udyam number",
-    shopName: "shop name",
-  };
-
-  for (const { field, value, model } of duplicateChecks) {
+  for (const { fieldKey, value } of identityChecks) {
     if (!value) continue;
-
-    if (model === "kyc") {
-      const dup = await prisma.kyc.findFirst({
-        where: {
-          [field]: value,
-          ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
-        },
-        select: { userId: true },
-      });
-      if (dup) {
-        return NextResponse.json(
-          { error: `Another account is already registered with this ${fieldLabels[field]}` },
-          { status: 409 }
-        );
+    const avail = await checkIdentityAvailability({
+      fieldKey,
+      value,
+      role: invite.role,
+      excludeUserId,
+    });
+    if (!avail.ok) {
+      if (avail.reason === "NEEDS_APPROVAL") {
+        await requestIdentityException({
+          fieldKey,
+          value,
+          role: invite.role,
+          inviteId: invite.id,
+          linkedUserId: avail.holders[0]?.userId ?? null,
+          reason: `Onboarding ${invite.role} with duplicate ${IDENTITY_FIELD_LABELS[fieldKey]}`,
+        });
       }
-    } else {
-      const dup = await prisma.user.findFirst({
-        where: {
-          [field]: value,
-          ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
+      return NextResponse.json(
+        {
+          error: identityDuplicateMessage(fieldKey, avail.reason),
+          code: IDENTITY_DUPLICATE_CODES[fieldKey],
+          needsApproval: avail.reason === "NEEDS_APPROVAL",
         },
-        select: { id: true },
-      });
-      if (dup) {
-        return NextResponse.json(
-          { error: `Another account is already registered with this ${fieldLabels[field]}` },
-          { status: 409 }
-        );
-      }
+        { status: 409 }
+      );
     }
   }
 
-  // Aadhaar last-4 fallback: catch legacy records where aadhaarNumber is NULL
+  // Aadhaar last-4 fallback: catch legacy records where aadhaarNumber is NULL.
+  // This path stays a hard block (no exception matching) since a null full
+  // number cannot be value-scoped to an approved exception.
   if (data.aadhaarNumber) {
     const last4 = data.aadhaarNumber.slice(-4);
     const dupLast4 = await prisma.kyc.findFirst({
@@ -192,7 +192,7 @@ export async function POST(
     });
     if (dupLast4) {
       return NextResponse.json(
-        { error: "Another account is already registered with this Aadhaar number" },
+        { error: "Another account is already registered with this Aadhaar number", code: "AADHAAR_DUPLICATE" },
         { status: 409 }
       );
     }
@@ -410,6 +410,13 @@ export async function POST(
 
     await tx.verificationResult.updateMany({
       where: { inviteId: invite.id },
+      data: { userId: user.id },
+    });
+
+    // Link any identity-exception rows filed against this invite to the new
+    // account so the audit trail and future checks resolve by userId too.
+    await tx.identityException.updateMany({
+      where: { inviteId: invite.id, userId: null },
       data: { userId: user.id },
     });
 

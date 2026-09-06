@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -22,6 +23,7 @@ import {
   EyeOff,
   ClipboardCopy,
 } from "lucide-react";
+import { useStepUp } from "@/components/security/StepUpProvider";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Input, Select } from "@/components/ui/Input";
@@ -46,14 +48,21 @@ type UserRow = {
   walletBalance: number;
   monthlyTurnover: number;
   retailers: number;
+  pinLoginEnabled?: boolean;
+  twoFactorExempt?: boolean;
   upline: { role: string; name: string; userCode: string | null }[];
 };
 
 export default function AdminUsersPage() {
+  const { data: session } = useSession();
+  const { fetchWithStepUp } = useStepUp();
+  const isMasterAdmin = session?.user?.role === "MASTER_ADMIN";
   const [q, setQ] = useState("");
   const [role, setRole] = useState("all");
   const [status, setStatus] = useState("all");
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [pinLoginTarget, setPinLoginTarget] = useState<UserRow | null>(null);
+  const [pinLoginBusy, setPinLoginBusy] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const pageSize = 50;
@@ -158,6 +167,32 @@ export default function AdminUsersPage() {
       notify(e instanceof Error ? e.message : "Reset failed", false);
     } finally {
       setResettingPw(false);
+    }
+  }
+
+  async function togglePinLogin(user: UserRow) {
+    setPinLoginBusy(true);
+    try {
+      const enabling = !user.pinLoginEnabled;
+      const res = await fetchWithStepUp(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setPinLogin", enabled: enabling }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? "Update failed");
+      notify(
+        enabling
+          ? `PIN login enabled for ${user.name}. 2FA is now waived.${data.warning ? ` ${data.warning}` : ""}`
+          : `PIN login disabled for ${user.name}. Mandatory 2FA is restored.`,
+        true
+      );
+      setPinLoginTarget(null);
+      fetchUsers();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Update failed", false);
+    } finally {
+      setPinLoginBusy(false);
     }
   }
 
@@ -383,6 +418,7 @@ export default function AdminUsersPage() {
       {moreUser && (
         <UserMoreMenu
           user={moreUser}
+          canManagePinLogin={isMasterAdmin}
           onClose={() => setMoreUser(null)}
           onManageServices={() => {
             setServicesUser(moreUser);
@@ -400,12 +436,36 @@ export default function AdminUsersPage() {
             setStatusTarget(moreUser);
             setMoreUser(null);
           }}
+          onTogglePinLogin={() => {
+            setPinLoginTarget(moreUser);
+            setMoreUser(null);
+          }}
           onCopied={() => {
             notify("User ID copied", true);
             setMoreUser(null);
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pinLoginTarget !== null}
+        busy={pinLoginBusy}
+        title={
+          pinLoginTarget?.pinLoginEnabled
+            ? `Disable PIN login for ${pinLoginTarget?.name}?`
+            : `Enable PIN login for ${pinLoginTarget?.name}?`
+        }
+        description={
+          pinLoginTarget?.pinLoginEnabled
+            ? "This restores mandatory two-factor authentication. The user will be signed out and must set up an authenticator app on next login."
+            : "This waives mandatory 2FA and lets the user sign in with their transaction PIN. They must accept all account risk. Ensure they have set a transaction PIN."
+        }
+        confirmLabel={pinLoginTarget?.pinLoginEnabled ? "Disable PIN login" : "Enable PIN login"}
+        onConfirm={async () => {
+          if (pinLoginTarget) await togglePinLogin(pinLoginTarget);
+        }}
+        onClose={() => setPinLoginTarget(null)}
+      />
 
       {statusTarget && (
         <ApprovalStatusDialog
@@ -474,19 +534,23 @@ export default function AdminUsersPage() {
 
 function UserMoreMenu({
   user,
+  canManagePinLogin,
   onClose,
   onManageServices,
   onResetPassword,
   onCloseAccount,
   onSetStatus,
+  onTogglePinLogin,
   onCopied,
 }: {
   user: UserRow;
+  canManagePinLogin: boolean;
   onClose: () => void;
   onManageServices: () => void;
   onResetPassword: () => void;
   onCloseAccount: () => void;
   onSetStatus: () => void;
+  onTogglePinLogin: () => void;
   onCopied: () => void;
 }) {
   useEffect(() => {
@@ -590,6 +654,18 @@ function UserMoreMenu({
             <KeyRound className="h-4 w-4" />
             Reset password
           </button>
+
+          {canManagePinLogin && (
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-800 transition hover:bg-ink-50"
+              onClick={onTogglePinLogin}
+            >
+              <KeyRound className="h-4 w-4 text-ink-500" />
+              {user.pinLoginEnabled ? "Disable PIN login (restore 2FA)" : "Enable PIN login (waive 2FA)"}
+            </button>
+          )}
 
           {user.status !== "Closed" && (
             <button

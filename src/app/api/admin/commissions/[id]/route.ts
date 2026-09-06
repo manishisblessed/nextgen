@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth-server";
+import { requireAdminActivity } from "@/lib/security/adminActivity";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
 
 const UpdateBody = z.object({
@@ -17,7 +18,12 @@ export const dynamic = "force-dynamic";
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
-    const admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    const admin = await requireAdminActivity(req, {
+      action: "commission.update",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "CommissionSlab",
+      entityId: params.id,
+    });
     const parsed = UpdateBody.safeParse(await req.json());
     if (!parsed.success)
       return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -53,17 +59,20 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
         percent: updated.percent ? Number(updated.percent) : null,
       },
     });
-  } catch (e: any) {
-    if (e?.name === "AuthError") return NextResponse.json({ error: e.message }, { status: 401 });
-    console.error("[admin/commissions/id] PATCH error:", e);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  } catch (e) {
+    return toErrorResponse(e);
   }
 }
 
 export async function DELETE(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
-    const admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    const admin = await requireAdminActivity(req, {
+      action: "commission.deactivate",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "CommissionSlab",
+      entityId: params.id,
+    });
 
     const existing = await prisma.commissionSlab.findUnique({
       where: { id: params.id },
@@ -86,9 +95,7 @@ export async function DELETE(req: Request, props: { params: Promise<{ id: string
     });
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    if (e?.name === "AuthError") return NextResponse.json({ error: e.message }, { status: 401 });
-    console.error("[admin/commissions/id] DELETE error:", e);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  } catch (e) {
+    return toErrorResponse(e);
   }
 }

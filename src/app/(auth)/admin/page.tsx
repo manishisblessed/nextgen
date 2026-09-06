@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
+import { PinLoginStep } from "@/components/auth/PinLoginStep";
 import { LocationGate, type LocationData } from "@/components/auth/LocationGate";
 
 export default function AdminLoginPage() {
@@ -53,9 +54,10 @@ function AdminLoginForm({ location }: { location: LocationData }) {
   const rateLimited = cooldownSec > 0;
 
   // 2FA state
-  const [step, setStep] = useState<"credentials" | "2fa">("credentials");
+  const [step, setStep] = useState<"credentials" | "2fa" | "pinlogin">("credentials");
   const [tempToken, setTempToken] = useState("");
   const [userName, setUserName] = useState("");
+  const [pinRiskAccepted, setPinRiskAccepted] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -87,6 +89,15 @@ function AdminLoginForm({ location }: { location: LocationData }) {
         return;
       }
 
+      if (data.needsPinLogin) {
+        setTempToken(data.tempToken);
+        setUserName(data.user?.name || "");
+        setPinRiskAccepted(Boolean(data.riskAccepted));
+        setStep("pinlogin");
+        setLoading(false);
+        return;
+      }
+
       if (data.needs2FA) {
         setTempToken(data.tempToken);
         setUserName(data.user?.name || "");
@@ -113,6 +124,40 @@ function AdminLoginForm({ location }: { location: LocationData }) {
       setError("Network error. Please try again.");
       setLoading(false);
     }
+  }
+
+  if (step === "pinlogin") {
+    return (
+      <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
+        <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-ink-900 via-ink-800 to-brand-700 p-10 text-white shadow-glow lg:flex">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
+              <Lock className="h-3.5 w-3.5" /> Restricted · Admin console
+            </span>
+            <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
+              Sign in with <br /> your PIN.
+            </h2>
+            <p className="mt-3 text-white/80">
+              Two-factor authentication has been waived for your account. Enter
+              your transaction PIN to continue.
+            </p>
+          </div>
+        </div>
+        <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
+          <PinLoginStep
+            tempToken={tempToken}
+            userName={userName}
+            riskAlreadyAccepted={pinRiskAccepted}
+            onBack={() => {
+              setStep("credentials");
+              setTempToken("");
+              setPassword("");
+              setError("");
+            }}
+          />
+        </div>
+      </div>
+    );
   }
 
   if (step === "2fa") {

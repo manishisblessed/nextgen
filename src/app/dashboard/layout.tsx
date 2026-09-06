@@ -12,6 +12,8 @@ import { SchemeGateBanner } from "@/components/dashboard/SchemeGateBanner";
 import { NavigationProgress } from "@/components/dashboard/NavigationProgress";
 import { PageTransition } from "@/components/motion/PageTransition";
 import { DashboardShellSkeleton } from "@/components/ui/Skeleton";
+import { StepUpProvider } from "@/components/security/StepUpProvider";
+import { AdminActivityTracker } from "@/components/security/AdminActivityTracker";
 
 const SIDEBAR_KEY = "ngp-sidebar-collapsed";
 
@@ -41,6 +43,9 @@ export default function DashboardLayout({
   }, []);
 
   const twoFactorEnabled = session?.user?.twoFactorEnabled === true;
+  // A master-admin may exempt an account from the mandatory-2FA gate and let it
+  // log in with a transaction PIN instead. Such users must never see the setup modal.
+  const twoFactorExempt = session?.user?.twoFactorExempt === true;
 
   // A stale JWT (e.g. minted before the user enabled 2FA, or a session cookie
   // that hasn't picked up the current DB value yet) can report
@@ -50,7 +55,7 @@ export default function DashboardLayout({
   // still reports it off do we treat setup as required.
   useEffect(() => {
     if (status !== "authenticated") return;
-    if (twoFactorEnabled) {
+    if (twoFactorEnabled || twoFactorExempt) {
       setTwoFAChecked(true);
       return;
     }
@@ -64,13 +69,15 @@ export default function DashboardLayout({
   }, [status, twoFactorEnabled, twoFAChecked, update]);
 
   const needs2FASetup =
-    status === "authenticated" && twoFAChecked && !twoFactorEnabled;
+    status === "authenticated" && twoFAChecked && !twoFactorEnabled && !twoFactorExempt;
 
   if (status === "loading") {
     return <DashboardShellSkeleton />;
   }
 
   return (
+    <StepUpProvider>
+    <AdminActivityTracker />
     <div className="flex min-h-screen bg-ink-50/40">
       <Toaster
         position="top-right"
@@ -99,5 +106,6 @@ export default function DashboardLayout({
       {needs2FASetup && <TwoFactorSetupModal />}
       {twoFactorEnabled && <ReKycGate />}
     </div>
+    </StepUpProvider>
   );
 }

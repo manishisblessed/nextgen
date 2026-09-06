@@ -54,6 +54,10 @@ export type NavItem = {
   label: string;
   icon: LucideIcon;
   badge?: string;
+  /** When present, this item renders as a collapsible parent tab whose
+   *  children are individual links. The parent's own href is only used as a
+   *  fallback landing route; it is never treated as a leaf link. */
+  children?: NavItem[];
 };
 
 export type NavGroup = {
@@ -83,8 +87,16 @@ const bbpsServices: NavItem[] = [
   { href: "/dashboard/bill-pay/bbps-2", label: "Unified Bill Payment Platform", icon: Receipt, badge: "New" },
 ];
 
-/** RT gets all services including BBPS */
-const retailerServices: NavItem[] = [...baseServices, ...bbpsServices];
+/** All BBPS / bill-payment services collapsed under a single "BBPS" tab. */
+const bbpsGroup: NavItem = {
+  href: "/dashboard/bill-pay/credit-card",
+  label: "BBPS",
+  icon: Receipt,
+  children: bbpsServices,
+};
+
+/** RT gets all services including the collapsible BBPS tab */
+const retailerServices: NavItem[] = [...baseServices, bbpsGroup];
 
 /** DT/MD/SD get payout but NOT BBPS */
 const networkServices: NavItem[] = [...baseServices];
@@ -188,18 +200,30 @@ const masterAdminMoneyOps: NavItem[] = adminMoneyOps.flatMap((item) =>
     : [item]
 );
 
+/** Onboarding / network-management tabs collapsed under a single "Onboarding"
+ *  tab. Shared by master-admin, admin and sub-admin. */
+const onboardingGroup: NavItem = {
+  href: "/dashboard/admin/invites",
+  label: "Onboarding",
+  icon: PackagePlus,
+  children: [
+    { href: "/dashboard/admin/invites", label: "Onboarding Invites", icon: PackagePlus, badge: "New" },
+    { href: "/dashboard/admin/join-requests", label: "Join Requests", icon: Inbox, badge: "New" },
+    { href: "/dashboard/admin/users", label: "Users", icon: Users },
+    { href: "/dashboard/admin/network", label: "Network Manager", icon: Users, badge: "New" },
+    { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
+    { href: "/dashboard/admin/identity-exceptions", label: "Identity Exceptions", icon: Fingerprint, badge: "New" },
+  ],
+};
+
 /** Workspace tabs shared by admin and sub-admin. Sub-admins are scoped down
  *  through their allowedTabs; with none set they inherit the full menu. */
 const adminWorkspace: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/admin/invites", label: "Onboarding Invites", icon: PackagePlus, badge: "New" },
-  { href: "/dashboard/admin/join-requests", label: "Join Requests", icon: Inbox, badge: "New" },
-  { href: "/dashboard/admin/users", label: "Users", icon: Users },
-  { href: "/dashboard/admin/network", label: "Network Manager", icon: Users, badge: "New" },
+  onboardingGroup,
   { href: "/dashboard/admin/sub-admins", label: "Sub-Admins", icon: UserCog },
   { href: "/dashboard/admin/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
   { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor, badge: "New" },
-  { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
   { href: "/dashboard/admin/schemes", label: "Scheme Manager", icon: Layers, badge: "New" },
   { href: "/dashboard/admin/qr", label: "QR Collections", icon: QrCode, badge: "New" },
   { href: "/dashboard/admin/disputes", label: "Disputes & Support", icon: LifeBuoy, badge: "New" },
@@ -219,14 +243,10 @@ export const navByRole: Record<Role, NavGroup[]> = {
       items: [
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/admin/admins", label: "Manage Admins", icon: ShieldCheck, badge: "New" },
-        { href: "/dashboard/admin/invites", label: "Onboarding Invites", icon: PackagePlus, badge: "New" },
-        { href: "/dashboard/admin/join-requests", label: "Join Requests", icon: Inbox, badge: "New" },
-        { href: "/dashboard/admin/users", label: "Users", icon: Users },
-        { href: "/dashboard/admin/network", label: "Network Manager", icon: Users, badge: "New" },
+        onboardingGroup,
         { href: "/dashboard/admin/sub-admins", label: "Sub-Admins", icon: UserCog },
         { href: "/dashboard/admin/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
         { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor, badge: "New" },
-        { href: "/dashboard/admin/kyc", label: "KYC Approvals", icon: ShieldCheck, badge: "8" },
         { href: "/dashboard/admin/schemes", label: "Scheme Manager", icon: Layers, badge: "New" },
         { href: "/dashboard/admin/qr", label: "QR Collections", icon: QrCode, badge: "New" },
         { href: "/dashboard/admin/disputes", label: "Disputes & Support", icon: LifeBuoy, badge: "New" },

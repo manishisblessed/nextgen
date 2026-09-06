@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { type Role } from "@prisma/client";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
+import {
+  checkIdentityAvailability,
+  requestIdentityException,
+  identityDuplicateMessage,
+  IDENTITY_DUPLICATE_CODES,
+  IDENTITY_FIELD_LABELS,
+  type IdentityFieldKey,
+} from "@/lib/security/identityExceptions";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -113,46 +122,62 @@ export async function POST(req: Request) {
     );
   }
 
-  // ── Fraud gate: reject if PAN, Aadhaar, or GST is already used by another user ──
+  // ── Fraud gate: reject if PAN, Aadhaar, or GST is already used by another
+  //    user, UNLESS a master-admin approved a value-scoped exception for this
+  //    tier. See identityExceptions.ts. ──
   const panUp = parsed.data.panNumber.toUpperCase();
   const gstUp = parsed.data.gstin?.toUpperCase() || null;
+  const role = user.role as Role;
 
-  const dupPan = await prisma.kyc.findFirst({
-    where: { panNumber: panUp, userId: { not: user.id } },
-    select: { userId: true },
-  });
-  if (dupPan) {
+  async function guard(fieldKey: IdentityFieldKey, value: string) {
+    const avail = await checkIdentityAvailability({ fieldKey, value, role, excludeUserId: user!.id });
+    if (avail.ok) return null;
+    if (avail.reason === "NEEDS_APPROVAL") {
+      await requestIdentityException({
+        fieldKey,
+        value,
+        role,
+        userId: user!.id,
+        linkedUserId: avail.holders[0]?.userId ?? null,
+        reason: `KYC submission for ${role} with duplicate ${IDENTITY_FIELD_LABELS[fieldKey]}`,
+      });
+    }
     return NextResponse.json(
-      { error: "Another account is already registered with this PAN number" },
+      {
+        error: identityDuplicateMessage(fieldKey, avail.reason),
+        code: IDENTITY_DUPLICATE_CODES[fieldKey],
+        needsApproval: avail.reason === "NEEDS_APPROVAL",
+      },
       { status: 409 }
     );
   }
 
-  const dupAadhaar = await prisma.kyc.findFirst({
-    where: {
-      aadhaarLast4: parsed.data.aadhaarLast4,
-      userId: { not: user.id },
-    },
-    select: { userId: true },
-  });
-  if (dupAadhaar) {
-    return NextResponse.json(
-      { error: "Another account is already registered with this Aadhaar number" },
-      { status: 409 }
-    );
-  }
+  const panBlocked = await guard("panNumber", panUp);
+  if (panBlocked) return panBlocked;
 
-  if (gstUp) {
-    const dupGst = await prisma.kyc.findFirst({
-      where: { gstin: gstUp, userId: { not: user.id } },
+  // Aadhaar here is only a last-4 (legacy manual path); we cannot value-scope to
+  // a full number, so allow it only if an approved AADHAAR exception for this
+  // tier matches the last-4, otherwise block on any other account's last-4.
+  const approvedAadhaar = await prisma.identityException.findFirst({
+    where: { field: "AADHAAR", role, status: "APPROVED", value: { endsWith: parsed.data.aadhaarLast4 } },
+    select: { id: true },
+  });
+  if (!approvedAadhaar) {
+    const dupAadhaar = await prisma.kyc.findFirst({
+      where: { aadhaarLast4: parsed.data.aadhaarLast4, userId: { not: user.id } },
       select: { userId: true },
     });
-    if (dupGst) {
+    if (dupAadhaar) {
       return NextResponse.json(
-        { error: "Another account is already registered with this GST number" },
+        { error: "Another account is already registered with this Aadhaar number", code: "AADHAAR_DUPLICATE" },
         { status: 409 }
       );
     }
+  }
+
+  if (gstUp) {
+    const gstBlocked = await guard("gstin", gstUp);
+    if (gstBlocked) return gstBlocked;
   }
 
   const kyc = await prisma.kyc.upsert({

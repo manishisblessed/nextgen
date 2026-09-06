@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRole } from "@/lib/auth-server";
+import { requireAdminActivity } from "@/lib/security/adminActivity";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { approveManualSlip, rejectManualSlip, ManualSlipError } from "@/lib/pos/manualSlip";
 
@@ -23,7 +23,12 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const params = await props.params;
   let admin;
   try {
-    admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    admin = await requireAdminActivity(req, {
+      action: "pos.manual_slip.review",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "PosManualSlip",
+      entityId: params.id,
+    });
   } catch (e) {
     return toErrorResponse(e);
   }

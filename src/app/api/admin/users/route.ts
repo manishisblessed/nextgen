@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { requireRole, AuthError } from "@/lib/auth-server";
+import { requireRole } from "@/lib/auth-server";
+import { requireAdminActivity } from "@/lib/security/adminActivity";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { generateNextUserCode } from "@/lib/userCode";
@@ -30,11 +32,13 @@ const CreateUserBody = z.object({
 export async function POST(req: Request) {
   let admin;
   try {
-    admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    admin = await requireAdminActivity(req, {
+      action: "user.create",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "User",
+    });
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+    return toErrorResponse(e);
   }
 
   const parsed = CreateUserBody.safeParse(await req.json().catch(() => ({})));
@@ -205,6 +209,8 @@ export async function GET(req: Request) {
           state: true,
           walletBalance: true,
           createdAt: true,
+          twoFactorExempt: true,
+          pinLoginEnabled: true,
           _count: { select: { children: true } },
           ...uplineInclude,
         },
@@ -270,6 +276,8 @@ export async function GET(req: Request) {
       }),
       status: displayStatus(u.status),
       walletBalance: Number(u.walletBalance),
+      pinLoginEnabled: u.pinLoginEnabled,
+      twoFactorExempt: u.twoFactorExempt,
       monthlyTurnover: turnoverMap.get(u.id) ?? 0,
       retailers: u._count.children,
       upline: flattenUpline(u).map((n) => ({

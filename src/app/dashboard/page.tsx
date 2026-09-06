@@ -8,6 +8,7 @@ import { MasterOverview } from "@/components/dashboard/overview/MasterOverview";
 import { AdminOverview } from "@/components/dashboard/overview/AdminOverview";
 import { TodaysBusinessOverview } from "@/components/dashboard/overview/TodaysBusinessOverview";
 import { NetworkOverview } from "@/components/dashboard/overview/NetworkOverview";
+import { RetailerBusinessOverview } from "@/components/dashboard/overview/RetailerBusinessOverview";
 import { BUSINESS_OVERVIEW_TAB } from "@/lib/roles";
 
 export default function DashboardHomePage() {
@@ -62,12 +63,17 @@ export default function DashboardHomePage() {
     displayRole === "master-distributor" ||
     displayRole === "distributor";
 
-  if (!canSeeBusinessOverview && !isNetworkTier) return overview;
+  // Retailers are the transacting leaf — they get a self-scoped "Today's
+  // Business" summary of their own activity across all rails.
+  const isRetailer = displayRole === "retailer";
+
+  if (!canSeeBusinessOverview && !isNetworkTier && !isRetailer) return overview;
 
   return (
     <div className="space-y-8">
       {canSeeBusinessOverview && <TodaysBusinessOverview />}
       {isNetworkTier && <NetworkOverview />}
+      {isRetailer && <RetailerBusinessOverview />}
       {overview}
     </div>
   );

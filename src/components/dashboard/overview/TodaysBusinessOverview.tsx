@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Hourglass,
   XCircle,
+  Sparkles,
 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { StatSkeleton } from "@/components/ui/Skeleton";
@@ -125,16 +126,21 @@ export function TodaysBusinessOverview() {
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="font-display text-lg font-semibold text-ink-900">
-            Today&apos;s Business Overview
-          </h2>
-          <p className="text-sm text-ink-500">
-            Platform business done today across all major services. Headline amounts
-            are <span className="font-semibold text-ink-600">completed</span> business;
-            pending &amp; failed are shown separately.
-          </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand-600 to-accent-500 text-white shadow-soft">
+            <Sparkles className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="font-display text-lg font-semibold text-ink-900">
+              Today&apos;s Business Overview
+            </h2>
+            <p className="max-w-2xl text-sm text-ink-500">
+              Platform business done today across all major services. Headline amounts
+              are <span className="font-semibold text-ink-600">completed</span> business;
+              pending &amp; failed are shown separately.
+            </p>
+          </div>
         </div>
         <button
           type="button"
@@ -148,10 +154,16 @@ export function TodaysBusinessOverview() {
       </div>
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <StatSkeleton key={i} />
-          ))}
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2 h-40 animate-pulse rounded-3xl bg-ink-100/70" />
+            <StatSkeleton />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <StatSkeleton key={i} />
+            ))}
+          </div>
         </div>
       ) : error === "load" ? (
         <div className="rounded-2xl border border-dashed border-rose-200 bg-rose-50/50 p-6 text-center text-sm text-rose-700">
@@ -164,9 +176,15 @@ export function TodaysBusinessOverview() {
         (() => {
           const links = cardLinks(data.date);
           return (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                <TotalBusinessCard data={data.total} href={links.total} />
+            <div className="space-y-4">
+              {/* Hero: total business gets prominence, growth rides alongside */}
+              <div className="grid gap-4 lg:grid-cols-3">
+                <TotalBusinessCard data={data.total} href={links.total} className="lg:col-span-2" />
+                <GrowthCard summary={data.summary} href={links.growth} />
+              </div>
+
+              {/* Per-service business — roomy row so nothing wraps awkwardly */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 <ServiceBusinessCard label="QR Today" icon={QrCode} accent="violet" data={data.qr} href={links.qr} />
                 <ServiceBusinessCard label="POS Today" icon={Monitor} accent="emerald" data={data.pos} href={links.pos} />
                 <ServiceBusinessCard label="BBPS Today" icon={ReceiptText} accent="accent" data={data.bbps} href={links.bbps} />
@@ -174,7 +192,8 @@ export function TodaysBusinessOverview() {
                 <ServiceBusinessCard label="Payout Today" icon={Landmark} accent="accent" data={data.payout} href={links.payout} />
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {/* Settlement & revenue summary strip */}
+              <div className="grid gap-4 sm:grid-cols-3">
                 <StatCard
                   label="Settled Today (net)"
                   value={formatINR(data.summary.settlementToday)}
@@ -196,9 +215,8 @@ export function TodaysBusinessOverview() {
                   accent="violet"
                   href={links.revenue}
                 />
-                <GrowthCard summary={data.summary} href={links.growth} />
               </div>
-            </>
+            </div>
           );
         })()
       ) : null}
@@ -275,67 +293,99 @@ function ServiceBusinessCard({
   return (
     <Link
       href={href}
-      className="group block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+      className="group relative block overflow-hidden rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
     >
-      <div className="flex items-start justify-between">
-        <span
-          className={cn(
-            "grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br text-white shadow-soft",
-            accents[accent]
-          )}
-        >
-          <Icon className="h-[18px] w-[18px]" />
-        </span>
-        <span className="rounded-full bg-ink-50 px-2 py-0.5 text-[11px] font-semibold text-ink-600">
-          {formatNumber(data.count)} Txn
-        </span>
+      {/* soft accent glow that blooms on hover */}
+      <div
+        className={cn(
+          "pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full bg-gradient-to-br opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-30",
+          accents[accent]
+        )}
+      />
+      <div className="relative">
+        <div className="flex items-start justify-between">
+          <span
+            className={cn(
+              "grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br text-white shadow-soft transition-transform duration-300 group-hover:scale-105",
+              accents[accent]
+            )}
+          >
+            <Icon className="h-[18px] w-[18px]" />
+          </span>
+          <span className="rounded-full bg-ink-50 px-2 py-0.5 text-[11px] font-semibold text-ink-600">
+            {formatNumber(data.count)} Txn
+          </span>
+        </div>
+        <p className="mt-3 text-[11px] font-semibold uppercase tracking-widest text-ink-500">
+          {label}
+        </p>
+        <p className="mt-0.5 font-display text-2xl font-bold text-ink-900">
+          {formatINR(data.amount)}
+        </p>
+        <StatusPills data={data} />
+        <AmountBreakdown data={data} />
       </div>
-      <p className="mt-3 text-[11px] font-semibold uppercase tracking-widest text-ink-500">
-        {label}
-      </p>
-      <p className="mt-0.5 font-display text-xl font-bold text-ink-900">
-        {formatINR(data.amount)}
-      </p>
-      <StatusPills data={data} />
-      <AmountBreakdown data={data} />
     </Link>
   );
 }
 
-function TotalBusinessCard({ data, href }: { data: ServiceToday; href: string }) {
+function TotalBusinessCard({
+  data,
+  href,
+  className,
+}: {
+  data: ServiceToday;
+  href: string;
+  className?: string;
+}) {
   return (
     <Link
       href={href}
-      className="group relative block overflow-hidden rounded-2xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-4 text-white shadow-glow transition-all hover:-translate-y-0.5 hover:shadow-glow focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+      className={cn(
+        "group relative block overflow-hidden rounded-3xl bg-gradient-to-br from-brand-700 via-brand-600 to-accent-500 p-5 text-white shadow-glow transition-all hover:-translate-y-0.5 hover:shadow-glow focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 md:p-6",
+        className
+      )}
     >
-      <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
-      <div className="flex items-start justify-between">
-        <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/15">
-          <IndianRupee className="h-[18px] w-[18px]" />
-        </span>
-        <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold">
-          {formatNumber(data.count)} Txn
-        </span>
+      {/* decorative light blooms */}
+      <div className="pointer-events-none absolute -right-14 -top-16 h-48 w-48 rounded-full bg-white/15 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
+
+      <div className="relative flex h-full flex-col justify-between gap-5 md:flex-row md:items-center">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/15 ring-1 ring-white/25 backdrop-blur">
+              <IndianRupee className="h-5 w-5" />
+            </span>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-white/80">
+              Total Business Today
+            </p>
+          </div>
+          <p className="mt-4 font-display text-3xl font-bold tracking-tight md:text-4xl">
+            {formatINR(data.amount)}
+          </p>
+          <AmountBreakdown data={data} onDark />
+        </div>
+
+        <div className="flex flex-col gap-2.5 md:items-end">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold ring-1 ring-white/20">
+            {formatNumber(data.count)} Transactions
+          </span>
+          <div className="grid grid-cols-3 gap-1.5 md:flex md:flex-col md:items-stretch">
+            <span className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white md:justify-start">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {formatNumber(data.success)} Success
+            </span>
+            <span className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white md:justify-start">
+              <Hourglass className="h-3.5 w-3.5" />
+              {formatNumber(data.pending)} Pending
+            </span>
+            <span className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white md:justify-start">
+              <XCircle className="h-3.5 w-3.5" />
+              {formatNumber(data.failed)} Failed
+            </span>
+          </div>
+        </div>
       </div>
-      <p className="mt-3 text-[11px] font-semibold uppercase tracking-widest text-white/80">
-        Total Business Today
-      </p>
-      <p className="mt-0.5 font-display text-xl font-bold">{formatINR(data.amount)}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white">
-          <CheckCircle2 className="h-3 w-3" />
-          {formatNumber(data.success)} Success
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white">
-          <Hourglass className="h-3 w-3" />
-          {formatNumber(data.pending)} Pending
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white">
-          <XCircle className="h-3 w-3" />
-          {formatNumber(data.failed)} Failed
-        </span>
-      </div>
-      <AmountBreakdown data={data} onDark />
     </Link>
   );
 }
@@ -357,9 +407,11 @@ function formatGrowth(pct: number | null, state: GrowthState): string {
 function GrowthCard({
   summary,
   href,
+  className,
 }: {
   summary: BusinessOverview["summary"];
   href: string;
+  className?: string;
 }) {
   const { growthPct, growthState } = summary;
 
@@ -372,33 +424,45 @@ function GrowthCard({
   return (
     <Link
       href={href}
-      className="group block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+      className={cn(
+        "group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-ink-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300",
+        className
+      )}
     >
       <div className="flex items-start justify-between">
         <span
           className={cn(
-            "grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br text-white shadow-soft",
+            "grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br text-white shadow-soft transition-transform duration-300 group-hover:scale-105",
             accents[accent]
           )}
         >
-          <Icon className="h-[18px] w-[18px]" />
+          <Icon className="h-5 w-5" />
         </span>
         <span
           className={cn(
-            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold",
+            "inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold",
             positive ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
           )}
         >
           vs yesterday
         </span>
       </div>
-      <p className="mt-3 text-[11px] font-semibold uppercase tracking-widest text-ink-500">
-        Yesterday vs Today Growth
-      </p>
-      <p className="mt-0.5 font-display text-xl font-bold text-ink-900">{display}</p>
-      <p className="mt-1 text-[11px] text-ink-500">
-        Yesterday: {formatINR(summary.yesterdayTotal)}
-      </p>
+      <div className="mt-4">
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-ink-500">
+          Yesterday vs Today Growth
+        </p>
+        <p
+          className={cn(
+            "mt-1 font-display text-3xl font-bold",
+            positive ? "text-emerald-600" : "text-rose-600"
+          )}
+        >
+          {display}
+        </p>
+        <p className="mt-1 text-[11px] text-ink-500">
+          Yesterday: {formatINR(summary.yesterdayTotal)}
+        </p>
+      </div>
     </Link>
   );
 }

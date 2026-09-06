@@ -3,6 +3,9 @@ import { z } from "zod";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
+import { requireStepUp, readStepUpCode } from "@/lib/security/stepUp";
+import { recordAdminActivity, readActionLocation } from "@/lib/security/adminActivity";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 import {
   recoverWalletLien,
   releaseWalletLien,
@@ -34,6 +37,19 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (!canManageLiens(admin))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  try {
+    const { code, type } = readStepUpCode(req);
+    await requireStepUp(admin, {
+      action: "wallet_lien.review",
+      code,
+      type,
+      ip: clientIp(req),
+      userAgent: req.headers.get("user-agent"),
+    });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
+
   const parsed = ActionBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -59,6 +75,17 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
         },
         ip: clientIp(req),
       },
+    });
+
+    await recordAdminActivity({
+      actor: admin,
+      req,
+      action: `wallet_lien.${parsed.data.action}`,
+      kind: "write",
+      entity: "WalletLien",
+      entityId: lien.id,
+      location: readActionLocation(req),
+      meta: { status: lien.status },
     });
 
     return NextResponse.json({ ok: true, lien: serializeLien(lien) });

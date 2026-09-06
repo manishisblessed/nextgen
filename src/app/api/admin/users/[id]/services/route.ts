@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole, AuthError } from "@/lib/auth-server";
+import { requireAdminActivity } from "@/lib/security/adminActivity";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 
@@ -46,7 +48,12 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
-    const admin = await requireRole("MASTER_ADMIN", "ADMIN", "SUPPORT");
+    const admin = await requireAdminActivity(req, {
+      action: "user.services.update",
+      roles: ["MASTER_ADMIN", "ADMIN", "SUPPORT"],
+      entity: "User",
+      entityId: params.id,
+    });
 
     const parsed = UpdateBody.safeParse(await req.json());
     if (!parsed.success)
@@ -90,9 +97,6 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
 
     return NextResponse.json({ ok: true, enabledServices });
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    console.error("[admin/users/id/services] PATCH error:", e);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return toErrorResponse(e);
   }
 }

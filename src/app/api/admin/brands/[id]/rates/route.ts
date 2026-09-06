@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRole, AuthError } from "@/lib/auth-server";
+import { requireAdminActivity } from "@/lib/security/adminActivity";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/security/audit";
 import { validateBrandRate } from "@/lib/brand/mdr";
@@ -63,11 +64,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
   const params = await props.params;
   let admin;
   try {
-    admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    admin = await requireAdminActivity(req, {
+      action: "brand_rate.create",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "BrandMdrRate",
+      entityId: params.id,
+    });
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+    return toErrorResponse(e);
   }
 
   const parsed = RateBody.safeParse(await req.json().catch(() => ({})));
@@ -154,11 +158,14 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   const params = await props.params;
   let admin;
   try {
-    admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    admin = await requireAdminActivity(req, {
+      action: "brand_rate.update",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "BrandMdrRate",
+      entityId: params.id,
+    });
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+    return toErrorResponse(e);
   }
 
   const parsed = UpdateBody.safeParse(await req.json().catch(() => ({})));
@@ -247,11 +254,14 @@ export async function DELETE(req: Request, props: { params: Promise<{ id: string
   const params = await props.params;
   let admin;
   try {
-    admin = await requireRole("MASTER_ADMIN", "ADMIN");
+    admin = await requireAdminActivity(req, {
+      action: "brand_rate.delete",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "BrandMdrRate",
+      entityId: params.id,
+    });
   } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: e.message }, { status: e.statusCode });
-    throw e;
+    return toErrorResponse(e);
   }
 
   const parsed = DeleteBody.safeParse(await req.json().catch(() => ({})));

@@ -2,15 +2,30 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { X, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { X, ChevronsLeft, ChevronsRight, ChevronDown } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { cn } from "@/lib/utils";
 import { toDisplayRole, type Role } from "@/lib/auth";
-import { navByRole, type NavGroup } from "@/lib/roles";
+import { navByRole, type NavGroup, type NavItem } from "@/lib/roles";
 import { hrefToServiceKey } from "@/lib/services/catalog";
 import { useEffectiveServices } from "@/hooks/useEffectiveServices";
+
+/** Recursively filter nav items by a predicate applied to leaf links. Parent
+ *  items (with children) are kept only if at least one child survives, so a
+ *  collapsible tab disappears entirely once all of its sub-links are hidden. */
+function filterNavItems(items: NavItem[], keep: (item: NavItem) => boolean): NavItem[] {
+  return items
+    .map((item) => {
+      if (item.children && item.children.length > 0) {
+        const children = filterNavItems(item.children, keep);
+        return children.length > 0 ? { ...item, children } : null;
+      }
+      return keep(item) ? item : null;
+    })
+    .filter((x): x is NavItem => x !== null);
+}
 
 export function Sidebar({
   open,
@@ -56,16 +71,14 @@ export function Sidebar({
         "/dashboard/master-admin/",
         "/dashboard/sub-admin/",
       ];
+      const matchTab = (item: NavItem) => {
+        const prefix = prefixes.find((p) => item.href.startsWith(p));
+        if (!prefix) return true;
+        const slug = item.href.slice(prefix.length).split("/")[0];
+        return allowedTabs.includes(slug);
+      };
       base = base
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) => {
-            const prefix = prefixes.find((p) => item.href.startsWith(p));
-            if (!prefix) return true;
-            const slug = item.href.slice(prefix.length).split("/")[0];
-            return allowedTabs.includes(slug);
-          }),
-        }))
+        .map((group) => ({ ...group, items: filterNavItems(group.items, matchTab) }))
         .filter((group) => group.items.length > 0);
     }
 
@@ -73,15 +86,13 @@ export function Sidebar({
     // globally and for this user (default-disabled allowlist).
     if (!isStaff) {
       const allowed = effectiveServices ?? new Set<string>();
+      const matchService = (item: NavItem) => {
+        const key = hrefToServiceKey(item.href);
+        if (!key) return true;
+        return allowed.has(key);
+      };
       base = base
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) => {
-            const key = hrefToServiceKey(item.href);
-            if (!key) return true;
-            return allowed.has(key);
-          }),
-        }))
+        .map((group) => ({ ...group, items: filterNavItems(group.items, matchService) }))
         .filter((group) => group.items.length > 0);
     }
 
@@ -99,7 +110,7 @@ export function Sidebar({
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-ink-100 bg-white transition-all duration-300 lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-ink-100 bg-white transition-all duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
           collapsed ? "lg:w-[72px]" : "lg:w-72",
           "w-72"
@@ -135,49 +146,25 @@ export function Sidebar({
               )}
               {collapsed && <div className="mb-2 mx-auto h-px w-8 bg-ink-100" />}
               <ul className="space-y-1">
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const active =
-                    pathname === item.href ||
-                    (item.href !== "/dashboard" && pathname.startsWith(item.href));
-                  return (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        onClick={onClose}
-                        title={collapsed ? item.label : undefined}
-                        className={cn(
-                          "group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200",
-                          collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
-                          active
-                            ? "bg-brand-600 text-white shadow-soft"
-                            : "text-ink-700 hover:bg-ink-100 hover:text-ink-900",
-                          !collapsed && !active && "hover:translate-x-0.5"
-                        )}
-                      >
-                        <Icon
-                          className={cn(
-                            "h-4 w-4 shrink-0",
-                            active ? "text-white" : "text-ink-500 group-hover:text-ink-700"
-                          )}
-                        />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                        {!collapsed && item.badge && (
-                          <span
-                            className={cn(
-                              "ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold",
-                              active
-                                ? "bg-white/20 text-white"
-                                : "bg-accent-100 text-accent-700"
-                            )}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                      </Link>
-                    </li>
-                  );
-                })}
+                {group.items.map((item) =>
+                  item.children && item.children.length > 0 ? (
+                    <CollapsibleNavItem
+                      key={item.href}
+                      item={item}
+                      pathname={pathname}
+                      collapsed={collapsed}
+                      onClose={onClose}
+                    />
+                  ) : (
+                    <NavLeaf
+                      key={item.href}
+                      item={item}
+                      pathname={pathname}
+                      collapsed={collapsed}
+                      onClose={onClose}
+                    />
+                  )
+                )}
               </ul>
             </div>
           ))}
@@ -217,5 +204,149 @@ export function Sidebar({
         </div>
       </aside>
     </>
+  );
+}
+
+function isItemActive(item: NavItem, pathname: string): boolean {
+  return (
+    pathname === item.href ||
+    (item.href !== "/dashboard" && pathname.startsWith(item.href))
+  );
+}
+
+/** A single leaf link row in the sidebar. */
+function NavLeaf({
+  item,
+  pathname,
+  collapsed,
+  onClose,
+}: {
+  item: NavItem;
+  pathname: string;
+  collapsed: boolean;
+  onClose: () => void;
+}) {
+  const Icon = item.icon;
+  const active = isItemActive(item, pathname);
+  return (
+    <li>
+      <Link
+        href={item.href}
+        onClick={onClose}
+        title={collapsed ? item.label : undefined}
+        className={cn(
+          "group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200",
+          collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
+          active
+            ? "bg-brand-600 text-white shadow-soft"
+            : "text-ink-700 hover:bg-ink-100 hover:text-ink-900",
+          !collapsed && !active && "hover:translate-x-0.5"
+        )}
+      >
+        <Icon
+          className={cn(
+            "h-4 w-4 shrink-0",
+            active ? "text-white" : "text-ink-500 group-hover:text-ink-700"
+          )}
+        />
+        {!collapsed && <span className="truncate">{item.label}</span>}
+        {!collapsed && item.badge && (
+          <span
+            className={cn(
+              "ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold",
+              active ? "bg-white/20 text-white" : "bg-accent-100 text-accent-700"
+            )}
+          >
+            {item.badge}
+          </span>
+        )}
+      </Link>
+    </li>
+  );
+}
+
+/** A collapsible parent tab whose children are individual leaf links. When the
+ *  sidebar is collapsed to icons, children are flattened to individual icon
+ *  rows so every service stays reachable with a single click. */
+function CollapsibleNavItem({
+  item,
+  pathname,
+  collapsed,
+  onClose,
+}: {
+  item: NavItem;
+  pathname: string;
+  collapsed: boolean;
+  onClose: () => void;
+}) {
+  const children = item.children ?? [];
+  const childActive = children.some((c) => isItemActive(c, pathname));
+  const [open, setOpen] = useState(childActive);
+
+  // Auto-expand when navigating into one of the children.
+  useEffect(() => {
+    if (childActive) setOpen(true);
+  }, [childActive]);
+
+  const Icon = item.icon;
+
+  if (collapsed) {
+    return (
+      <>
+        {children.map((child) => (
+          <NavLeaf
+            key={child.href}
+            item={child}
+            pathname={pathname}
+            collapsed={collapsed}
+            onClose={onClose}
+          />
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cn(
+          "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+          childActive
+            ? "text-brand-700 hover:bg-ink-100"
+            : "text-ink-700 hover:bg-ink-100 hover:text-ink-900",
+          !childActive && "hover:translate-x-0.5"
+        )}
+      >
+        <Icon
+          className={cn(
+            "h-4 w-4 shrink-0",
+            childActive ? "text-brand-600" : "text-ink-500 group-hover:text-ink-700"
+          )}
+        />
+        <span className="truncate">{item.label}</span>
+        <ChevronDown
+          className={cn(
+            "ml-auto h-4 w-4 shrink-0 text-ink-400 transition-transform duration-200",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && (
+        <ul className="mt-1 ml-4 space-y-1 border-l border-ink-100 pl-2">
+          {children.map((child) => (
+            <NavLeaf
+              key={child.href}
+              item={child}
+              pathname={pathname}
+              collapsed={collapsed}
+              onClose={onClose}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }

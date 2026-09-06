@@ -48,6 +48,17 @@ model User {
   twoFactorBackupCodes String[]   @default([]) // bcrypt-hashed single-use recovery codes
   twoFactorVerifiedAt  DateTime? // when 2FA was first confirmed
 
+  // ── TPIN login (2FA-exempt accounts) ─────────────────────────────────────
+  // A master-admin may exempt a specific user from the mandatory-2FA gate and
+  // permit login using their transaction PIN as the second factor. This is a
+  // deliberate security downgrade (a 4–6 digit PIN is weaker than TOTP), so the
+  // user must explicitly accept the risk and the acceptance is recorded. Only a
+  // MASTER_ADMIN can flip these; ADMIN cannot. See src/app/api/auth/login.
+  twoFactorExempt        Boolean   @default(false) // master-admin waived mandatory 2FA
+  pinLoginEnabled        Boolean   @default(false) // may authenticate with TPIN instead of TOTP
+  pinLoginRiskAcceptedAt DateTime? // when the user accepted the no-2FA liability
+  pinLoginRiskAcceptedIp String?   // IP that accepted the liability (audit)
+
   // Server-side session invalidation. Every issued JWT carries the tokenVersion
   // it was minted with; the jwt/session callbacks reject any token whose version
   // != this value. Incrementing it (logout, role/status change, forced sign-out)
@@ -106,7 +117,9 @@ model User {
   children User[]  @relation("Hierarchy")
 
   // org / shop info
-  shopName    String?   @unique
+  // shopName uniqueness is enforced in the application layer (see Kyc note) so a
+  // master-admin can grant value-scoped IdentityException rows for it too.
+  shopName    String?
   shopAddress String?
   pincode     String?
   state       String?
@@ -223,6 +236,7 @@ model User {
   @@index([status])
   @@index([schemeId])
   @@index([reKycRequired])
+  @@index([shopName])
 }
 
 model Session {
@@ -288,23 +302,28 @@ model Kyc {
   userId            String    @unique
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   status            KycStatus @default(NOT_STARTED)
-  panNumber         String?   @unique
+  // NOTE: PAN / Aadhaar / bank / GST / MSME uniqueness is NOT enforced by a DB
+  // unique index. It is enforced in the application layer (onboard verify +
+  // register + kyc routes) so a master-admin can grant value-scoped
+  // IdentityException rows that permit the SAME identity across up to four tier
+  // accounts. Non-unique indexes below keep the duplicate lookups fast.
+  panNumber         String?
   panVerifiedAt     DateTime?
   panName           String?
   aadhaarLast4      String?
   aadhaarVerifiedAt DateTime?
-  aadhaarNumber     String?   @unique
+  aadhaarNumber     String?
   aadhaarName       String?
   aadhaarDob        String?
   aadhaarGender     String?
   aadhaarAddress    String?
   aadhaarMobile     String? // Aadhaar-registered mobile for records
   bankAccountName   String?
-  bankAccountNumber String?   @unique
+  bankAccountNumber String?
   bankIfsc          String?
   bankAccountStatus String? // active | inactive
-  gstin             String?   @unique
-  msmeNumber        String?   @unique
+  gstin             String?
+  msmeNumber        String?
   nameMismatch      Boolean   @default(false)
   // Set when the applicant self-declares (via popup) that the differing
   // Aadhaar/PAN/Bank names all belong to them. Such accounts always require
@@ -318,6 +337,64 @@ model Kyc {
   submittedAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+
+  @@index([panNumber])
+  @@index([aadhaarNumber])
+  @@index([bankAccountNumber])
+  @@index([gstin])
+  @@index([msmeNumber])
+}
+
+// ---------- Identity duplicate exceptions (master-admin controlled) ----------
+// By default every PAN / Aadhaar / bank account / GST / Udyam / shop name is
+// unique across the platform (fraud prevention). A master-admin may grant a
+// value-scoped exception so the SAME identity can be reused to onboard up to
+// FOUR accounts — one per network tier (SUPER_DISTRIBUTOR, MASTER_DISTRIBUTOR,
+// DISTRIBUTOR, RETAILER). Enforcement is per-row: one approved row unlocks ONE
+// (field, value, role) combination. The @@unique below guarantees one-per-tier;
+// counting APPROVED rows for a (field, value) enforces the max-of-four cap.
+
+enum IdentityField {
+  PAN
+  AADHAAR
+  BANK_ACCOUNT
+  GSTIN
+  MSME
+  SHOP_NAME
+}
+
+enum IdentityExceptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+model IdentityException {
+  id            String                  @id @default(cuid())
+  field         IdentityField
+  value         String // the exact identity value this exception unlocks (value-scoped)
+  role          Role // the ONE tier this row unlocks: SD | MD | DT | RT
+  // Once the account is created it is linked here; before that the exception is
+  // tied to the onboarding invite so verify/register can find it.
+  userId        String?
+  inviteId      String?
+  // The existing account this identity collides with (for the audit trail).
+  linkedUserId  String?
+  status        IdentityExceptionStatus @default(PENDING)
+  reason        String
+  requestedById String?
+  approvedById  String? // MASTER_ADMIN only
+  approvedAt    DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  // One approved row per tier per identity value → one-per-tier guarantee.
+  @@unique([field, value, role])
+  @@index([field, value, status])
+  @@index([inviteId])
+  @@index([userId])
+  @@index([status, createdAt])
 }
 
 // ---------- Monthly Re-KYC audit trail (Phase 13) ----------
@@ -954,10 +1031,24 @@ model AuditLog {
   meta      Json?
   ip        String?
   userAgent String?
+  // ── Actor + geo snapshot (admin activity control) ────────────────────────
+  // actorName/actorRole are snapshotted at write time so the historical record
+  // survives a later rename/deletion of the acting user (the userId FK alone is
+  // not durable enough for a compliance trail). lat/lng/locationAccuracy record
+  // WHERE the action was performed (browser geolocation on writes; last-login
+  // location as fallback). kind = "write" | "read" to distinguish step-up-gated
+  // mutations from sensitive page views.
+  actorName        String?
+  actorRole        String?
+  lat              Float?
+  lng              Float?
+  locationAccuracy Float?
+  kind             String?
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
   @@index([action, createdAt])
+  @@index([actorRole, createdAt])
 }
 
 model Notification {
@@ -2283,6 +2374,10 @@ model QrClaim {
   reviewedBy   User?     @relation("QrClaimReviewer", fields: [reviewedById], references: [id])
   reviewedAt   DateTime?
   reviewNote   String?
+  // Structured rejection reasons (multi-select). reviewNote remains the composed
+  // human-readable summary shown to the retailer; this array powers filtering
+  // and reporting. Empty for non-rejected claims.
+  rejectionReasons String[] @default([])
   // Admin attestation that the UTR was found in the provider's merchant portal.
   portalVerified Boolean @default(false)
 

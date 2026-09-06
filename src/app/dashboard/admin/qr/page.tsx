@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { Input, Label } from "@/components/ui/Input";
+import { useStepUp } from "@/components/security/StepUpProvider";
+import { QR_REJECTION_REASONS } from "@/lib/qr/rejectionReasons";
 import { formatINR } from "@/lib/utils";
 
 type Overview = {
@@ -88,6 +90,7 @@ type QrRow = {
 // ---------------------------------------------------------------------------
 
 function ReviewQueueTab() {
+  const { fetchWithStepUp } = useStepUp();
   const [claims, setClaims] = useState<ClaimRow[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [threshold, setThreshold] = useState(10000);
@@ -98,7 +101,11 @@ function ReviewQueueTab() {
   const [selected, setSelected] = useState<ClaimRow | null>(null);
   const [portalVerified, setPortalVerified] = useState(false);
   const [note, setNote] = useState("");
+  const [reasons, setReasons] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const toggleReason = (value: string) =>
+    setReasons((prev) => (prev.includes(value) ? prev.filter((r) => r !== value) : [...prev, value]));
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -125,21 +132,30 @@ function ReviewQueueTab() {
     setSelected(c);
     setPortalVerified(false);
     setNote("");
+    setReasons([]);
   }
 
   async function act(action: "approve" | "reject") {
     if (!selected) return;
-    if (action === "reject" && note.trim().length < 3) {
-      toast.error("A rejection note is required (shown to the retailer).");
-      return;
+    if (action === "reject") {
+      if (reasons.length === 0 && note.trim().length < 3) {
+        toast.error("Select at least one reason, or add a note (shown to the retailer).");
+        return;
+      }
+      if (reasons.length === 1 && reasons[0] === "OTHER" && note.trim().length < 3) {
+        toast.error("Add a note when the only reason is 'Other'.");
+        return;
+      }
     }
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/qr/claims/${selected.id}/${action}`, {
+      const res = await fetchWithStepUp(`/api/admin/qr/claims/${selected.id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          action === "approve" ? { portalVerified, note: note.trim() || undefined } : { note: note.trim() }
+          action === "approve"
+            ? { portalVerified, note: note.trim() || undefined }
+            : { reasons, note: note.trim() || undefined }
         ),
       });
       const d = await res.json();
@@ -394,13 +410,39 @@ function ReviewQueueTab() {
               </span>
             </label>
             <div>
-              <Label htmlFor="review-note">Note {`(required to reject)`}</Label>
+              <p className="text-xs font-semibold text-ink-700">Rejection reasons (select one or more)</p>
+              <p className="mb-2 text-[11px] text-ink-500">Shown to the retailer. Required to reject.</p>
+              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {QR_REJECTION_REASONS.map((r) => (
+                  <label
+                    key={r.value}
+                    className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 text-xs ${
+                      reasons.includes(r.value)
+                        ? "border-brand-400 bg-brand-50 text-ink-800"
+                        : "border-ink-200 bg-white text-ink-600 hover:border-ink-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={reasons.includes(r.value)}
+                      onChange={() => toggleReason(r.value)}
+                      className="mt-0.5 h-3.5 w-3.5 accent-brand-600"
+                    />
+                    <span>{r.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="review-note">
+                Note {reasons.includes("OTHER") ? "(required for 'Other')" : "(optional for reject / approve)"}
+              </Label>
               <Input
                 id="review-note"
                 value={note}
                 maxLength={500}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="e.g. Verified in portal / UTR not found in portal"
+                placeholder="e.g. Verified in portal / additional detail for the retailer"
               />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -474,6 +516,7 @@ const QR_STATE_BADGE: Record<QrState, { variant: "success" | "brand" | "warning"
 };
 
 function QrManageTab() {
+  const { fetchWithStepUp } = useStepUp();
   const [qrs, setQrs] = useState<QrRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -531,7 +574,7 @@ function QrManageTab() {
     if (!image) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/admin/qr", {
+      const res = await fetchWithStepUp("/api/admin/qr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -565,7 +608,7 @@ function QrManageTab() {
   }
 
   async function patchQr(id: string, body: Record<string, unknown>): Promise<boolean> {
-    const res = await fetch(`/api/admin/qr/${id}`, {
+    const res = await fetchWithStepUp(`/api/admin/qr/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
