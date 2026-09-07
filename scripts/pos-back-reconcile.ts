@@ -25,6 +25,11 @@
  * Idempotent: safe to re-run. handlePosReversal is idempotent and the mirror
  * upsert is keyed on the canonical transactionRef.
  */
+
+// Mark this file as a module so its top-level `main` is scoped here and does
+// not collide with the `main` declared in other standalone scripts (TS2393).
+export {};
+
 try {
   (process as unknown as { loadEnvFile?: (p?: string) => void }).loadEnvFile?.();
 } catch {
