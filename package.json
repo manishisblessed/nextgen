@@ -17,6 +17,7 @@
     "backfill:service-vendor": "tsx scripts/backfill-service-vendor.ts",
     "backfill:network-services": "tsx scripts/backfill-network-services.ts",
     "audit:pos-classification": "tsx scripts/audit-pos-classification.ts",
+    "recon:pos-reversals": "tsx scripts/pos-back-reconcile.ts",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
