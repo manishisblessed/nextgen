@@ -27,6 +27,8 @@ import {
   ArrowRight,
   Pencil,
   Eye,
+  XCircle,
+  Clock,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -159,7 +161,35 @@ function fmtTime(iso: string) {
 }
 
 // ── Tab types ──
-type Tab = "machines" | "transactions" | "tracking";
+type Tab = "transactions" | "pending" | "failed" | "reversals" | "machines" | "tracking";
+
+const ADMIN_POS_TABS: { id: Tab; label: string; icon: typeof ArrowLeftRight }[] = [
+  { id: "transactions", label: "Live Transactions", icon: ArrowLeftRight },
+  { id: "pending", label: "Pending", icon: Clock },
+  { id: "failed", label: "Failed Transactions", icon: XCircle },
+  { id: "reversals", label: "Reversals & Voids", icon: RotateCcw },
+  { id: "machines", label: "POS Machines", icon: Monitor },
+  { id: "tracking", label: "Tracking Report", icon: History },
+];
+
+// A "view" over the transaction feed — each tab pins the feed to a set of
+// statuses and supplies the labels/accents so one component serves all three.
+type TxnView = {
+  key: string;
+  statuses: PosTransactionStatus[];
+  noun: string;
+  liveWord: string;
+  icon: typeof ArrowLeftRight;
+  countAccent: "brand" | "emerald" | "violet" | "accent";
+  volAccent: "brand" | "emerald" | "violet" | "accent";
+};
+
+const TXN_VIEWS: Record<"captured" | "pending" | "failed" | "reversals", TxnView> = {
+  captured: { key: "captured", statuses: ["CAPTURED"], noun: "Captured", liveWord: "captured", icon: ArrowLeftRight, countAccent: "brand", volAccent: "emerald" },
+  pending: { key: "pending", statuses: ["AUTHORIZED"], noun: "Pending", liveWord: "pending / authorized", icon: Clock, countAccent: "accent", volAccent: "brand" },
+  failed: { key: "failed", statuses: ["FAILED"], noun: "Failed", liveWord: "failed", icon: XCircle, countAccent: "accent", volAccent: "violet" },
+  reversals: { key: "reversals", statuses: ["REFUNDED", "VOIDED"], noun: "Reversed", liveWord: "reversed / voided", icon: RotateCcw, countAccent: "violet", volAccent: "accent" },
+};
 
 export default function AdminPosPage() {
   const [activeTab, setActiveTab] = useState<Tab>("transactions");
@@ -173,31 +203,33 @@ export default function AdminPosPage() {
       />
 
       {/* Tabs */}
-      <div className="inline-flex w-full max-w-2xl gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
-        {(["transactions", "machines", "tracking"] as const).map((tab) => (
+      <div className="inline-flex w-full max-w-6xl gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
+        {ADMIN_POS_TABS.map(({ id, label, icon: Icon }) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+            key={id}
+            onClick={() => setActiveTab(id)}
             className={cn(
-              "flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all",
-              activeTab === tab
+              "flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all",
+              activeTab === id
                 ? "bg-white text-ink-900 shadow-sm ring-1 ring-ink-100"
                 : "text-ink-500 hover:text-ink-700"
             )}
           >
-            {tab === "transactions" ? (
-              <span className="flex items-center justify-center gap-2"><ArrowLeftRight className="h-4 w-4" /> Live Transactions</span>
-            ) : tab === "machines" ? (
-              <span className="flex items-center justify-center gap-2"><Monitor className="h-4 w-4" /> POS Machines</span>
-            ) : (
-              <span className="flex items-center justify-center gap-2"><History className="h-4 w-4" /> Tracking Report</span>
-            )}
+            <span className="flex items-center justify-center gap-2">
+              <Icon className="h-4 w-4 shrink-0" /> {label}
+            </span>
           </button>
         ))}
       </div>
 
       {activeTab === "transactions" ? (
-        <TransactionsTab />
+        <TransactionsTab view={TXN_VIEWS.captured} />
+      ) : activeTab === "pending" ? (
+        <TransactionsTab view={TXN_VIEWS.pending} />
+      ) : activeTab === "failed" ? (
+        <TransactionsTab view={TXN_VIEWS.failed} />
+      ) : activeTab === "reversals" ? (
+        <TransactionsTab view={TXN_VIEWS.reversals} />
       ) : activeTab === "machines" ? (
         <MachinesTab />
       ) : (
@@ -869,13 +901,14 @@ function AssignModal({
 // TRANSACTIONS TAB — refreshes every 1 second
 // ═══════════════════════════════════════════════════════════════════════
 
-function TransactionsTab() {
+function TransactionsTab({ view }: { view: TxnView }) {
+  const isCapturedView = view.key === "captured";
+  const statusParam = view.statuses.join(",");
   const today = todayRange();
   const defaults = defaultDateRange();
   // Draft filters — bound to the inputs. Nothing queries until "Search".
   const [dateFrom, setDateFrom] = useState(defaults.from);
   const [dateTo, setDateTo] = useState(defaults.to);
-  const [statusFilter, setStatusFilter] = useState<PosTransactionStatus | "">("");
   const [modeFilter, setModeFilter] = useState<PosPaymentMode | "">("");
   const [terminalFilter, setTerminalFilter] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
@@ -898,34 +931,33 @@ function TransactionsTab() {
   const [applied, setApplied] = useState({
     dateFrom: defaults.from,
     dateTo: defaults.to,
-    status: "" as PosTransactionStatus | "",
     mode: "" as PosPaymentMode | "",
     terminal: "",
     company: "",
   });
 
   const applySearch = useCallback(() => {
-    setApplied({ dateFrom, dateTo, status: statusFilter, mode: modeFilter, terminal: terminalFilter, company: companyFilter });
+    setApplied({ dateFrom, dateTo, mode: modeFilter, terminal: terminalFilter, company: companyFilter });
     setPage(1);
     setSearchNonce((n) => n + 1);
-  }, [dateFrom, dateTo, statusFilter, modeFilter, terminalFilter, companyFilter]);
+  }, [dateFrom, dateTo, modeFilter, terminalFilter, companyFilter]);
 
   const applyToday = useCallback(() => {
     setDateFrom(today.from);
     setDateTo(today.to);
-    setApplied({ dateFrom: today.from, dateTo: today.to, status: statusFilter, mode: modeFilter, terminal: terminalFilter, company: companyFilter });
+    setApplied({ dateFrom: today.from, dateTo: today.to, mode: modeFilter, terminal: terminalFilter, company: companyFilter });
     setPage(1);
     setSearchNonce((n) => n + 1);
-  }, [today.from, today.to, statusFilter, modeFilter, terminalFilter, companyFilter]);
+  }, [today.from, today.to, modeFilter, terminalFilter, companyFilter]);
 
   // Company applies instantly on selection (no Search click needed). It still
   // won't auto-poll, so this is a single load — no rate-limit risk.
   const applyCompany = useCallback((company: string) => {
     setCompanyFilter(company);
-    setApplied({ dateFrom, dateTo, status: statusFilter, mode: modeFilter, terminal: terminalFilter, company });
+    setApplied({ dateFrom, dateTo, mode: modeFilter, terminal: terminalFilter, company });
     setPage(1);
     setSearchNonce((n) => n + 1);
-  }, [dateFrom, dateTo, statusFilter, modeFilter, terminalFilter]);
+  }, [dateFrom, dateTo, modeFilter, terminalFilter]);
 
   // Live feed via SSE (server pushes from the local mirror — no polling, and no
   // partner API on the hot path, so company/multi-terminal views are live too).
@@ -938,7 +970,7 @@ function TransactionsTab() {
     page_size: "50",
     _n: String(searchNonce),
   };
-  if (applied.status) streamQuery.status = applied.status;
+  streamQuery.status = statusParam;
   if (applied.mode) streamQuery.payment_mode = applied.mode;
   if (applied.terminal) streamQuery.terminal_id = applied.terminal;
   if (applied.company) streamQuery.company = applied.company;
@@ -989,7 +1021,7 @@ function TransactionsTab() {
       body: JSON.stringify({
         date_from: `${applied.dateFrom}T00:00:00.000Z`,
         date_to: `${applied.dateTo}T23:59:59.999Z`,
-        status: applied.status || null,
+        status: view.statuses,
         payment_mode: applied.mode || null,
         terminal_id: applied.terminal || null,
         company: applied.company || null,
@@ -1005,12 +1037,12 @@ function TransactionsTab() {
       toast.warning(`Report capped at ${Number(d.returned).toLocaleString("en-IN")} rows — narrow the date range for the rest.`);
     }
     return (d.rows as PosTransaction[]) ?? [];
-  }, [applied, transactions]);
+  }, [applied, view.statuses, transactions]);
 
   const reportSubtitle =
     `${applied.dateFrom} to ${applied.dateTo}` +
     (applied.company ? ` · ${applied.company}` : "") +
-    (applied.status ? ` · ${applied.status}` : "") +
+    ` · ${view.statuses.join(" / ")}` +
     (applied.mode ? ` · ${applied.mode}` : "") +
     (applied.terminal ? ` · TID ${applied.terminal}` : "");
 
@@ -1044,9 +1076,28 @@ function TransactionsTab() {
     <div className="min-w-0 space-y-6">
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Transactions" value={summary ? String(summary.total_transactions) : "..."} icon={ArrowLeftRight} accent="brand" />
-        <StatCard label="Total Volume" value={summary ? formatINR(parseFloat(summary.total_amount)) : "..."} icon={IndianRupee} accent="emerald" />
-        <StatCard label="Captured" value={summary ? String(summary.captured_count) : "..."} icon={CreditCard} accent="violet" />
+        <StatCard
+          label={`${view.noun} Transactions`}
+          value={summary ? String(summary.total_transactions) : "..."}
+          icon={view.icon}
+          accent={view.countAccent}
+        />
+        <StatCard
+          label={`${view.noun} Volume`}
+          value={summary ? formatINR(parseFloat(summary.total_amount)) : "..."}
+          icon={IndianRupee}
+          accent={view.volAccent}
+        />
+        <StatCard
+          label={isCapturedView ? "Captured" : "Terminals (in view)"}
+          value={
+            summary
+              ? String(isCapturedView ? summary.captured_count : summary.terminal_count)
+              : "..."
+          }
+          icon={isCapturedView ? CreditCard : Monitor}
+          accent="violet"
+        />
         <StatCard label="Total Terminals" value={totalMachines != null ? String(totalMachines) : "..."} icon={Monitor} accent="accent" />
       </div>
 
@@ -1062,7 +1113,9 @@ function TransactionsTab() {
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
             </span>
             <span className="text-xs font-semibold text-emerald-700">
-              {applied.company ? `Live — ${applied.company}` : "Live — streaming"}
+              {applied.company
+                ? `Live — ${applied.company} · ${view.liveWord}`
+                : `Live — ${view.liveWord} only`}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1080,8 +1133,8 @@ function TransactionsTab() {
               ))}
             </select>
             <ReportActions<PosTransaction>
-              filename={`pos-transactions-${applied.dateFrom}-to-${applied.dateTo}`}
-              title="POS Transactions Report"
+              filename={`pos-${view.key}-${applied.dateFrom}-to-${applied.dateTo}`}
+              title={`${view.noun} POS Transactions Report`}
               subtitle={reportSubtitle}
               columns={exportCols}
               rows={transactions}
@@ -1090,7 +1143,7 @@ function TransactionsTab() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <div className="min-w-0">
             <label className="mb-1 block text-xs font-semibold text-ink-500">From</label>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
@@ -1102,18 +1155,6 @@ function TransactionsTab() {
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") applySearch(); }}
               className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400" />
-          </div>
-          <div className="min-w-0">
-            <label className="mb-1 block text-xs font-semibold text-ink-500">Status</label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as PosTransactionStatus | "")}
-              className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400">
-              <option value="">All</option>
-              <option value="CAPTURED">Captured</option>
-              <option value="AUTHORIZED">Authorized</option>
-              <option value="FAILED">Failed</option>
-              <option value="REFUNDED">Refunded</option>
-              <option value="VOIDED">Voided</option>
-            </select>
           </div>
           <div className="min-w-0">
             <label className="mb-1 block text-xs font-semibold text-ink-500">Mode</label>
@@ -1159,7 +1200,7 @@ function TransactionsTab() {
         <ErrorBanner message={error instanceof Error ? error.message : "Failed to load transactions."} />
       ) : (
         <DataTable
-          title="POS Transactions"
+          title={`${view.noun} POS Transactions`}
           description={
             pagination
               ? `${pagination.total_records} total · page ${pagination.page} of ${pagination.total_pages}`
@@ -1171,7 +1212,7 @@ function TransactionsTab() {
           data={transactions}
           loading={isLoading && transactions.length === 0}
           loadingRows={8}
-          empty="No transactions for the selected filters."
+          empty={`No ${view.noun.toLowerCase()} transactions for the selected filters.`}
         />
       )}
 
