@@ -36,7 +36,7 @@ import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { cn, formatINR } from "@/lib/utils";
+import { cn, formatINR, istToday, istDaysAgo, istDayRangeUtc } from "@/lib/utils";
 import { posClassificationLabel } from "@/lib/pos/classification";
 import { type ReportColumn } from "@/lib/reports";
 import { ReportActions } from "@/components/dashboard/ReportActions";
@@ -82,15 +82,14 @@ async function postFetcher<T>([url, body]: readonly [string, unknown]): Promise<
   return json as T;
 }
 
+// Date pickers work in the IST business day (matching the payin monitor's IST
+// reset), so the default 30-day window and "Today" resolve to IST calendar days.
 function defaultDateRange() {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - 30);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+  return { from: istDaysAgo(30), to: istToday() };
 }
 
 function todayRange() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istToday();
   return { from: today, to: today };
 }
 
@@ -681,9 +680,10 @@ function TransactionsTab({ view }: { view: TxnView }) {
     ? assignedAtDate
     : dateFrom;
 
+  const feedRange = istDayRangeUtc(clampedDateFrom, dateTo);
   const body = {
-    date_from: `${clampedDateFrom}T00:00:00.000Z`,
-    date_to: `${dateTo}T23:59:59.999Z`,
+    date_from: feedRange.from,
+    date_to: feedRange.to,
     status: view.statuses,
     payment_mode: modeFilter || null,
     terminal_id: activeTerminal || null,
@@ -755,12 +755,13 @@ function TransactionsTab({ view }: { view: TxnView }) {
   // complete (the server paginates the partner feed), not just this page.
   // Uses the same day boundaries as the live feed so "Today" includes today.
   const fetchAllRows = useCallback(async (): Promise<PosTransaction[]> => {
+    const range = istDayRangeUtc(clampedDateFrom, dateTo);
     const res = await fetch("/api/pos/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        date_from: `${clampedDateFrom}T00:00:00.000Z`,
-        date_to: `${dateTo}T23:59:59.999Z`,
+        date_from: range.from,
+        date_to: range.to,
         status: view.statuses,
         payment_mode: modeFilter || null,
         terminal_id: activeTerminal || null,

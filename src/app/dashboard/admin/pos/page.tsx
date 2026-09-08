@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { AssignUserPicker, type PickerUser } from "@/components/ui/AssignUserPicker";
-import { cn, formatINR } from "@/lib/utils";
+import { cn, formatINR, istToday, istDaysAgo, istDayRangeUtc } from "@/lib/utils";
 import { posClassificationLabel } from "@/lib/pos/classification";
 import { type ReportColumn } from "@/lib/reports";
 import { ReportActions } from "@/components/dashboard/ReportActions";
@@ -123,15 +123,14 @@ function usePosFeedStream(query: Record<string, string>, enabled: boolean) {
 
 // ── Helpers ──
 
+// Date pickers work in the IST business day (matching the payin monitor's IST
+// reset), so the default 30-day window and "Today" resolve to IST calendar days.
 function defaultDateRange() {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - 30);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+  return { from: istDaysAgo(30), to: istToday() };
 }
 
 function todayRange() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istToday();
   return { from: today, to: today };
 }
 
@@ -963,9 +962,10 @@ function TransactionsTab({ view }: { view: TxnView }) {
   // partner API on the hot path, so company/multi-terminal views are live too).
   // `_n` (searchNonce) is included so an explicit Search/Today reopens the
   // stream even when the filters are unchanged.
+  const appliedRange = istDayRangeUtc(applied.dateFrom, applied.dateTo);
   const streamQuery: Record<string, string> = {
-    date_from: `${applied.dateFrom}T00:00:00.000Z`,
-    date_to: `${applied.dateTo}T23:59:59.999Z`,
+    date_from: appliedRange.from,
+    date_to: appliedRange.to,
     page: String(page),
     page_size: "50",
     _n: String(searchNonce),
@@ -1015,12 +1015,13 @@ function TransactionsTab({ view }: { view: TxnView }) {
   // partner feed) so CSV / PDF / ZIP downloads are complete, not just this page.
   // Uses the same day boundaries as the live feed so "Today" includes today.
   const fetchAllRows = useCallback(async (): Promise<PosTransaction[]> => {
+    const range = istDayRangeUtc(applied.dateFrom, applied.dateTo);
     const res = await fetch("/api/pos/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        date_from: `${applied.dateFrom}T00:00:00.000Z`,
-        date_to: `${applied.dateTo}T23:59:59.999Z`,
+        date_from: range.from,
+        date_to: range.to,
         status: view.statuses,
         payment_mode: applied.mode || null,
         terminal_id: applied.terminal || null,
