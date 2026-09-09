@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { AssignUserPicker, type PickerUser } from "@/components/ui/AssignUserPicker";
-import { cn, formatINR, istToday, istDaysAgo, istDayRangeUtc } from "@/lib/utils";
+import { cn, formatINR, istToday, istDayRangeUtc } from "@/lib/utils";
 import { posClassificationLabel } from "@/lib/pos/classification";
 import { type ReportColumn } from "@/lib/reports";
 import { ReportActions } from "@/components/dashboard/ReportActions";
@@ -124,11 +124,7 @@ function usePosFeedStream(query: Record<string, string>, enabled: boolean) {
 // ── Helpers ──
 
 // Date pickers work in the IST business day (matching the payin monitor's IST
-// reset), so the default 30-day window and "Today" resolve to IST calendar days.
-function defaultDateRange() {
-  return { from: istDaysAgo(30), to: istToday() };
-}
-
+// reset), so the default window and "Today" resolve to IST calendar days.
 function todayRange() {
   const today = istToday();
   return { from: today, to: today };
@@ -904,10 +900,10 @@ function TransactionsTab({ view }: { view: TxnView }) {
   const isCapturedView = view.key === "captured";
   const statusParam = view.statuses.join(",");
   const today = todayRange();
-  const defaults = defaultDateRange();
-  // Draft filters — bound to the inputs. Nothing queries until "Search".
-  const [dateFrom, setDateFrom] = useState(defaults.from);
-  const [dateTo, setDateTo] = useState(defaults.to);
+  // Draft filters — bound to the inputs. Default to today's IST business day so
+  // the tab opens on today's transactions; the 30-day window is available on demand.
+  const [dateFrom, setDateFrom] = useState(today.from);
+  const [dateTo, setDateTo] = useState(today.to);
   const [modeFilter, setModeFilter] = useState<PosPaymentMode | "">("");
   const [terminalFilter, setTerminalFilter] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
@@ -928,8 +924,8 @@ function TransactionsTab({ view }: { view: TxnView }) {
   // Applied filters — drive the live feed AND the report export. Updated only
   // when the user clicks Search / Today, so the table and downloads always agree.
   const [applied, setApplied] = useState({
-    dateFrom: defaults.from,
-    dateTo: defaults.to,
+    dateFrom: today.from,
+    dateTo: today.to,
     mode: "" as PosPaymentMode | "",
     terminal: "",
     company: "",
