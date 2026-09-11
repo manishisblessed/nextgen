@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
@@ -50,10 +51,21 @@ type MyDues = { amount: number; count: number };
 const inputCls = "w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 placeholder:text-ink-400";
 const labelCls = "mb-1.5 block text-xs font-semibold text-ink-500";
 
+/** Roles that are NOT allowed to access this page — only retailers can. */
+const BLOCKED_ROLES = new Set(["super-distributor", "master-distributor", "distributor"]);
+
 export default function NetworkPosRentalPage() {
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
+  const router = useRouter();
   const role = session?.role ?? "distributor";
   const meta = HIERARCHY[role] ?? HIERARCHY.distributor;
+
+  // Redirect non-retailer network roles away from this page
+  useEffect(() => {
+    if (!loading && session && BLOCKED_ROLES.has(role)) {
+      router.replace("/dashboard");
+    }
+  }, [loading, session, role, router]);
 
   const [children, setChildren] = useState<Child[]>([]);
   const [childLoading, setChildLoading] = useState(true);

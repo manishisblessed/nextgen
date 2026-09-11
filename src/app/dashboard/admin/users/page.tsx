@@ -183,8 +183,8 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(data?.error ?? "Update failed");
       notify(
         enabling
-          ? `PIN login enabled for ${user.name}. 2FA is now waived.${data.warning ? ` ${data.warning}` : ""}`
-          : `PIN login disabled for ${user.name}. Mandatory 2FA is restored.`,
+          ? `TPIN login allowed for ${user.name}. They can now choose the authenticator or their transaction PIN at login.${data.warning ? ` ${data.warning}` : ""}`
+          : `TPIN login disabled for ${user.name}. Mandatory 2FA is restored.`,
         true
       );
       setPinLoginTarget(null);
@@ -452,15 +452,15 @@ export default function AdminUsersPage() {
         busy={pinLoginBusy}
         title={
           pinLoginTarget?.pinLoginEnabled
-            ? `Disable PIN login for ${pinLoginTarget?.name}?`
-            : `Enable PIN login for ${pinLoginTarget?.name}?`
+            ? `Disable TPIN login for ${pinLoginTarget?.name}?`
+            : `Allow TPIN login for ${pinLoginTarget?.name}?`
         }
         description={
           pinLoginTarget?.pinLoginEnabled
             ? "This restores mandatory two-factor authentication. The user will be signed out and must set up an authenticator app on next login."
-            : "This waives mandatory 2FA and lets the user sign in with their transaction PIN. They must accept all account risk. Ensure they have set a transaction PIN."
+            : "This lets the user sign in with their transaction PIN instead of an authenticator. At login it stays the user's choice — if they have an authenticator set up they can pick either. They must accept all account risk when using the PIN. Ensure they have set a transaction PIN."
         }
-        confirmLabel={pinLoginTarget?.pinLoginEnabled ? "Disable PIN login" : "Enable PIN login"}
+        confirmLabel={pinLoginTarget?.pinLoginEnabled ? "Disable TPIN login" : "Allow TPIN login"}
         onConfirm={async () => {
           if (pinLoginTarget) await togglePinLogin(pinLoginTarget);
         }}
@@ -663,7 +663,7 @@ function UserMoreMenu({
               onClick={onTogglePinLogin}
             >
               <KeyRound className="h-4 w-4 text-ink-500" />
-              {user.pinLoginEnabled ? "Disable PIN login (restore 2FA)" : "Enable PIN login (waive 2FA)"}
+              {user.pinLoginEnabled ? "Disable TPIN login (restore 2FA)" : "Allow TPIN login (user's choice)"}
             </button>
           )}
 

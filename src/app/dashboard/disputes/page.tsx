@@ -1,17 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   LifeBuoy,
-  Plus,
   RefreshCw,
   Send,
   AlertCircle,
   ChevronLeft,
   Clock,
+  FileBarChart2,
+  ArrowRight,
 } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
-import { Input, Label, Select } from "@/components/ui/Input";
+import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 
@@ -70,13 +72,9 @@ const CATEGORIES = [
 export default function DisputesPage() {
   const [disputes, setDisputes] = useState<DisputeRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"list" | "new" | "detail">("list");
+  const [view, setView] = useState<"list" | "detail">("list");
   const [detail, setDetail] = useState<DisputeDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // New ticket form
-  const [form, setForm] = useState({ category: "TRANSACTION", subject: "", description: "", txnRefId: "" });
-  const [submitting, setSubmitting] = useState(false);
 
   // Reply box
   const [reply, setReply] = useState("");
@@ -111,36 +109,6 @@ export default function DisputesPage() {
     }
   }
 
-  async function createTicket(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/disputes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          category: form.category,
-          subject: form.subject,
-          description: form.description,
-          ...(form.txnRefId.trim() ? { txnRefId: form.txnRefId.trim() } : {}),
-        }),
-      });
-      const d = await res.json();
-      if (!res.ok) {
-        setError(typeof d.error === "string" ? d.error : "Could not raise the ticket — check the fields");
-        return;
-      }
-      setForm({ category: "TRANSACTION", subject: "", description: "", txnRefId: "" });
-      await fetchList();
-      await openDetail(d.id);
-    } catch {
-      setError("Network error — try again");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function sendReply(e: React.FormEvent) {
     e.preventDefault();
     if (!detail || !reply.trim()) return;
@@ -172,7 +140,7 @@ export default function DisputesPage() {
       <ServicePageHeader
         icon={LifeBuoy}
         title="Support Tickets"
-        description="Raise disputes about transactions, wallet, commissions or KYC — with guaranteed response times."
+        description="Track and reply to your support tickets. To raise a new ticket, open the transaction in Reports and click “Raise ticket” — the details are filled in for you."
       />
 
       {error && (
@@ -184,26 +152,51 @@ export default function DisputesPage() {
 
       {view === "list" && (
         <>
+          {/* Raising a ticket lives in Reports — deep-link users there. */}
+          <Link
+            href="/dashboard/reports"
+            className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-brand-100 bg-brand-50/60 px-5 py-4 transition hover:border-brand-200 hover:bg-brand-50"
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-brand-700 ring-1 ring-brand-100">
+                <FileBarChart2 className="h-4.5 w-4.5" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-ink-900">Need to raise a ticket?</p>
+                <p className="text-xs text-ink-500">
+                  Open the transaction in Reports and click “Raise ticket” — details fill in automatically.
+                </p>
+              </div>
+            </div>
+            <span className="flex items-center gap-1 text-xs font-semibold text-brand-700">
+              Go to Reports <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </Link>
+
           <div className="mb-4 flex items-center justify-between">
             <p className="text-xs text-ink-500">
               {loading ? "Loading…" : `${disputes.length} ticket(s)`} · Urgent tickets are answered within 4 hours,
               normal within 48 hours.
             </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={fetchList} disabled={loading}>
-                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              </Button>
-              <Button onClick={() => setView("new")}>
-                <Plus className="h-4 w-4" />
-                New ticket
-              </Button>
-            </div>
+            <Button variant="outline" onClick={fetchList} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-ink-100 bg-white">
             {disputes.length === 0 ? (
               <div className="p-12 text-center text-sm text-ink-500">
-                {loading ? "Loading…" : "No tickets yet. Raise one if something went wrong — we respond fast."}
+                {loading ? (
+                  "Loading…"
+                ) : (
+                  <>
+                    No tickets yet. Go to{" "}
+                    <Link href="/dashboard/reports" className="font-semibold text-brand-700 hover:underline">
+                      Reports
+                    </Link>{" "}
+                    and raise one from a transaction if something went wrong.
+                  </>
+                )}
               </div>
             ) : (
               <ul className="divide-y divide-ink-100">
@@ -237,76 +230,6 @@ export default function DisputesPage() {
             )}
           </div>
         </>
-      )}
-
-      {view === "new" && (
-        <form onSubmit={createTicket} className="grid gap-4 rounded-2xl border border-ink-100 bg-white p-6">
-          <button
-            type="button"
-            onClick={() => setView("list")}
-            className="flex w-fit items-center gap-1 text-xs font-semibold text-ink-500 hover:text-ink-800"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" /> Back to tickets
-          </button>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="cat">Category</Label>
-              <Select
-                id="cat"
-                value={form.category}
-                onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="txn">Transaction reference (optional)</Label>
-              <Input
-                id="txn"
-                placeholder="TXN… from your transaction history"
-                value={form.txnRefId}
-                onChange={(e) => setForm((f) => ({ ...f, txnRefId: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="subject">Subject</Label>
-            <Input
-              id="subject"
-              required
-              minLength={5}
-              maxLength={140}
-              placeholder="Short summary of the problem"
-              value={form.subject}
-              onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="desc">Describe the issue</Label>
-            <textarea
-              id="desc"
-              required
-              minLength={10}
-              maxLength={4000}
-              rows={5}
-              className="w-full rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-brand-400 focus:ring-4 focus:ring-brand-100"
-              placeholder="What happened, when, and the amount involved. The more detail, the faster we resolve it."
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            />
-          </div>
-
-          <Button type="submit" size="lg" disabled={submitting}>
-            {submitting ? "Raising ticket…" : "Raise ticket"}
-          </Button>
-        </form>
       )}
 
       {view === "detail" && detail && (

@@ -1167,7 +1167,9 @@ function InvoicesTab({
 
 /* ─────────────────────────────────────────────────────── Inventory Intake */
 
-const CSV_COLUMNS = ["serial", "tid", "mid", "model", "brand", "company", "condition", "status", "location", "city", "state"];
+const CSV_COLUMNS = ["serial", "tid", "mid", "model", "brand", "company", "provider", "condition", "status", "location", "city", "state"];
+
+type BrandOption = { id: string; name: string; key: string; active: boolean };
 
 type MachineRow = {
   serial: string; tid: string; mid: string; model: string; brand: string;
@@ -1190,6 +1192,23 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
 
   // Shared defaults applied to every new row
   const [defaults, setDefaults] = useState({ brand: "", company: "", condition: "NEW", status: "active", city: "", state: "" });
+
+  // Batch pricing / tenancy — applied to EVERY machine in this intake so a
+  // 3rd-party (no-API) machine is priceable for slip-based settlement. Brand
+  // tenancy points at an MDR rate card; provider is the acquirer label (e.g.
+  // YESBANK). Both are optional (blank → priced via the retailer's POS scheme).
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [batchBrandId, setBatchBrandId] = useState("");
+  const [batchProvider, setBatchProvider] = useState("");
+
+  useEffect(() => {
+    fetch("/api/admin/brands")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (Array.isArray(d?.brands)) setBrands((d.brands as BrandOption[]).filter((b) => b.active));
+      })
+      .catch(() => {});
+  }, []);
 
   const [trackQuery, setTrackQuery] = useState("");
   const [track, setTrack] = useState<{
@@ -1252,6 +1271,8 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
     const data = validRows.map((r) => {
       const row: Record<string, string> = {};
       Object.entries(r).forEach(([k, v]) => { if (v) row[k] = v; });
+      if (batchBrandId) row.brandId = batchBrandId;
+      if (batchProvider.trim()) row.provider = batchProvider.trim();
       return row;
     });
     const ok = await post(data);
@@ -1322,6 +1343,35 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
               Paste CSV
             </button>
           </div>
+        </div>
+
+        {/* Pricing & tenancy — the key to settling no-API (3rd-party) machines.
+            Applied to every machine in this intake batch. */}
+        <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/40 p-3">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-brand-500">
+            Pricing &amp; tenancy · applied to every machine in this batch
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] font-semibold text-ink-400">Brand (MDR rate card)</label>
+              <select className={thinSelect} value={batchBrandId} onChange={(e) => setBatchBrandId(e.target.value)}>
+                <option value="">— None (price via retailer&apos;s POS scheme) —</option>
+                {brands.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] font-semibold text-ink-400">Acquirer / provider label</label>
+              <input className={thinInput} placeholder="e.g. YESBANK" value={batchProvider}
+                onChange={(e) => setBatchProvider(e.target.value)} />
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-ink-400">
+            For 3rd-party machines with no API, pick a Brand that has an MDR rate card so uploaded-slip settlements can be
+            priced (or leave it blank to price via the retailer&apos;s own POS scheme). The provider label is stored on
+            the machine (any non–Same Day value keeps it on the manual-slip flow).
+          </p>
         </div>
 
         {mode === "table" ? (
@@ -1455,7 +1505,7 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
             </div>
             <textarea
               className={`${inputCls} h-48 font-mono text-xs`}
-              placeholder={"serial,tid,mid,model,brand,company,condition,location,city,state\nSN001,TID001,,S900,Pax,ICICI,NEW,Eros Mall,New Delhi,Delhi\nSN002,TID002,,D210,Verifone,HDFC,NEW,Main Road,Mumbai,Maharashtra"}
+              placeholder={"serial,tid,mid,model,brand,company,provider,condition,location,city,state\nSN001,TID001,,S900,Pax,Yes Bank,YESBANK,NEW,Eros Mall,New Delhi,Delhi\nSN002,TID002,,D210,Verifone,Yes Bank,YESBANK,NEW,Main Road,Mumbai,Maharashtra"}
               value={csvText}
               onChange={(e) => setCsvText(e.target.value)}
             />
@@ -1464,7 +1514,14 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
                 onClick={async () => {
                   const parsed = parseCsv();
                   if (!parsed) return;
-                  const ok = await post(parsed);
+                  // Apply the batch brand/provider as a fallback; a value present
+                  // in the CSV row itself (e.g. its own provider) takes priority.
+                  const withTenancy = parsed.map((row) => ({
+                    ...(batchBrandId ? { brandId: batchBrandId } : {}),
+                    ...(batchProvider.trim() ? { provider: batchProvider.trim() } : {}),
+                    ...row,
+                  }));
+                  const ok = await post(withTenancy);
                   if (ok) setCsvText("");
                 }}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
 import { TwoFactorStep } from "@/components/auth/TwoFactorStep";
 import { PinLoginStep } from "@/components/auth/PinLoginStep";
+import { LoginMethodChoice } from "@/components/auth/LoginMethodChoice";
 import { LocationGate, type LocationData } from "@/components/auth/LocationGate";
 
 export default function AdminLoginPage() {
@@ -54,10 +55,28 @@ function AdminLoginForm({ location }: { location: LocationData }) {
   const rateLimited = cooldownSec > 0;
 
   // 2FA state
-  const [step, setStep] = useState<"credentials" | "2fa" | "pinlogin">("credentials");
+  const [step, setStep] = useState<"credentials" | "choose" | "2fa" | "pinlogin">("credentials");
   const [tempToken, setTempToken] = useState("");
   const [userName, setUserName] = useState("");
   const [pinRiskAccepted, setPinRiskAccepted] = useState(false);
+  const [canChoose, setCanChoose] = useState(false);
+
+  function resetToCredentials() {
+    setStep("credentials");
+    setTempToken("");
+    setPassword("");
+    setError("");
+    setCanChoose(false);
+  }
+
+  function backFromFactorStep() {
+    if (canChoose) {
+      setStep("choose");
+      setError("");
+    } else {
+      resetToCredentials();
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -85,6 +104,20 @@ function AdminLoginForm({ location }: { location: LocationData }) {
           startCooldown(retrySec);
         }
         setError(data.error || "Invalid credentials.");
+        setLoading(false);
+        return;
+      }
+
+      if (data.needsMethodChoice) {
+        setTempToken(data.tempToken);
+        setUserName(data.user?.name || "");
+        setPinRiskAccepted(Boolean(data.riskAccepted));
+        setCanChoose(true);
+        setStep(
+          data.preferredMethod === "2fa" || data.preferredMethod === "pinlogin"
+            ? data.preferredMethod
+            : "choose"
+        );
         setLoading(false);
         return;
       }
@@ -126,6 +159,47 @@ function AdminLoginForm({ location }: { location: LocationData }) {
     }
   }
 
+  if (step === "choose") {
+    return (
+      <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
+        <div className="hidden flex-col justify-between rounded-3xl bg-gradient-to-br from-ink-900 via-ink-800 to-brand-700 p-10 text-white shadow-glow lg:flex">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest">
+              <Lock className="h-3.5 w-3.5" /> Restricted · Admin console
+            </span>
+            <h2 className="mt-6 font-display text-3xl font-bold leading-tight">
+              Two ways to <br /> verify it&apos;s you.
+            </h2>
+            <p className="mt-3 text-white/80">
+              You may sign in with your authenticator app or your transaction
+              PIN. The choice is yours.
+            </p>
+          </div>
+          <div className="space-y-3">
+            {[
+              "Authenticator app (TOTP) — most secure",
+              "Transaction PIN — quick and convenient",
+              "Switch between them any time",
+              "All attempts logged to audit trail",
+            ].map((t) => (
+              <div key={t} className="flex items-center gap-2 text-sm">
+                <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                {t}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-3xl border border-ink-100 bg-white p-8 shadow-soft md:p-10">
+          <LoginMethodChoice
+            userName={userName}
+            onChoose={(method) => setStep(method)}
+            onBack={resetToCredentials}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (step === "pinlogin") {
     return (
       <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-2">
@@ -148,12 +222,7 @@ function AdminLoginForm({ location }: { location: LocationData }) {
             tempToken={tempToken}
             userName={userName}
             riskAlreadyAccepted={pinRiskAccepted}
-            onBack={() => {
-              setStep("credentials");
-              setTempToken("");
-              setPassword("");
-              setError("");
-            }}
+            onBack={backFromFactorStep}
           />
         </div>
       </div>
@@ -195,12 +264,7 @@ function AdminLoginForm({ location }: { location: LocationData }) {
             tempToken={tempToken}
             userName={userName}
             userEmail={email}
-            onBack={() => {
-              setStep("credentials");
-              setTempToken("");
-              setPassword("");
-              setError("");
-            }}
+            onBack={backFromFactorStep}
           />
         </div>
       </div>

@@ -9,6 +9,12 @@ import {
   Wallet,
   ArrowRight,
   Plus,
+  Monitor,
+  CreditCard,
+  QrCode,
+  Receipt,
+  Truck,
+  type LucideIcon,
 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { TransactionsTable } from "@/components/dashboard/TransactionsTable";
@@ -21,6 +27,15 @@ import type { Session } from "@/lib/auth";
 import { formatINR, cn } from "@/lib/utils";
 import { hrefToServiceKey } from "@/lib/services/catalog";
 import { useEffectiveServices } from "@/hooks/useEffectiveServices";
+
+/** Primary service cards shown on the retailer dashboard. Each links straight
+ *  to its rail; BBPS opens the bill-payment hub with all sub-options. */
+const SERVICE_CARDS: { title: string; description: string; href: string; icon: LucideIcon }[] = [
+  { title: "POS", description: "Manage POS terminals & settlements", href: "/dashboard/pos", icon: Monitor },
+  { title: "Payment Gateway", description: "Collect payments & top up your wallet", href: "/dashboard/wallet", icon: CreditCard },
+  { title: "QR Payments", description: "Static & dynamic UPI QR collections", href: "/dashboard/qr", icon: QrCode },
+  { title: "BBPS", description: "Credit card & utility bill payments", href: "/dashboard/bill-pay", icon: Receipt },
+];
 
 export function RetailerOverview({ session }: { session: Session }) {
   const effectiveServices = useEffectiveServices();
@@ -135,6 +150,36 @@ export function RetailerOverview({ session }: { session: Session }) {
         )}
       </div>
 
+      <PosBookingStrip />
+
+      <div>
+        <div className="mb-4">
+          <h2 className="font-display text-lg font-semibold text-ink-900">Services</h2>
+          <p className="text-sm text-ink-500">Jump straight into a payment rail</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {SERVICE_CARDS.map((card) => {
+            const Icon = card.icon;
+            return (
+              <Link
+                key={card.href}
+                href={card.href}
+                className="group flex flex-col rounded-2xl border border-ink-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft"
+              >
+                <div className="flex items-start justify-between">
+                  <span className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-brand-600 to-accent-500 text-white shadow-soft">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <ArrowRight className="h-4 w-4 text-ink-300 transition group-hover:translate-x-1 group-hover:text-brand-600" />
+                </div>
+                <h3 className="mt-4 font-display text-base font-semibold text-ink-900">{card.title}</h3>
+                <p className="mt-1 text-xs leading-relaxed text-ink-500">{card.description}</p>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-ink-100 bg-white p-5 lg:col-span-2">
           <div className="flex items-end justify-between">
@@ -230,6 +275,82 @@ export function RetailerOverview({ session }: { session: Session }) {
 
       <TransactionsTable data={txns} loading={loadingTxns} showCommission={false} />
     </div>
+  );
+}
+
+/** Compact live status of the retailer's most recent in-progress POS booking.
+ *  Renders nothing until it knows there's an active order, so it never clutters
+ *  the dashboard for retailers who haven't booked a machine. */
+type StripBooking = {
+  id: string;
+  status: "APPLIED" | "ASSIGNED" | "DISPATCHED" | "DELIVERED" | "CANCELLED";
+  statusLabel: string;
+  stepIndex: number;
+  plan: { name: string };
+  machine: { tid: string | null; serial: string | null } | null;
+};
+
+const STRIP_STEPS = ["Applied", "Assigned", "Dispatched", "Delivered"];
+
+function PosBookingStrip() {
+  const [booking, setBooking] = useState<StripBooking | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/pos/booking")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d?.bookings) return;
+        const list = d.bookings as StripBooking[];
+        // Prefer an in-progress order; otherwise the most recent overall.
+        const active = list.find((b) => b.status !== "DELIVERED" && b.status !== "CANCELLED");
+        setBooking(active ?? list[0] ?? null);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  if (!booking || booking.status === "CANCELLED") return null;
+
+  const machineLabel = booking.machine?.tid ?? booking.machine?.serial ?? null;
+  const delivered = booking.status === "DELIVERED";
+
+  return (
+    <Link
+      href="/dashboard/pos-booking"
+      className="group flex flex-col gap-4 rounded-2xl border border-ink-100 bg-white p-5 shadow-sm transition hover:border-brand-200 hover:shadow-soft sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex items-center gap-3">
+        <span className={cn(
+          "grid h-11 w-11 place-items-center rounded-xl text-white shadow-soft",
+          delivered ? "bg-emerald-500" : "bg-gradient-to-br from-brand-600 to-accent-500",
+        )}>
+          <Truck className="h-5 w-5" />
+        </span>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-ink-500">POS Booking</p>
+          <p className="font-display text-sm font-semibold text-ink-900">
+            {booking.plan.name} · {booking.statusLabel}
+            {machineLabel && <span className="ml-1 font-mono text-xs text-ink-500">({machineLabel})</span>}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          {STRIP_STEPS.map((label, i) => {
+            const done = i <= booking.stepIndex;
+            return (
+              <div key={label} className="flex items-center gap-1.5">
+                <span className={cn("h-2 w-2 rounded-full", done ? (delivered ? "bg-emerald-500" : "bg-brand-500") : "bg-ink-200")} />
+                {i < STRIP_STEPS.length - 1 && <span className={cn("h-0.5 w-6 rounded-full", i < booking.stepIndex ? (delivered ? "bg-emerald-500" : "bg-brand-500") : "bg-ink-200")} />}
+              </div>
+            );
+          })}
+        </div>
+        <ArrowRight className="h-4 w-4 text-ink-300 transition group-hover:translate-x-1 group-hover:text-brand-600" />
+      </div>
+    </Link>
   );
 }
 

@@ -12,15 +12,17 @@ import {
   ChevronRight,
   Info,
 } from "lucide-react";
+import { LifeBuoy } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+import { RaiseTicketModal, type RaiseTicketPayload } from "@/components/dashboard/reports/RaiseTicketModal";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
 import { REPORTS } from "@/lib/reports/registry";
 import { brandLogoUrl, brandBadge, brandLocalLogos } from "@/lib/brand/logos";
-import type { ReportColumnDef, Accent } from "@/lib/reports/registry";
+import type { ReportColumnDef, Accent, ReportConfig } from "@/lib/reports/registry";
 import type { ReportType, ReportResult } from "@/lib/reports/types";
 import type { ReportColumn } from "@/lib/reports";
 
@@ -43,6 +45,20 @@ const ACCENT_HEX: Record<Accent, string> = {
   accent: "#f97606",
   emerald: "#059669",
   violet: "#7c3aed",
+};
+
+/** Column colour → Tailwind text classes for header and body cells. */
+const COL_COLOR_HEADER: Record<string, string> = {
+  green:  "text-emerald-600",
+  red:    "text-rose-600",
+  orange: "text-orange-600",
+  yellow: "text-amber-600",
+};
+const COL_COLOR_CELL: Record<string, string> = {
+  green:  "text-emerald-700",
+  red:    "text-rose-600",
+  orange: "text-orange-600",
+  yellow: "text-amber-600",
 };
 
 const ACRONYMS = new Set(["AEPS", "DMT", "UPI", "DTH", "PAN", "GST", "IMPS", "NEFT", "RTGS", "POS", "QR", "PG", "BBPS", "ID"]);
@@ -175,6 +191,40 @@ function toColFormat(f?: ReportColumnDef["format"]): ReportColumn<Row>["format"]
   return "text";
 }
 
+/**
+ * Statuses for which a "Raise ticket" action is offered — pending / in-flight or
+ * failed transactions. Clean successes (SUCCESS, SETTLED, REFUNDED…) don't need
+ * a dispute, so no button is shown for them.
+ */
+const TICKETABLE_STATUS = new Set([
+  "INITIATED", "PROCESSING", "HOLD", "PENDING", "PENDING_APPROVAL", "FAILED",
+]);
+
+function isTicketable(row: Row): boolean {
+  const refId = row["refId"];
+  if (!refId || String(refId).trim() === "" || String(refId).trim() === "—") return false;
+  return TICKETABLE_STATUS.has(String(row["status"] ?? "").toUpperCase().trim());
+}
+
+/** Auto-compile the report row into a readable details block for the ticket. */
+function buildTicketDetails(row: Row, columns: ReportColumnDef[], reportTitle: string): string {
+  const lines = columns
+    .filter((c) => c.format !== "avatar")
+    .map((c) => {
+      const v = exportString(row[c.key], c.format).trim();
+      return v && v !== "—" ? `• ${c.header}: ${v}` : null;
+    })
+    .filter((l): l is string => !!l);
+  return `Transaction details (auto-filled from ${reportTitle}):\n${lines.join("\n")}`;
+}
+
+/** Short subject line derived from the transaction. Capped to the API's 140 chars. */
+function buildTicketSubject(row: Row, reportTitle: string): string {
+  const refId = String(row["refId"] ?? "").trim();
+  const status = humanize(String(row["status"] ?? "").trim());
+  return `${reportTitle}: ${refId}${status ? ` (${status})` : ""}`.slice(0, 140);
+}
+
 export function ReportView({ type }: { type: ReportType }) {
   const config = REPORTS[type];
   const f = config.filters;
@@ -206,6 +256,21 @@ export function ReportView({ type }: { type: ReportType }) {
   const [data, setData] = useState<ReportResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Raise-ticket modal (reports are the only place users open a support ticket).
+  const canRaiseTicket = !!config.raiseTicket;
+  const [ticket, setTicket] = useState<RaiseTicketPayload | null>(null);
+  const openTicket = useCallback(
+    (row: Row) => {
+      setTicket({
+        txnRefId: String(row["refId"] ?? "").trim(),
+        subject: buildTicketSubject(row, config.title),
+        detailsText: buildTicketDetails(row, config.columns, config.title),
+        category: "TRANSACTION",
+      });
+    },
+    [config.columns, config.title]
+  );
 
   // Debounce free-text search.
   useEffect(() => {
@@ -445,10 +510,13 @@ export function ReportView({ type }: { type: ReportType }) {
             <thead className="bg-ink-50/80 text-left text-[11px] uppercase tracking-wider text-ink-500">
               <tr>
                 {config.columns.map((c) => (
-                  <th key={c.key} className={`whitespace-nowrap px-5 py-3 font-semibold ${c.align === "right" ? "text-right" : ""}`}>
+                  <th key={c.key} className={`whitespace-nowrap px-5 py-3 font-semibold ${c.align === "right" ? "text-right" : ""} ${c.color ? COL_COLOR_HEADER[c.color] ?? "" : ""}`}>
                     {c.header}
                   </th>
                 ))}
+                {canRaiseTicket && (
+                  <th className="whitespace-nowrap px-5 py-3 text-right font-semibold">Action</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100 text-ink-800">
@@ -460,11 +528,16 @@ export function ReportView({ type }: { type: ReportType }) {
                         <div className="h-3 w-20 animate-pulse rounded bg-ink-100" />
                       </td>
                     ))}
+                    {canRaiseTicket && (
+                      <td className="px-5 py-3.5">
+                        <div className="ml-auto h-3 w-16 animate-pulse rounded bg-ink-100" />
+                      </td>
+                    )}
                   </tr>
                 ))
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={config.columns.length} className="px-5 py-14 text-center text-sm text-ink-500">
+                  <td colSpan={config.columns.length + (canRaiseTicket ? 1 : 0)} className="px-5 py-14 text-center text-sm text-ink-500">
                     No records match your filters.
                   </td>
                 </tr>
@@ -472,10 +545,25 @@ export function ReportView({ type }: { type: ReportType }) {
                 rows.map((row, i) => (
                   <tr key={i} className="transition-colors hover:bg-brand-50/40">
                     {config.columns.map((c) => (
-                      <td key={c.key} className={`whitespace-nowrap px-5 py-3 ${c.align === "right" ? "text-right" : ""}`}>
+                      <td key={c.key} className={`whitespace-nowrap px-5 py-3 ${c.align === "right" ? "text-right" : ""} ${c.color ? COL_COLOR_CELL[c.color] ?? "" : ""}`}>
                         {displayCell(row[c.key], c.format)}
                       </td>
                     ))}
+                    {canRaiseTicket && (
+                      <td className="whitespace-nowrap px-5 py-3 text-right">
+                        {isTicketable(row) ? (
+                          <button
+                            type="button"
+                            onClick={() => openTicket(row)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-100"
+                          >
+                            <LifeBuoy className="h-3.5 w-3.5" /> Raise ticket
+                          </button>
+                        ) : (
+                          <span className="text-ink-300">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -486,7 +574,7 @@ export function ReportView({ type }: { type: ReportType }) {
                   {config.columns.map((c, idx) => {
                     const tv = totals[c.key];
                     return (
-                      <td key={c.key} className={`whitespace-nowrap px-5 py-3 ${c.align === "right" ? "text-right" : ""}`}>
+                      <td key={c.key} className={`whitespace-nowrap px-5 py-3 ${c.align === "right" ? "text-right" : ""} ${c.color ? COL_COLOR_CELL[c.color] ?? "" : ""}`}>
                         {tv === undefined
                           ? idx === 0 && !("service" in totals || "date" in totals || "tid" in totals)
                             ? "Total"
@@ -497,6 +585,7 @@ export function ReportView({ type }: { type: ReportType }) {
                       </td>
                     );
                   })}
+                  {canRaiseTicket && <td className="px-5 py-3" />}
                 </tr>
               </tfoot>
             )}
@@ -519,6 +608,8 @@ export function ReportView({ type }: { type: ReportType }) {
           </div>
         )}
       </div>
+
+      {canRaiseTicket && <RaiseTicketModal payload={ticket} onClose={() => setTicket(null)} />}
     </div>
   );
 }

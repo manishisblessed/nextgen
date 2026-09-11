@@ -73,8 +73,8 @@ export default function DashboardHomePage() {
     <div className="space-y-8">
       {canSeeBusinessOverview && <TodaysBusinessOverview />}
       {isNetworkTier && <NetworkOverview />}
-      {isRetailer && <RetailerBusinessOverview />}
       {overview}
+      {isRetailer && <RetailerBusinessOverview />}
     </div>
   );
 }
