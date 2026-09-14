@@ -11,18 +11,24 @@ export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
 const PARENT_ROLES = ["DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"];
+// Retailers have no downstream, so they can't create plans or assign
+// subscriptions (POST stays parent-only). They can still READ this endpoint to
+// see the subscriptions their upstream/admin assigned to them ("charged to you").
+const GET_ROLES = [...PARENT_ROLES, "RETAILER"];
 
 /**
  * GET /api/network/pos/rental
  *
  * Returns active rental plans and the caller's own subscriptions
  * (where createdById = caller). Accessible to SD, MD, and Distributor roles.
+ * Retailers may also call it, but only receive their "charged to you" data
+ * (mySubscriptions / myInvoices / myDues); all parent-only fields come back empty.
  */
 export async function GET(req: Request) {
   let user;
   try {
     user = await requireAuth();
-    if (!PARENT_ROLES.includes(user.role))
+    if (!GET_ROLES.includes(user.role))
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   } catch (e) {
     if (e instanceof AuthError)

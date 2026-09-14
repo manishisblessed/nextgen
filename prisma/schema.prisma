@@ -2698,6 +2698,12 @@ model PosManualSlip {
   @@index([status, createdAt])
   @@index([machineId])
   @@index([tid])
+  // NOTE: a PARTIAL UNIQUE index on (tid, rrn) WHERE status IN
+  // ('PENDING','APPROVED') AND rrn IS NOT NULL is enforced in the DB via the
+  // 20260914120000_pos_manual_slip_rrn_unique migration. Prisma can't express
+  // partial indexes, so it lives in SQL only — do not "fix" the drift by
+  // dropping it. It stops concurrent duplicate slips for the same RRN/TID while
+  // still allowing re-upload after a REJECT.
 }
 
 // PG (payment gateway) acquirer settlement entry — the PG analogue of

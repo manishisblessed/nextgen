@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
@@ -139,24 +140,36 @@ export async function POST(req: Request) {
       );
   }
 
-  const slip = await prisma.posManualSlip.create({
-    data: {
-      uploaderUserId: user.id,
-      machineId: machine.id,
-      tid: machine.tid,
-      grossAmount: d.grossAmount,
-      paymentMode: d.paymentMode,
-      rrn: d.rrn || null,
-      authCode: d.authCode || null,
-      cardType: d.cardType ?? null,
-      brandType: d.brandType || null,
-      txnTime: d.txnTime ? new Date(d.txnTime) : null,
-      slipPublicId: d.slipPublicId,
-      slipFormat: d.slipFormat?.toLowerCase() || null,
-      slipResourceType: d.slipResourceType,
-      status: "PENDING",
-    },
-  });
+  let slip;
+  try {
+    slip = await prisma.posManualSlip.create({
+      data: {
+        uploaderUserId: user.id,
+        machineId: machine.id,
+        tid: machine.tid,
+        grossAmount: d.grossAmount,
+        paymentMode: d.paymentMode,
+        rrn: d.rrn || null,
+        authCode: d.authCode || null,
+        cardType: d.cardType ?? null,
+        brandType: d.brandType || null,
+        txnTime: d.txnTime ? new Date(d.txnTime) : null,
+        slipPublicId: d.slipPublicId,
+        slipFormat: d.slipFormat?.toLowerCase() || null,
+        slipResourceType: d.slipResourceType,
+        status: "PENDING",
+      },
+    });
+  } catch (e) {
+    // Partial unique index (tid, rrn) WHERE status IN (PENDING, APPROVED) —
+    // catches the concurrent-duplicate race the soft check above can't.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
+      return NextResponse.json(
+        { error: `A slip with this RRN for TID ${machine.tid} is already pending or approved.` },
+        { status: 409 }
+      );
+    throw e;
+  }
 
   return NextResponse.json(
     {

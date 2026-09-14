@@ -137,7 +137,7 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "brands", label: "Brands & MDR" },
   { href: "settlement-ops", label: "Settlement Ops" },
   { href: "pos-settlement", label: "POS Settlement" },
-  { href: "pos-slips", label: "POS Manual Slips" },
+  { href: "pos-slips", label: "External POS Slips" },
   { href: "pos-reversals", label: "POS Reversals" },
   { href: "reversals", label: "Reversal Desk" },
   { href: "aeps", label: "AEPS Centre" },
@@ -182,7 +182,7 @@ const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/pos-rental", label: "POS Rental & Billing", icon: ReceiptText, badge: "New" },
   { href: "/dashboard/admin/pos-bookings", label: "POS Bookings", icon: PackagePlus, badge: "New" },
   { href: "/dashboard/admin/pos-settlement", label: "POS Settlement", icon: CreditCard, badge: "New" },
-  { href: "/dashboard/admin/pos-slips", label: "POS Manual Slips", icon: ListChecks, badge: "New" },
+  { href: "/dashboard/admin/pos-slips", label: "External POS Slips", icon: ListChecks, badge: "New" },
   { href: "/dashboard/admin/pos-reversals", label: "POS Reversals", icon: RotateCcw, badge: "New" },
   // NOTE: "Company Earnings" (the Revenue Wallet) is deliberately NOT here — it
   // is owner-only and injected into the master-admin menu via masterAdminMoneyOps.
@@ -344,6 +344,9 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/dashboard/admin/wallet-ops", label: "Wallet Balances", icon: Wallet },
         { href: "/dashboard/admin/ledger", label: "Ledger Explorer", icon: BookOpenCheck },
+        // Read-only for finance: the queue is viewable but Approve/Reject is
+        // gated to master-admin/admin in both the UI and the API.
+        { href: "/dashboard/admin/pos-slips", label: "External POS Slips", icon: ListChecks },
         // "Company Earnings" (Revenue Wallet) is owner-only; finance uses the
         // Commission Distributed + Per-Txn Earnings reports instead.
         { href: "/dashboard/admin/commission-report", label: "Commission Distributed", icon: HandCoins },

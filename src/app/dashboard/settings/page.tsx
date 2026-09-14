@@ -106,9 +106,8 @@ export default function SettingsPage() {
                 Login method
               </h3>
               <p className="mt-1 text-xs text-ink-500">
-                Choose whether to sign in with your authenticator app or your
-                transaction PIN — when an administrator has allowed both, the
-                choice is yours.
+                Sign in with your authenticator app or your transaction PIN.
+                Turn on PIN login yourself and choose your default.
               </p>
             </div>
           </div>

@@ -188,11 +188,12 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
     title: "Push / Pull Report",
     short: "Push / Pull",
     description:
-      "Network wallet push & pull transfers across your hierarchy. See who pushed or pulled funds, to/from whom, with amounts and notes.",
+      "Wallet push & pull transfers — both network parent→child and admin-initiated — across your hierarchy with amounts and notes.",
     icon: ArrowLeftRight,
     accent: "violet",
     columns: [
       { key: "date", header: "Date", format: "datetime" },
+      { key: "source", header: "Source", format: "badge" },
       { key: "fromUser", header: "From" },
       { key: "fromRole", header: "From Role", format: "badge" },
       { key: "toUser", header: "To" },

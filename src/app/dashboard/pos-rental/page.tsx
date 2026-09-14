@@ -51,18 +51,23 @@ type MyDues = { amount: number; count: number };
 const inputCls = "w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 placeholder:text-ink-400";
 const labelCls = "mb-1.5 block text-xs font-semibold text-ink-500";
 
-/** Roles that are NOT allowed to access this page — only retailers can. */
-const BLOCKED_ROLES = new Set(["super-distributor", "master-distributor", "distributor"]);
+/** Roles allowed on this page. Parents get the full management UI; retailers
+ *  get a read-only view of the subscriptions assigned to them. */
+const NETWORK_ROLES = new Set(["super-distributor", "master-distributor", "distributor", "retailer"]);
+/** Parent roles have downstream children, so they can create plans and assign
+ *  subscriptions. Retailers are leaf nodes and only see what's charged to them. */
+const PARENT_ROLES = new Set(["super-distributor", "master-distributor", "distributor"]);
 
 export default function NetworkPosRentalPage() {
   const { session, loading } = useAuth();
   const router = useRouter();
-  const role = session?.role ?? "distributor";
+  const role = session?.role ?? "retailer";
   const meta = HIERARCHY[role] ?? HIERARCHY.distributor;
+  const isParent = PARENT_ROLES.has(role);
 
-  // Redirect non-retailer network roles away from this page
+  // Redirect roles that don't belong on this page (admin, finance, etc.)
   useEffect(() => {
-    if (!loading && session && BLOCKED_ROLES.has(role)) {
+    if (!loading && session && !NETWORK_ROLES.has(role)) {
       router.replace("/dashboard");
     }
   }, [loading, session, role, router]);
@@ -424,12 +429,18 @@ export default function NetworkPosRentalPage() {
     <div className="min-w-0 space-y-6">
       <PageHeader
         eyebrow="POS Management"
-        title="POS Rental & Subscriptions"
-        description={`Create your own rental plans and assign subscriptions to your ${meta.childLabelPlural.toLowerCase()}. Set monthly rent, commission, and GST per machine.`}
+        title={isParent ? "POS Rental & Subscriptions" : "My POS Rental"}
+        description={
+          isParent
+            ? `Create your own rental plans and assign subscriptions to your ${meta.childLabelPlural.toLowerCase()}. Set monthly rent, commission, and GST per machine.`
+            : "View the POS machine rental subscriptions assigned to you and your monthly charges."
+        }
       />
 
-      {/* My Rental — what upstream/admin charges me */}
-      {(mySubs.length > 0 || myDues.amount > 0) && (
+      {/* My Rental — what upstream/admin charges me. Always shown for retailers
+          (leaf nodes) since it's their only section; parents see it only when
+          they actually have upstream-assigned subscriptions or dues. */}
+      {(!isParent || mySubs.length > 0 || myDues.amount > 0) && (
         <div className="rounded-2xl border border-ink-100 bg-white p-6">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -512,6 +523,13 @@ export default function NetworkPosRentalPage() {
             </div>
           )}
 
+          {/* Empty state — no subscriptions assigned yet */}
+          {mySubs.length === 0 && myDues.amount === 0 && (
+            <p className="rounded-xl border border-dashed border-ink-200 bg-ink-50/50 px-4 py-8 text-center text-sm text-ink-500">
+              No POS rental subscriptions have been assigned to you yet. When your provider assigns a rental plan to one of your machines, it will appear here with the monthly rent and billing day.
+            </p>
+          )}
+
           {/* Invoice / payment history */}
           {showInvoices && myInvoices.length > 0 && (
             <div className="mt-4">
@@ -554,6 +572,10 @@ export default function NetworkPosRentalPage() {
         </div>
       )}
 
+      {/* Management sections below are parent-only: retailers have no downstream
+          children, so they can't create plans or assign subscriptions. */}
+      {isParent && (
+      <>
       {/* My Rental Plans management */}
       <div className="rounded-2xl border border-ink-100 bg-white p-6">
         <div className="mb-4">
@@ -902,6 +924,8 @@ export default function NetworkPosRentalPage() {
       <DataTable columns={columns} data={subs} loading={subsLoading}
         title="My Subscriptions"
         description={`${formatNumber(subs.length)} subscription${subs.length === 1 ? "" : "s"}`} />
+      </>
+      )}
 
       <ConfirmDialog
         open={cancelTarget !== null}

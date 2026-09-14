@@ -242,6 +242,7 @@ function MachinesTab() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [syncing, setSyncing] = useState(false);
   const [assignTargets, setAssignTargets] = useState<LocalPosMachine[]>([]);
@@ -253,6 +254,7 @@ function MachinesTab() {
 
   const params = new URLSearchParams({ page: String(page), pageSize: "50" });
   if (statusFilter) params.set("status", statusFilter);
+  if (sourceFilter) params.set("source", sourceFilter);
   if (search) params.set("search", search);
   if (assigneeFilter) params.set("assignee", assigneeFilter);
 
@@ -449,6 +451,20 @@ function MachinesTab() {
     { key: "serial", header: "Serial No.", render: (r) => <span className="font-mono text-xs">{r.serial ?? "—"}</span> },
     { key: "mid", header: "MID", render: (r) => <span className="font-mono text-xs">{r.mid ?? "—"}</span> },
     { key: "model", header: "Model", render: (r) => r.model ?? "—" },
+    {
+      key: "source",
+      header: "Source",
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          {r.source === "MANUAL" ? (
+            <Badge variant="accent">External POS</Badge>
+          ) : (
+            <Badge variant="default">Integrated</Badge>
+          )}
+          {r.company && <span className="text-[11px] text-ink-400">{r.company}</span>}
+        </div>
+      ),
+    },
     { key: "location", header: "Location", render: (r) => r.location || "—" },
     { key: "status", header: "Status", render: (r) => machineBadge(r.status) },
     {
@@ -556,14 +572,14 @@ function MachinesTab() {
 
       {/* Filters */}
       <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr,170px,170px,auto]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr,150px,150px,150px,auto]">
           <div className="min-w-0">
             <label className="mb-1 block text-xs font-semibold text-ink-500">Search</label>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
               <input
                 type="text"
-                placeholder="TID, serial, MID..."
+                placeholder="TID, serial, MID, company..."
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 className="w-full rounded-lg border border-ink-200 py-2 pl-9 pr-3 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
@@ -582,6 +598,18 @@ function MachinesTab() {
               <option value="inactive">Inactive</option>
               <option value="maintenance">Maintenance</option>
               <option value="decommissioned">Decommissioned</option>
+            </select>
+          </div>
+          <div className="min-w-0">
+            <label className="mb-1 block text-xs font-semibold text-ink-500">Source</label>
+            <select
+              value={sourceFilter}
+              onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
+              className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+            >
+              <option value="">All sources</option>
+              <option value="MANUAL">External POS</option>
+              <option value="SYNC">Integrated</option>
             </select>
           </div>
           <div className="min-w-0">

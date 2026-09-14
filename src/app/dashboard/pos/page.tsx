@@ -1235,7 +1235,7 @@ function SettlementsTab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// UPLOAD SLIP TAB — manual POS slips for no-API terminals (e.g. Yes Bank)
+// UPLOAD SLIP TAB — External POS slips for no-API terminals (e.g. Yes Bank)
 // ═══════════════════════════════════════════════════════════════════════
 
 type ManualSlip = {
@@ -1274,7 +1274,7 @@ function ManualSlipTab() {
     { revalidateOnFocus: false, refreshInterval: 20000 }
   );
 
-  // Only no-API (non-Same Day), active terminals accept manual slips.
+  // Only External POS (non-Same Day, no live API), active terminals accept slips.
   const machines = useMemo(
     () =>
       (machinesData?.data ?? []).filter(
@@ -1414,7 +1414,7 @@ function ManualSlipTab() {
         {machines.length === 0 ? (
           <div className="flex items-center gap-2 rounded-xl border border-ink-200 bg-ink-50 p-4 text-sm text-ink-600">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            You have no manual (no-API) terminals assigned. Slips can only be uploaded for such terminals.
+            You have no External POS (no-API) terminals assigned. Slips can only be uploaded for such terminals.
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">

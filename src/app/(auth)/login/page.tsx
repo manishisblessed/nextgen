@@ -248,16 +248,16 @@ function LoginForm({ location }: { location: LocationData }) {
               Sign in with <br /> your PIN.
             </h2>
             <p className="mt-3 text-white/85">
-              Two-factor authentication has been waived for your account by an
-              administrator. Enter your transaction PIN to continue.
+              You chose to sign in with your transaction PIN. Enter it to
+              continue.
             </p>
           </div>
           <div className="space-y-3">
             {[
               "Your transaction PIN is your second factor",
               "5 wrong attempts locks it for 15 minutes",
-              "You accept all account risk without 2FA",
-              "Ask an admin to re-enable 2FA anytime",
+              "You accepted all account risk without 2FA",
+              "Switch back to your authenticator any time",
             ].map((t) => (
               <div key={t} className="flex items-center gap-2 text-sm">
                 <ShieldCheck className="h-4 w-4 text-emerald-300" />

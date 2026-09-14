@@ -211,8 +211,8 @@ function SubAdminLoginForm({ location }: { location: LocationData }) {
               Sign in with <br /> your PIN.
             </h2>
             <p className="mt-3 text-white/80">
-              Two-factor authentication has been waived for your account. Enter
-              your transaction PIN to continue.
+              You chose to sign in with your transaction PIN. Enter it to
+              continue.
             </p>
           </div>
         </div>

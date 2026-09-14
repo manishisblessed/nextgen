@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { formatINR } from "@/lib/utils";
+import { useAuth } from "@/lib/useAuth";
 import {
   ListChecks,
   RefreshCw,
@@ -63,6 +64,11 @@ function statusBadge(s: Slip["status"]) {
 }
 
 export default function AdminPosSlipsPage() {
+  const { session } = useAuth();
+  // Approve/reject is MASTER_ADMIN / ADMIN only (mirrors the API guard). Finance
+  // and Support get a read-only queue: they can view slips but not action them.
+  const canReview = session?.role === "master-admin" || session?.role === "admin";
+
   const [tab, setTab] = useState<StatusTab>("PENDING");
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -192,9 +198,15 @@ export default function AdminPosSlipsPage() {
     },
     {
       key: "id",
-      header: "Action",
-      render: (r) =>
-        r.status === "PENDING" ? (
+      header: canReview ? "Action" : "Review",
+      render: (r) => {
+        if (!canReview)
+          return r.status === "PENDING" ? (
+            <span className="text-xs text-ink-400">Awaiting admin review</span>
+          ) : (
+            <span className="text-xs text-ink-400">Reviewed {fmt(r.reviewedAt)}</span>
+          );
+        return r.status === "PENDING" ? (
           <div className="flex items-center gap-2">
             <Button size="sm" disabled={actingId === r.id} onClick={() => setApproveTarget(r)}>
               {actingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -211,15 +223,16 @@ export default function AdminPosSlipsPage() {
           </div>
         ) : (
           <span className="text-xs text-ink-400">Reviewed {fmt(r.reviewedAt)}</span>
-        ),
+        );
+      },
     },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="POS Manual Slips"
-        description="Verify retailer-uploaded transaction slips for no-API terminals (e.g. Yes Bank). Approving pushes the transaction into POS Fleet and the shared settlement engine (payin, MDR, instant/T+1, commission & TDS) exactly like an API-sourced capture."
+        title="External POS Slips"
+        description="Verify retailer-uploaded transaction slips for External POS terminals (no live API, e.g. Yes Bank). Approving pushes the transaction into POS Fleet and the shared settlement engine (payin, MDR, instant/T+1, commission & TDS) exactly like an API-sourced capture."
         actions={
           <Button variant="outline" size="sm" onClick={load}>
             <RefreshCw className="h-4 w-4" /> Refresh

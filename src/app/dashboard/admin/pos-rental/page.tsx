@@ -1193,8 +1193,8 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
   // Shared defaults applied to every new row
   const [defaults, setDefaults] = useState({ brand: "", company: "", condition: "NEW", status: "active", city: "", state: "" });
 
-  // Batch pricing / tenancy — applied to EVERY machine in this intake so a
-  // 3rd-party (no-API) machine is priceable for slip-based settlement. Brand
+  // Batch pricing / tenancy — applied to EVERY machine in this intake so an
+  // External POS (no-API) machine is priceable for slip-based settlement. Brand
   // tenancy points at an MDR rate card; provider is the acquirer label (e.g.
   // YESBANK). Both are optional (blank → priced via the retailer's POS scheme).
   const [brands, setBrands] = useState<BrandOption[]>([]);
@@ -1345,7 +1345,7 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
           </div>
         </div>
 
-        {/* Pricing & tenancy — the key to settling no-API (3rd-party) machines.
+        {/* Pricing & tenancy — the key to settling External POS (no-API) machines.
             Applied to every machine in this intake batch. */}
         <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/40 p-3">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-brand-500">
@@ -1368,9 +1368,9 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
             </div>
           </div>
           <p className="mt-2 text-[11px] text-ink-400">
-            For 3rd-party machines with no API, pick a Brand that has an MDR rate card so uploaded-slip settlements can be
+            For External POS machines (no live API), pick a Brand that has an MDR rate card so uploaded-slip settlements can be
             priced (or leave it blank to price via the retailer&apos;s own POS scheme). The provider label is stored on
-            the machine (any non–Same Day value keeps it on the manual-slip flow).
+            the machine (any non–Same Day value keeps it on the External POS slip flow).
           </p>
         </div>
 
@@ -1564,12 +1564,23 @@ function IntakeTab({ onNotice }: { onNotice: (text: string, ok: boolean) => void
         {track && (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl bg-ink-50 p-4 text-sm">
-              <p className="font-semibold text-ink-900">
+              <p className="flex flex-wrap items-center gap-2 font-semibold text-ink-900">
                 {String(track.machine.serial ?? "no-serial")} · {String(track.machine.model ?? track.machine.brand ?? "")}
+                {track.machine.source === "MANUAL" ? (
+                  <Badge variant="accent">External POS</Badge>
+                ) : (
+                  <Badge variant="default">Integrated</Badge>
+                )}
               </p>
               <p className="mt-1 text-xs text-ink-500">
-                TID {String(track.machine.tid ?? "—")} · MID {String(track.machine.mid ?? "—")} · {String(track.machine.source)} · {String(track.machine.condition ?? "—")} · {String(track.machine.status)}
+                TID {String(track.machine.tid ?? "—")} · MID {String(track.machine.mid ?? "—")} · {String(track.machine.condition ?? "—")} · {String(track.machine.status)}
               </p>
+              {Boolean(track.machine.company || track.machine.provider) && (
+                <p className="mt-1 text-xs text-ink-500">
+                  Acquirer: {String(track.machine.company ?? track.machine.provider ?? "—")}
+                  {track.machine.provider && track.machine.company ? ` · ${String(track.machine.provider)}` : ""}
+                </p>
+              )}
               <p className="mt-1 text-xs text-ink-500">
                 Assigned to:{" "}
                 {track.machine.assignedUser
