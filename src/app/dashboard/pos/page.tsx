@@ -1243,6 +1243,7 @@ type ManualSlip = {
   tid: string;
   grossAmount: number;
   paymentMode: string;
+  settlementPref: "INSTANT" | "T1";
   rrn: string | null;
   authCode: string | null;
   status: "PENDING" | "APPROVED" | "REJECTED";
@@ -1287,6 +1288,7 @@ function ManualSlipTab() {
   const [machineId, setMachineId] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentMode, setPaymentMode] = useState("CARD");
+  const [settlePref, setSettlePref] = useState<"INSTANT" | "T1">("T1");
   const [rrn, setRrn] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [cardType, setCardType] = useState("");
@@ -1298,6 +1300,7 @@ function ManualSlipTab() {
     setMachineId("");
     setAmount("");
     setPaymentMode("CARD");
+    setSettlePref("T1");
     setRrn("");
     setAuthCode("");
     setCardType("");
@@ -1348,6 +1351,7 @@ function ManualSlipTab() {
           machineId,
           grossAmount: amt,
           paymentMode,
+          settlementPref: settlePref,
           rrn: rrn.trim() || undefined,
           authCode: authCode.trim() || undefined,
           cardType: cardType || undefined,
@@ -1367,7 +1371,7 @@ function ManualSlipTab() {
     } finally {
       setBusy(false);
     }
-  }, [amount, machineId, file, paymentMode, rrn, authCode, cardType, txnTime, resetForm, mutate]);
+  }, [amount, machineId, file, paymentMode, settlePref, rrn, authCode, cardType, txnTime, resetForm, mutate]);
 
   const pending = slips.filter((s) => s.status === "PENDING").length;
   const approved = slips.filter((s) => s.status === "APPROVED").length;
@@ -1377,6 +1381,11 @@ function ManualSlipTab() {
     { key: "createdAt", header: "Uploaded", render: (r) => <span className="text-xs">{fmtTime(r.createdAt)}</span> },
     { key: "tid", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.tid}</span> },
     { key: "paymentMode", header: "Mode", render: (r) => <Badge variant="default">{r.paymentMode}</Badge> },
+    { key: "settlementPref", header: "Settlement", render: (r) => (
+      <Badge variant={r.settlementPref === "INSTANT" ? "accent" : "default"}>
+        {r.settlementPref === "INSTANT" ? "Instant" : "Next day"}
+      </Badge>
+    ) },
     { key: "grossAmount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.grossAmount)}</span> },
     { key: "rrn", header: "RRN", render: (r) => <span className="font-mono text-xs">{r.rrn ?? "—"}</span> },
     {
@@ -1459,6 +1468,21 @@ function ManualSlipTab() {
                 <option value="NFC">NFC</option>
                 <option value="BHARATQR">BharatQR</option>
               </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-ink-500">Settlement</label>
+              <select
+                value={settlePref}
+                onChange={(e) => setSettlePref(e.target.value as "INSTANT" | "T1")}
+                className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+              >
+                <option value="T1">Next day (T+1)</option>
+                <option value="INSTANT">Instant (on approval)</option>
+              </select>
+              <p className="mt-1 text-[11px] text-ink-400">
+                Instant credits your wallet the moment an admin approves (subject to daily limit); Next day settles in the T+1 sweep.
+              </p>
             </div>
 
             <div>

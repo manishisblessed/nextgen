@@ -2670,6 +2670,11 @@ model PosManualSlip {
 
   grossAmount Decimal   @db.Decimal(14, 2)
   paymentMode String    @default("CARD") // CARD | UPI | NFC | BHARATQR
+  // Retailer-chosen settlement timing for THIS slip. "T1" = next-day sweep,
+  // "INSTANT" = credit the wallet at admin approval. Honored at approval time
+  // (see approveManualSlip → handlePosCapture); INSTANT still respects the
+  // platform instant kill-switch + daily instant budget cap, falling back to T1.
+  settlementPref String @default("T1") // INSTANT | T1
   rrn         String? // acquirer RRN / reference number from the slip
   authCode    String? // approval / auth code from the slip
   cardType    String? // CREDIT | DEBIT | PREPAID (optional pricing dimension)
@@ -2696,6 +2701,7 @@ model PosManualSlip {
 
   @@index([uploaderUserId, status])
   @@index([status, createdAt])
+  @@index([settlementPref, status])
   @@index([machineId])
   @@index([tid])
   // NOTE: a PARTIAL UNIQUE index on (tid, rrn) WHERE status IN

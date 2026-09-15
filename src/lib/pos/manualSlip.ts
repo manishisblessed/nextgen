@@ -84,6 +84,9 @@ export async function approveManualSlip(slipId: string, adminId: string) {
     cardType: slip.cardType ?? undefined,
     brandType: slip.brandType ?? undefined,
     capturedAt,
+    // Honor the retailer's Instant/Next Day choice made at upload time. INSTANT
+    // still respects the platform kill-switch + daily budget (falls back to T1).
+    settlementModeOverride: slip.settlementPref === "INSTANT" ? "INSTANT" : "T1",
   });
 
   if (capture.status === "NO_SCHEME")

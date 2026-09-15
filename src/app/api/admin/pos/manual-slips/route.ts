@@ -25,12 +25,16 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const status = url.searchParams.get("status") ?? "PENDING";
+  const prefParam = (url.searchParams.get("pref") ?? "").toUpperCase();
+  const pref = prefParam === "INSTANT" || prefParam === "T1" ? prefParam : null;
   const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("pageSize")) || 25));
 
-  const where = status && status !== "ALL" ? { status } : {};
+  const statusWhere = status && status !== "ALL" ? { status } : {};
+  const prefWhere = pref ? { settlementPref: pref } : {};
+  const where = { ...statusWhere, ...prefWhere };
 
-  const [total, slips, counts] = await Promise.all([
+  const [total, slips, counts, prefCounts] = await Promise.all([
     prisma.posManualSlip.count({ where }),
     prisma.posManualSlip.findMany({
       where,
@@ -41,7 +45,10 @@ export async function GET(req: Request) {
         uploader: { select: { id: true, name: true, userCode: true, role: true } },
       },
     }),
-    prisma.posManualSlip.groupBy({ by: ["status"], _count: true }),
+    // Status-tab counts within the active settlement-pref selection.
+    prisma.posManualSlip.groupBy({ by: ["status"], where: prefWhere, _count: true }),
+    // Instant / Next Day tab counts within the active status selection.
+    prisma.posManualSlip.groupBy({ by: ["settlementPref"], where: statusWhere, _count: true }),
   ]);
 
   // Enrich with terminal display info (machineId is a plain reference).
@@ -56,6 +63,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     summary: counts.map((c) => ({ status: c.status, count: c._count })),
+    prefSummary: prefCounts.map((c) => ({ pref: c.settlementPref, count: c._count })),
     slips: slips.map((s) => {
       const m = machineById.get(s.machineId);
       return {
@@ -72,6 +80,7 @@ export async function GET(req: Request) {
           : null,
         grossAmount: toNumber(s.grossAmount),
         paymentMode: s.paymentMode,
+        settlementPref: s.settlementPref,
         rrn: s.rrn,
         authCode: s.authCode,
         cardType: s.cardType,

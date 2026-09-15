@@ -18,6 +18,8 @@ import {
   Loader2,
   FileText,
   Clock,
+  Zap,
+  CalendarClock,
 } from "lucide-react";
 
 type Slip = {
@@ -27,6 +29,7 @@ type Slip = {
   machine: { model: string | null; location: string | null; city: string | null; provider: string; branded: boolean } | null;
   grossAmount: number;
   paymentMode: string;
+  settlementPref: "INSTANT" | "T1";
   rrn: string | null;
   authCode: string | null;
   cardType: string | null;
@@ -43,12 +46,22 @@ type Slip = {
 
 type ApiData = {
   summary: { status: string; count: number }[];
+  prefSummary: { pref: string; count: number }[];
   slips: Slip[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 };
 
 const STATUS_TABS = ["PENDING", "APPROVED", "REJECTED", "ALL"] as const;
 type StatusTab = (typeof STATUS_TABS)[number];
+
+// Settlement-preference tabs — split the queue by the retailer's Instant vs
+// Next Day choice. "" = both.
+const PREF_TABS = [
+  { key: "", label: "All settlement" },
+  { key: "INSTANT", label: "Instant" },
+  { key: "T1", label: "Next day (T+1)" },
+] as const;
+type PrefTab = (typeof PREF_TABS)[number]["key"];
 
 function fmt(iso: string | null) {
   if (!iso) return "—";
@@ -70,6 +83,7 @@ export default function AdminPosSlipsPage() {
   const canReview = session?.role === "master-admin" || session?.role === "admin";
 
   const [tab, setTab] = useState<StatusTab>("PENDING");
+  const [pref, setPref] = useState<PrefTab>("");
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -82,7 +96,8 @@ export default function AdminPosSlipsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/pos/manual-slips?status=${tab}&page=${page}&pageSize=25`);
+      const prefQs = pref ? `&pref=${pref}` : "";
+      const res = await fetch(`/api/admin/pos/manual-slips?status=${tab}${prefQs}&page=${page}&pageSize=25`);
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error ?? "Failed to load");
       setData(d);
@@ -91,7 +106,7 @@ export default function AdminPosSlipsPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, page]);
+  }, [tab, pref, page]);
 
   useEffect(() => {
     load();
@@ -100,6 +115,14 @@ export default function AdminPosSlipsPage() {
   const countByStatus = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of data?.summary ?? []) m.set(s.status, s.count);
+    return m;
+  }, [data]);
+
+  const countByPref = useMemo(() => {
+    const m = new Map<string, number>();
+    let all = 0;
+    for (const p of data?.prefSummary ?? []) { m.set(p.pref, p.count); all += p.count; }
+    m.set("", all);
     return m;
   }, [data]);
 
@@ -114,9 +137,12 @@ export default function AdminPosSlipsPage() {
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof d.error === "string" ? d.error : "Approval failed");
       const net = d.settlement?.netAmount;
+      const settledNow = d.settlement?.status === "SETTLED";
       toast.success(
         net != null
-          ? `Approved — ₹${Number(net).toLocaleString("en-IN")} queued to the retailer's settlement.`
+          ? settledNow
+            ? `Approved — ₹${Number(net).toLocaleString("en-IN")} settled instantly to the retailer's wallet.`
+            : `Approved — ₹${Number(net).toLocaleString("en-IN")} queued for the retailer's T+1 settlement.`
           : "Slip approved and pushed to settlement."
       );
       load();
@@ -163,6 +189,15 @@ export default function AdminPosSlipsPage() {
     },
     { key: "tid", header: "TID", render: (r) => <span className="font-mono text-xs font-semibold">{r.tid}</span> },
     { key: "paymentMode", header: "Mode", render: (r) => <Badge variant="default">{r.paymentMode}</Badge> },
+    {
+      key: "settlementPref",
+      header: "Settlement",
+      render: (r) => (
+        <Badge variant={r.settlementPref === "INSTANT" ? "accent" : "default"}>
+          {r.settlementPref === "INSTANT" ? "Instant" : "Next day"}
+        </Badge>
+      ),
+    },
     { key: "grossAmount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.grossAmount)}</span> },
     { key: "rrn", header: "RRN / Auth", render: (r) => (
       <div className="flex flex-col text-xs font-mono">
@@ -239,6 +274,25 @@ export default function AdminPosSlipsPage() {
           </Button>
         }
       />
+
+      <div className="flex flex-wrap gap-1 rounded-xl border border-brand-100 bg-brand-50/50 p-1">
+        {PREF_TABS.map((p) => (
+          <button
+            key={p.key || "ALL"}
+            onClick={() => { setPref(p.key); setPage(1); }}
+            className={
+              "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all " +
+              (pref === p.key ? "bg-white text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-700")
+            }
+          >
+            {p.key === "INSTANT" ? <Zap className="h-4 w-4" /> : p.key === "T1" ? <CalendarClock className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}
+            {p.label}
+            {countByPref.has(p.key) && (
+              <span className="rounded-full bg-ink-100 px-1.5 text-[11px] text-ink-600">{countByPref.get(p.key)}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
       <div className="flex flex-wrap gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
         {STATUS_TABS.map((t) => (
