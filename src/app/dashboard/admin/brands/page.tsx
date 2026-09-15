@@ -1011,28 +1011,44 @@ function CreateBrandModal({
       <div className="w-full max-w-md rounded-2xl bg-white p-6" onClick={(e) => e.stopPropagation()}>
         <h3 className="mb-4 text-base font-bold text-ink-900">New brand</h3>
         <div className="space-y-3">
-          <label className="block text-xs text-ink-500">
-            Company (from POS fleet)
-            <select
-              className={`${inputCls} mt-1 w-full`}
+          <div className="space-y-1.5">
+            <label className="block text-xs text-ink-500" htmlFor="brand-company">
+              Company / acquirer name
+            </label>
+            <input
+              id="brand-company"
+              className={`${inputCls} w-full`}
+              placeholder="e.g. Yes Bank"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
-              disabled={loadingCompanies}
-            >
-              <option value="">
-                {loadingCompanies
-                  ? "Loading companies…"
-                  : companies.length === 0
-                  ? "No companies found on POS machines"
-                  : "Select a company…"}
-              </option>
-              {companies.map((c) => (
-                <option key={c.company} value={c.company}>
-                  {c.company} ({c.machineCount})
-                </option>
-              ))}
-            </select>
-          </label>
+              autoFocus
+            />
+            {companies.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[11px] text-ink-400">or pick from POS fleet:</span>
+                {/* Quick-fill only — resets after each pick so free typing stays the source of truth. */}
+                <select
+                  className={`${inputCls} min-w-0 flex-1`}
+                  value=""
+                  onChange={(e) => { if (e.target.value) setCompany(e.target.value); }}
+                  disabled={loadingCompanies}
+                >
+                  <option value="">
+                    {loadingCompanies ? "Loading…" : "Select existing…"}
+                  </option>
+                  {companies.map((c) => (
+                    <option key={c.company} value={c.company}>
+                      {c.company} ({c.machineCount})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <p className="text-[11px] text-ink-400">
+              Type a new acquirer to create its brand, or pick one already on your POS fleet. For an External POS
+              (no-API) acquirer, create the brand here, then select it as the machine&apos;s Brand in Inventory Intake.
+            </p>
+          </div>
           {company && (
             <p className="text-[11px] text-ink-400">
               Brand key: <span className="font-mono text-ink-600">{key}</span>
