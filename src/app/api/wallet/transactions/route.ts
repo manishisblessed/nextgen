@@ -3,6 +3,7 @@ import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { buildPayoutLedgerMemos } from "@/lib/payout/ledgerMemos";
 import { bankLogoSlug } from "@/lib/bank-logos";
+import { resolveTxnBankName } from "@/lib/txn/bankName";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -42,9 +43,9 @@ async function attachBankLogos(rows: LedgerRow[]): Promise<LedgerRow[]> {
 
   const txns = await prisma.transaction.findMany({
     where: { id: { in: txnIds } },
-    select: { id: true, operator: true },
+    select: { id: true, operator: true, request: true },
   });
-  const opById = new Map(txns.map((t) => [t.id, t.operator]));
+  const txnById = new Map(txns.map((t) => [t.id, t]));
 
   const opCodes = [
     ...new Set(txns.map((t) => t.operator).filter((c): c is string => !!c)),
@@ -59,8 +60,9 @@ async function attachBankLogos(rows: LedgerRow[]): Promise<LedgerRow[]> {
 
   return rows.map((r) => {
     if (r.refType !== "Transaction" || !r.refId) return r;
-    const operator = opById.get(r.refId) ?? null;
-    const name = (operator && billerName.get(operator)) || operator || null;
+    const t = txnById.get(r.refId);
+    if (!t) return r;
+    const name = resolveTxnBankName(t.operator, t.request, billerName);
     return { ...r, logo: name && bankLogoSlug(name) ? name : null };
   });
 }

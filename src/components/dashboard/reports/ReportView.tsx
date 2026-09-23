@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { toDisplayRole } from "@/lib/auth";
 import {
   Search,
   RefreshCw,
@@ -231,7 +233,22 @@ function buildTicketSubject(row: Row, reportTitle: string): string {
 }
 
 export function ReportView({ type }: { type: ReportType }) {
-  const config = REPORTS[type];
+  const { data: session } = useSession();
+  const isRetailer =
+    !!session?.user?.role &&
+    toDisplayRole(session.user.role as string) === "retailer";
+
+  // Retailers don't need the raw "Operator / Provider" code (e.g. "4004") — the
+  // Bank column + logo already identify the issuer. Drop it from their view
+  // (table + exports); admins/distributors keep it for reconciliation.
+  const base = REPORTS[type];
+  const config = useMemo<ReportConfig>(
+    () =>
+      isRetailer
+        ? { ...base, columns: base.columns.filter((c) => c.key !== "operator") }
+        : base,
+    [base, isRetailer]
+  );
   const f = config.filters;
 
   const today = useMemo(() => new Date(), []);

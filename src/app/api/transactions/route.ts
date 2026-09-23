@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { isAdminRole } from "@/lib/security/ownership";
 import { bankLogoSlug } from "@/lib/bank-logos";
+import { resolveTxnBankName } from "@/lib/txn/bankName";
 
 const CreateBody = z.object({
   service: z.string().trim().min(1).max(64).optional(),
@@ -86,8 +87,11 @@ export async function GET(req: Request) {
     : [];
   const billerName = new Map(billers.map((b) => [b.code, b.name]));
   /** Bank name for logo resolution, only when it maps to a known bank logo. */
-  const logoName = (operator: string | null): string | null => {
-    const name = (operator && billerName.get(operator)) || operator || null;
+  const logoName = (
+    operator: string | null,
+    request: (typeof rows)[number]["request"]
+  ): string | null => {
+    const name = resolveTxnBankName(operator, request, billerName);
     return name && bankLogoSlug(name) ? name : null;
   };
 
@@ -112,7 +116,7 @@ export async function GET(req: Request) {
     }),
     customer: t.customer ?? "—",
     commission: hideCommission ? 0 : toNumber(t.commission),
-    logo: logoName(t.operator),
+    logo: logoName(t.operator, t.request),
   }));
 
   return NextResponse.json({ ok: true, data });
