@@ -56,6 +56,7 @@ type Scheme = {
   description: string | null;
   active: boolean;
   isDefault: boolean;
+  ownerId: string | null;
   slabs?: Slab[];
 };
 
@@ -281,6 +282,7 @@ export default function SchemeEditorPage() {
 
       <AssignmentPanel
         schemeId={schemeId}
+        ownerId={scheme?.ownerId ?? null}
         assigned={assigned}
         onChange={(msg) => {
           notify(msg, true);
@@ -721,61 +723,84 @@ function SlabModal({
   );
 }
 
+type TargetUser = { id: string; name: string; email: string; shop: string; role: string };
+
 function AssignmentPanel({
   schemeId,
+  ownerId,
   assigned,
   onChange,
   onError,
 }: {
   schemeId: string;
+  ownerId: string | null;
   assigned: AssignedUser[];
   onChange: (msg: string) => void;
   onError: (msg: string) => void;
 }) {
   const [assigningAll, setAssigningAll] = useState(false);
   const [assignAllConfirmOpen, setAssignAllConfirmOpen] = useState(false);
-  const [sdList, setSdList] = useState<{ id: string; name: string; email: string; shopName: string | null }[]>([]);
-  const [loadingSd, setLoadingSd] = useState(true);
+  const [targetList, setTargetList] = useState<TargetUser[]>([]);
+  const [loadingTargets, setLoadingTargets] = useState(true);
+
+  // A platform scheme (no owner) can only go to super-distributors; a derived
+  // scheme can only go to its owner's direct children (any tier below them).
+  const isDerived = ownerId != null;
+  const targetLabel = isDerived ? "child user" : "super distributor";
+  const targetLabelPlural = isDerived ? "child users" : "super distributors";
 
   const assignedIds = useMemo(() => new Set(assigned.map((u) => u.id)), [assigned]);
 
-  const loadSuperDistributors = useCallback(async () => {
-    setLoadingSd(true);
+  const loadTargets = useCallback(async () => {
+    setLoadingTargets(true);
     try {
-      const res = await fetch("/api/admin/users?role=super-distributor&pageSize=200");
+      const url = isDerived
+        ? `/api/admin/users?parentId=${encodeURIComponent(ownerId!)}&pageSize=200`
+        : "/api/admin/users?role=super-distributor&pageSize=200";
+      const res = await fetch(url);
       const data = await res.json();
       if (res.ok)
-        setSdList(
-          (data.users ?? []).map((u: { id: string; name: string; email: string; shopName: string | null }) => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            shopName: u.shopName,
-          }))
+        setTargetList(
+          (data.users ?? []).map(
+            (u: { id: string; name: string; email?: string; shop?: string; role: string }) => ({
+              id: u.id,
+              name: u.name,
+              email: u.email ?? "",
+              shop: u.shop ?? "",
+              role: u.role,
+            })
+          )
         );
     } catch {
       /* silent */
     } finally {
-      setLoadingSd(false);
+      setLoadingTargets(false);
     }
-  }, []);
+  }, [isDerived, ownerId]);
 
   useEffect(() => {
-    loadSuperDistributors();
-  }, [loadSuperDistributors]);
+    loadTargets();
+  }, [loadTargets]);
 
   async function assignAll() {
     setAssigningAll(true);
     try {
+      // Assign to every eligible, not-yet-assigned target. The endpoint enforces
+      // the cascade rule server-side, so this can never mis-price the network.
+      const userIds = targetList.filter((u) => !assignedIds.has(u.id)).map((u) => u.id);
+      if (userIds.length === 0) {
+        onChange(`All ${targetLabelPlural} are already assigned.`);
+        return;
+      }
       const res = await fetch("/api/admin/schemes/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schemeId, role: "SUPER_DISTRIBUTOR" }),
+        body: JSON.stringify({ schemeId, userIds }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Assign failed");
-      onChange(`Assigned to ${data.updated} super distributor(s).`);
-      loadSuperDistributors();
+      onChange(`Assigned to ${data.updated} ${targetLabelPlural}.`);
+      loadTargets();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
     } finally {
@@ -792,7 +817,8 @@ function AssignmentPanel({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Assign failed");
-      onChange("Super distributor assigned to scheme.");
+      onChange(`${targetLabel[0].toUpperCase()}${targetLabel.slice(1)} assigned to scheme.`);
+      loadTargets();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Assign failed");
     }
@@ -813,7 +839,7 @@ function AssignmentPanel({
     }
   }
 
-  const unassigned = sdList.filter((u) => !assignedIds.has(u.id));
+  const unassigned = targetList.filter((u) => !assignedIds.has(u.id));
 
   return (
     <section className="overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-sm">
@@ -821,16 +847,18 @@ function AssignmentPanel({
         <Users className="h-4 w-4 text-violet-600" />
         <h3 className="font-display text-sm font-semibold text-ink-900">Assignment</h3>
         <span className="ml-auto text-xs text-ink-400">
-          Cascade model — admin assigns to super distributors only. Lower tiers receive derived schemes.
+          {isDerived
+            ? "Derived scheme — assignable only to the owner's direct children."
+            : "Cascade model — platform schemes go to super distributors only. Lower tiers receive derived schemes."}
         </span>
       </div>
 
       <div className="grid gap-6 p-5 lg:grid-cols-2">
-        {/* Available super distributors */}
+        {/* Available targets */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
-              Super distributors ({unassigned.length} available)
+              {isDerived ? "Child users" : "Super distributors"} ({unassigned.length} available)
             </p>
             {unassigned.length > 0 && (
               <Button size="sm" variant="outline" onClick={() => setAssignAllConfirmOpen(true)} disabled={assigningAll}>
@@ -838,11 +866,15 @@ function AssignmentPanel({
               </Button>
             )}
           </div>
-          {loadingSd ? (
+          {loadingTargets ? (
             <p className="py-4 text-center text-sm text-ink-400">Loading…</p>
           ) : unassigned.length === 0 ? (
             <p className="rounded-xl border border-dashed border-ink-200 px-3 py-6 text-center text-sm text-ink-500">
-              All super distributors are assigned to this scheme.
+              {targetList.length === 0
+                ? isDerived
+                  ? "This scheme's owner has no direct children yet."
+                  : "No super distributors exist yet."
+                : `All ${targetLabelPlural} are assigned to this scheme.`}
             </p>
           ) : (
             <ul className="max-h-72 divide-y divide-ink-100 overflow-y-auto rounded-xl border border-ink-100">
@@ -850,7 +882,7 @@ function AssignmentPanel({
                 <li key={u.id} className="flex items-center justify-between px-3 py-2 text-sm">
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-ink-900">{u.name}</span>
-                    <span className="block truncate text-xs text-ink-500">{u.shopName ?? u.email}</span>
+                    <span className="block truncate text-xs text-ink-500">{u.shop || u.email}</span>
                   </span>
                   <button
                     onClick={() => assignUser(u.id)}
@@ -897,10 +929,11 @@ function AssignmentPanel({
         onClose={() => setAssignAllConfirmOpen(false)}
         busy={assigningAll}
         tone="default"
-        title="Assign scheme to all super distributors?"
+        title={`Assign scheme to all ${targetLabelPlural}?`}
         description={
           <>
-            This scheme will be assigned to <span className="font-semibold text-ink-900">ALL super distributors</span>, overriding their current scheme.
+            This scheme will be assigned to{" "}
+            <span className="font-semibold text-ink-900">ALL {targetLabelPlural}</span>, overriding their current scheme.
           </>
         }
         confirmLabel="Assign to all"

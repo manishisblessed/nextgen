@@ -150,6 +150,7 @@ export async function GET(req: Request) {
     const q = searchParams.get("q") ?? "";
     const role = searchParams.get("role");
     const status = searchParams.get("status");
+    const parentId = searchParams.get("parentId");
     const page = Math.max(1, Number(searchParams.get("page") ?? 1));
     const pageSize = Math.min(100, Math.max(10, Number(searchParams.get("pageSize") ?? 50)));
 
@@ -187,6 +188,10 @@ export async function GET(req: Request) {
       ];
     }
 
+    // Scope to a specific parent's direct children (used by cascade-aware
+    // scheme-assignment pickers for derived schemes).
+    if (parentId) where.parentId = parentId;
+
     // Exclude ADMIN, SUPPORT, and MASTER_ADMIN from default user list unless explicitly filtered
     where.role = where.role ?? { notIn: ["ADMIN", "SUPPORT", "MASTER_ADMIN"] };
 
@@ -211,6 +216,7 @@ export async function GET(req: Request) {
           createdAt: true,
           twoFactorExempt: true,
           pinLoginEnabled: true,
+          parentId: true,
           _count: { select: { children: true } },
           ...uplineInclude,
         },
@@ -265,7 +271,9 @@ export async function GET(req: Request) {
       id: u.id,
       userCode: u.userCode ?? "—",
       name: u.name,
+      email: u.email,
       shop: u.shopName ?? "—",
+      parentId: u.parentId ?? null,
       role: displayRole(u.role),
       city: u.city ?? "—",
       state: u.state ?? "—",

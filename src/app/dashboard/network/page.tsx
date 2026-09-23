@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Search, Filter, PackagePlus, RefreshCw, ShieldCheck, ShieldOff, Loader2,
-  Wallet, ArrowUpDown, Monitor, Layers, X, Check, AlertCircle, Eye,
+  Wallet, ArrowUpDown, Monitor, X, Check, AlertCircle, Eye,
   Link2, Copy, Share2, Send, Pencil, Trash2, Clock, MailPlus, ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -135,7 +135,7 @@ export default function NetworkPage() {
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
-  const [actionTarget, setActionTarget] = useState<{ user: NetworkUser; action: "wallet" | "pos" | "scheme" } | null>(null);
+  const [actionTarget, setActionTarget] = useState<{ user: NetworkUser; action: "wallet" | "pos" } | null>(null);
   const [statusTarget, setStatusTarget] = useState<NetworkUser | null>(null);
 
   const role: keyof typeof CHILD_META =
@@ -263,13 +263,6 @@ export default function NetworkPage() {
             >
               <Monitor className="h-4 w-4" />
             </button>
-            <button
-              onClick={() => setActionTarget({ user: r, action: "scheme" })}
-              title="Assign commission scheme"
-              className="rounded-lg p-1.5 text-ink-500 hover:bg-brand-50 hover:text-brand-700"
-            >
-              <Layers className="h-4 w-4" />
-            </button>
           </div>
         );
       },
@@ -395,14 +388,6 @@ export default function NetworkPage() {
         <PosAssignModal
           child={actionTarget.user}
           parentId={currentUserId}
-          onClose={() => setActionTarget(null)}
-          onDone={() => { setActionTarget(null); fetchNetwork(); }}
-        />
-      )}
-
-      {actionTarget?.action === "scheme" && (
-        <SchemeAssignModal
-          child={actionTarget.user}
           onClose={() => setActionTarget(null)}
           onDone={() => { setActionTarget(null); fetchNetwork(); }}
         />
@@ -645,100 +630,6 @@ function PosAssignModal({ child, parentId, onClose, onDone }: { child: NetworkUs
               </div>
             </>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Scheme assign modal ──
-
-function SchemeAssignModal({ child, onClose, onDone }: { child: NetworkUser; onClose: () => void; onDone: () => void }) {
-  const [schemes, setSchemes] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([]);
-  const [selectedScheme, setSelectedScheme] = useState<string | null>(child.schemeId);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/network/scheme")
-      .then((r) => r.json())
-      .then((d) => { setSchemes(d.schemes ?? []); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const submit = async () => {
-    if (!selectedScheme) { setErr("Select a scheme — without one, the user cannot transact"); return; }
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/network/scheme", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ childId: child.id, schemeId: selectedScheme }),
-      });
-      const d = await res.json();
-      if (!res.ok) { setErr(d.error ?? "Assignment failed"); setBusy(false); return; }
-      onDone();
-    } catch { setErr("Request failed"); setBusy(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-ink-100 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
-          <div>
-            <h3 className="font-display text-base font-semibold text-ink-900">Assign scheme to {child.name}</h3>
-            <p className="text-xs text-ink-500">One scheme covers charges, commission and POS MDR</p>
-          </div>
-          <button onClick={onClose} className="rounded-full p-1 text-ink-400 hover:bg-ink-100"><X className="h-5 w-5" /></button>
-        </div>
-        <div className="space-y-4 p-5">
-          {err && <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"><AlertCircle className="h-4 w-4 shrink-0" /> {err}</div>}
-
-          {child.schemeName && (
-            <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700">
-              <Layers className="h-4 w-4 shrink-0" />
-              Currently assigned: <span className="font-semibold">{child.schemeName}</span>
-            </div>
-          )}
-          {!child.schemeName && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              No scheme assigned — this user cannot transact until a scheme is assigned.
-            </div>
-          )}
-
-          {loading ? (
-            <div className="py-8 text-center text-sm text-ink-500">Loading your schemes…</div>
-          ) : schemes.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-ink-200 px-3 py-6 text-center text-sm text-ink-500">
-              You have no derived schemes yet. Go to <span className="font-semibold">My Schemes</span> to create one from your rate-card first.
-            </div>
-          ) : (
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-ink-500">Select scheme</label>
-              <select
-                value={selectedScheme ?? ""}
-                onChange={(e) => setSelectedScheme(e.target.value || null)}
-                className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
-              >
-                <option value="">— Select a scheme —</option>
-                {schemes.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}{s.isDefault ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={submit} disabled={busy || loading || schemes.length === 0}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Assign
-            </Button>
-          </div>
         </div>
       </div>
     </div>

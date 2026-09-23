@@ -31,6 +31,7 @@ import {
 type NetworkUser = {
   id: string;
   userCode: string | null;
+  role: string;
   name: string;
   email: string;
   phone: string;
@@ -584,7 +585,7 @@ function DefaultServicesPanel({
 
 /* ------------------------------------------------------------- drawer */
 
-type SchemeOption = { id: string; name: string };
+type SchemeOption = { id: string; name: string; ownerId: string | null; active: boolean };
 
 function UserDrawer({
   user,
@@ -650,10 +651,33 @@ function UserDrawer({
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const list = d?.schemes ?? d ?? [];
-        if (Array.isArray(list)) setSchemes(list.map((s: SchemeOption) => ({ id: s.id, name: s.name })));
+        if (Array.isArray(list))
+          setSchemes(
+            list.map((s: SchemeOption) => ({
+              id: s.id,
+              name: s.name,
+              ownerId: s.ownerId ?? null,
+              active: s.active ?? true,
+            }))
+          );
       })
       .catch(() => {});
   }, []);
+
+  // Only offer schemes the backend will actually accept for THIS user (mirrors
+  // the cascade rule in PATCH /api/admin/network/[id]): a platform scheme
+  // (ownerId null) is assignable only to a super-distributor; everyone else can
+  // only take a scheme derived from their own parent (ownerId === parent.id).
+  const assignableSchemes = schemes.filter(
+    (s) => s.active && (s.ownerId ? s.ownerId === user.parent?.id : user.role === "SUPER_DISTRIBUTOR")
+  );
+
+  // Keep the user's currently-assigned scheme visible even if it's no longer in
+  // the assignable set (e.g. it was deactivated), so the selection isn't blanked.
+  const schemeOptions =
+    user.scheme && !assignableSchemes.some((s) => s.id === user.scheme!.id)
+      ? [{ id: user.scheme.id, name: `${user.scheme.name} (current)` }, ...assignableSchemes]
+      : assignableSchemes;
 
   const patch = async (label: string, body: object) => {
     setBusy(label);
@@ -991,7 +1015,7 @@ function UserDrawer({
           <div className="flex gap-2">
             <select value={schemeId} onChange={(e) => setSchemeId(e.target.value)} className={`${inputCls} flex-1`}>
               <option value="">Platform default</option>
-              {schemes.map((s) => (
+              {schemeOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
@@ -1012,6 +1036,13 @@ function UserDrawer({
               Save
             </Button>
           </div>
+          {assignableSchemes.length === 0 && (
+            <p className="mt-2 text-xs text-amber-600">
+              {user.role === "SUPER_DISTRIBUTOR"
+                ? "No active platform schemes available yet. Create one under Schemes first."
+                : `No scheme has been derived from this user's parent (${user.parent?.name ?? "—"}) yet. Assign a scheme to the parent first — schemes cascade down from there.`}
+            </p>
+          )}
           <p className="mt-2 text-xs text-ink-400">
             One scheme now covers charges and POS settlement MDR. Assigning it here sets both.
           </p>

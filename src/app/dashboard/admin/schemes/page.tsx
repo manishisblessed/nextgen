@@ -869,6 +869,7 @@ function SchemeCard({
       {assignOpen && (
         <AssignModal
           schemeId={scheme.id}
+          ownerId={scheme.ownerId}
           onClose={() => setAssignOpen(false)}
           onChanged={(msg) => {
             notify(msg, true);
@@ -1944,11 +1945,13 @@ function MdrRateModal({
 
 function AssignModal({
   schemeId,
+  ownerId,
   onClose,
   onChanged,
   onError,
 }: {
   schemeId: string;
+  ownerId: string | null;
   onClose: () => void;
   onChanged: (msg: string) => void;
   onError: (msg: string) => void;
@@ -2053,10 +2056,12 @@ function AssignModal({
         </div>
         <div className="space-y-4 p-5">
           <p className="text-xs text-ink-400">
-            Pick a role, then select the user to assign this scheme. The user will receive the charges and commission defined in this scheme.
+            {ownerId
+              ? "This is a derived scheme — it can only be assigned to the owner's direct children (any tier below them)."
+              : "This is a platform scheme — it can only be assigned to super-distributors. Lower tiers receive schemes derived from their parent."}
           </p>
 
-          {/* Available users */}
+          {/* Available users — scoped to who can actually hold this scheme */}
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
@@ -2071,10 +2076,17 @@ function AssignModal({
             <AssignUserPicker
               autoFocus
               excludeUserIds={assignedIds}
+              parentId={ownerId ?? undefined}
+              roles={ownerId ? undefined : [{ value: "super-distributor", label: "Super Distributor" }]}
+              defaultRole={ownerId ? "all" : "super-distributor"}
               onSelect={(u) => assignUser(u.id)}
               onVisibleUsersChange={setVisibleUsers}
               listMaxHeightClass="max-h-48"
-              emptyLabel="All users are assigned to this scheme."
+              emptyLabel={
+                ownerId
+                  ? "This owner has no direct children to assign yet."
+                  : "All super-distributors are already assigned to this scheme."
+              }
             />
           </div>
 

@@ -18,8 +18,10 @@ export type PickerUser = {
   id: string;
   userCode: string;
   name: string;
+  email?: string;
   shop: string;
   role: string; // kebab-case display role (retailer, distributor, …)
+  parentId?: string | null;
   city: string;
   state: string;
   status: string;
@@ -45,6 +47,8 @@ export type AssignUserPickerProps = {
   roles?: readonly { value: RoleTabValue; label: string }[];
   /** Role tab selected on mount. Defaults to "all". */
   defaultRole?: RoleTabValue;
+  /** Restrict the list to a specific parent's direct children (cascade scoping). */
+  parentId?: string | null;
   /** Autofocus the search box on mount. */
   autoFocus?: boolean;
   /** Page size for each fetch. Defaults to 25. */
@@ -70,6 +74,7 @@ export function AssignUserPicker({
   excludeUserIds,
   roles = ROLE_TABS,
   defaultRole = "all",
+  parentId,
   autoFocus = false,
   pageSize = 25,
   listMaxHeightClass = "max-h-72",
@@ -88,7 +93,9 @@ export function AssignUserPicker({
   }, [rawQuery]);
 
   const { data, isLoading } = useSWR<{ users: PickerUser[] }>(
-    `/api/admin/users?role=${role}&q=${encodeURIComponent(q)}&pageSize=${pageSize}`,
+    `/api/admin/users?role=${role}&q=${encodeURIComponent(q)}&pageSize=${pageSize}${
+      parentId ? `&parentId=${encodeURIComponent(parentId)}` : ""
+    }`,
     pickerFetcher,
     { revalidateOnFocus: false, keepPreviousData: true }
   );
