@@ -16,7 +16,7 @@
  * match APPROVED claims against the provider's settlement file and claw back
  * anything that never settled.
  */
-import { Prisma, type QrClaimStatus, type ServiceCode } from "@prisma/client";
+import { Prisma, type QrClaimStatus, type QrSettlementKind, type ServiceCode } from "@prisma/client";
 import { createHash } from "crypto";
 import { prisma } from "../db";
 import { creditWallet, debitWallet } from "../ledger";
@@ -147,8 +147,11 @@ const CARD_LAST4_RE = /^\d{4}$/;
  * Run every submission-time validation WITHOUT creating anything. The route
  * calls this before paying for the Cloudinary upload; `submitQrClaim` runs it
  * again right before insert (the DB uniques stay authoritative under races).
+ * Also returns the QR's settlement kind so the claim can be stamped with it.
  */
-export async function precheckQrClaim(input: QrClaimPrecheckInput): Promise<{ utr: string | null; amount: number }> {
+export async function precheckQrClaim(
+  input: QrClaimPrecheckInput
+): Promise<{ utr: string | null; amount: number; settlementKind: QrSettlementKind }> {
   // Card last-4 is the required identifier for RuPay credit-card collections.
   const cardLast4 = input.cardLast4?.trim();
   if (!cardLast4 || !CARD_LAST4_RE.test(cardLast4)) {
@@ -190,7 +193,7 @@ export async function precheckQrClaim(input: QrClaimPrecheckInput): Promise<{ ut
   // claimable immediately so a retailer can split a payment: remaining rupees
   // on the live QR, the rest on the overflow QR, without waiting for rotation.
   if (!qr.active) {
-    const overflow = qr.enabled ? await isOverflowCollectQr(qr.id) : false;
+    const overflow = qr.enabled ? await isOverflowCollectQr(qr.id, qr.settlementKind) : false;
     if (!overflow) {
       const cutoff = qr.disabledAt?.getTime();
       const effectivePaidMs = paidAtMs ?? now;
@@ -226,7 +229,7 @@ export async function precheckQrClaim(input: QrClaimPrecheckInput): Promise<{ ut
     throw new QrClaimError("Daily claim amount limit reached — try again tomorrow or contact support", 429, "DAILY_AMOUNT_LIMIT");
   }
 
-  return { utr, amount };
+  return { utr, amount, settlementKind: qr.settlementKind };
 }
 
 export type QrClaimSubmitInput = QrClaimPrecheckInput & {
@@ -235,7 +238,7 @@ export type QrClaimSubmitInput = QrClaimPrecheckInput & {
 };
 
 export async function submitQrClaim(input: QrClaimSubmitInput) {
-  const { utr, amount } = await precheckQrClaim(input);
+  const { utr, amount, settlementKind } = await precheckQrClaim(input);
 
   let claim;
   try {
@@ -247,6 +250,9 @@ export async function submitQrClaim(input: QrClaimSubmitInput) {
         cardLast4: input.cardLast4.trim(),
         utr,
         paidAt: input.paidAt ?? null,
+        // Snapshot the QR's stream so settlement/reporting stay correct even if
+        // the QR is later re-tagged.
+        settlementKind,
         screenshotPublicId: input.screenshotPublicId,
         screenshotFormat: input.screenshotFormat ?? null,
         screenshotHash: input.screenshotHash,
@@ -270,11 +276,11 @@ export async function submitQrClaim(input: QrClaimSubmitInput) {
     },
   });
 
-  // This claim just moved the QR's daily counter — re-resolve the live QR so a
-  // filled QR auto-pauses immediately (not only on the next /api/qr/active
-  // poll). Best-effort: never fail a successfully-recorded claim over rotation.
+  // This claim just moved the QR's daily counter — re-resolve the live QR for
+  // this stream so a filled QR auto-pauses immediately (not only on the next
+  // /api/qr/active poll). Best-effort: never fail a recorded claim over rotation.
   try {
-    await resolveLiveQr();
+    await resolveLiveQr(settlementKind);
   } catch {
     /* the next /api/qr/active call re-resolves */
   }
@@ -375,10 +381,30 @@ export async function approveQrClaim(input: QrClaimReviewInput): Promise<{ id: s
         beneficiaryId: claim.userId,
         portalVerified: true,
         secondApproval: claim.status === "AWAITING_SECOND_APPROVAL",
+        settlementKind: claim.settlementKind,
         note: input.note ?? null,
       },
     },
   });
+
+  // QR-Instant claims settle to the retailer wallet IMMEDIATELY at the scheme's
+  // T0 rate — no button, no waiting for the T+1 cron. T1 claims stay SETTLEABLE
+  // for the next-day sweep. Best-effort: if pricing isn't available (no scheme
+  // slab / below floor) the claim stays SETTLEABLE and the T+1 sweep retries it
+  // at T0 (see runQrT1SettlementSweep), so money is never stuck permanently.
+  if (claim.settlementKind === "INSTANT") {
+    try {
+      const net = await settleClaim(
+        { id: claim.id, userId: claim.userId, amount: claim.amount, utr: claim.utr, cardLast4: claim.cardLast4 },
+        "T0",
+        SETTLED_VIA.QR_INSTANT_APPROVAL,
+        input.adminId
+      );
+      if (net !== null) return { id: claim.id, status: "SETTLED" };
+    } catch {
+      /* leave SETTLEABLE — the T+1 sweep will settle it at T0 as a fallback */
+    }
+  }
 
   return { id: claim.id, status: "SETTLEABLE" };
 }
@@ -659,7 +685,11 @@ export async function runQrT1SettlementSweep(): Promise<{
   for (const claim of claims) {
     if (Number(claim.amount) < config.minAmount) continue; // below minimum — leave for next run
     try {
-      const net = await settleClaim(claim, "T1", SETTLED_VIA.T1_CRON);
+      // T1 claims settle at the scheme's T1 rate. A SETTLEABLE INSTANT claim
+      // reaching the sweep means its at-approval instant settle failed to price
+      // that day; retry it here at its own T0 rate so it is never stuck.
+      const settlementType = claim.settlementKind === "INSTANT" ? "T0" : "T1";
+      const net = await settleClaim(claim, settlementType, SETTLED_VIA.T1_CRON);
       if (net === null) continue; // not priceable — leave SETTLEABLE for admin
       settled++;
       totalAmount += net;
@@ -809,13 +839,16 @@ export async function clawbackQrClaim(input: QrClaimReviewInput & { note: string
  * you've fronted: approved-and-credited claims the provider hasn't settled to
  * you yet. If it grows faster than settlements arrive, stop approving.
  */
-export async function getQrClaimOverview() {
+export async function getQrClaimOverview(kind?: QrSettlementKind) {
+  // Optionally scope every figure to a single settlement stream (the admin
+  // review queue shows QR-Instant / QR-T+1 tabs, each with its own overview).
+  const k = kind ? { settlementKind: kind } : {};
   const [pending, awaitingSecond, settleable, outstanding] = await Promise.all([
-    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "PENDING" } }),
-    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "AWAITING_SECOND_APPROVAL" } }),
-    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { status: "SETTLEABLE" } }),
+    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { ...k, status: "PENDING" } }),
+    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { ...k, status: "AWAITING_SECOND_APPROVAL" } }),
+    prisma.qrClaim.aggregate({ _count: true, _sum: { amount: true }, where: { ...k, status: "SETTLEABLE" } }),
     // Fronted float: SETTLED (net-credited) claims the provider hasn't settled to us yet.
-    prisma.qrClaim.aggregate({ _count: true, _sum: { netAmount: true }, where: { status: "SETTLED", reconciledAt: null } }),
+    prisma.qrClaim.aggregate({ _count: true, _sum: { netAmount: true }, where: { ...k, status: "SETTLED", reconciledAt: null } }),
   ]);
   return {
     pendingCount: pending._count,

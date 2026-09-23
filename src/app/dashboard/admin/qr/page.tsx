@@ -35,11 +35,16 @@ type Overview = {
   outstandingReceivable: number;
 };
 
+type QrKind = "INSTANT" | "T1";
+
+const KIND_LABEL: Record<QrKind, string> = { INSTANT: "QR-Instant", T1: "QR-T+1" };
+
 type ClaimRow = {
   id: string;
   retailer: { id: string; userCode: string | null; name: string; phone: string; shopName: string | null };
   qrLabel: string;
   qrVpa: string | null;
+  settlementKind: QrKind;
   amount: number;
   utr: string | null;
   cardLast4: string | null;
@@ -71,6 +76,7 @@ type QrRow = {
   label: string;
   upiVpa: string | null;
   imageUrl: string;
+  settlementKind: QrKind;
   active: boolean;
   enabled: boolean;
   priority: number;
@@ -89,7 +95,7 @@ type QrRow = {
 // Tab 1 — claims review queue
 // ---------------------------------------------------------------------------
 
-function ReviewQueueTab() {
+function ReviewQueueTab({ kind }: { kind: QrKind }) {
   const { fetchWithStepUp } = useStepUp();
   const [claims, setClaims] = useState<ClaimRow[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -110,7 +116,7 @@ function ReviewQueueTab() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/qr/claims?status=${statusFilter}`);
+      const res = await fetch(`/api/admin/qr/claims?status=${statusFilter}&kind=${kind}`);
       if (res.ok) {
         const d = await res.json();
         setClaims(d.claims ?? []);
@@ -122,7 +128,7 @@ function ReviewQueueTab() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, kind]);
 
   useEffect(() => {
     refresh();
@@ -163,9 +169,13 @@ function ReviewQueueTab() {
         toast.error(typeof d.error === "string" ? d.error : "Action failed");
         return;
       }
-      if (d.status === "SETTLEABLE") {
+      if (d.status === "SETTLED") {
         toast.success(
-          `Approved — ${formatINR(selected.amount)} is now settleable to ${selected.retailer.name}. They receive it (net of MDR) on instant settle or T+1.`
+          `Approved & instantly settled — ${formatINR(selected.amount)} (net of MDR) was credited to ${selected.retailer.name}'s wallet now.`
+        );
+      } else if (d.status === "SETTLEABLE") {
+        toast.success(
+          `Approved — ${formatINR(selected.amount)} is now settleable to ${selected.retailer.name}. They receive it (net of MDR) on T+1.`
         );
       } else if (d.status === "AWAITING_SECOND_APPROVAL") {
         toast.warning(
@@ -445,6 +455,15 @@ function ReviewQueueTab() {
                 placeholder="e.g. Verified in portal / additional detail for the retailer"
               />
             </div>
+            <p
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+                selected.settlementKind === "INSTANT" ? "bg-emerald-50 text-emerald-700" : "bg-ink-50 text-ink-600"
+              }`}
+            >
+              {selected.settlementKind === "INSTANT"
+                ? "QR-Instant claim — approving credits the retailer's wallet immediately at the T0 rate."
+                : "QR-T+1 claim — approving marks it settleable; it credits on the next-day (T+1) sweep."}
+            </p>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => act("approve")} disabled={busy || !portalVerified}>
                 <CheckCircle2 className="mr-1 h-4 w-4" />
@@ -452,7 +471,9 @@ function ReviewQueueTab() {
                   ? "Working…"
                   : selected.amount > threshold && selected.status === "PENDING"
                     ? "Approve (stage for 2nd admin)"
-                    : `Approve ${formatINR(selected.amount)}`}
+                    : selected.settlementKind === "INSTANT"
+                      ? `Approve & settle ${formatINR(selected.amount)}`
+                      : `Approve ${formatINR(selected.amount)}`}
               </Button>
               <Button variant="outline" onClick={() => act("reject")} disabled={busy}>
                 <XCircle className="mr-1 h-4 w-4" />
@@ -522,6 +543,8 @@ function QrManageTab() {
 
   const [label, setLabel] = useState("");
   const [vpa, setVpa] = useState("");
+  const [newKind, setNewKind] = useState<QrKind>("INSTANT");
+  const [kindFilter, setKindFilter] = useState<"ALL" | QrKind>("ALL");
   const [priority, setPriority] = useState("100");
   const [dailyLimit, setDailyLimit] = useState("");
   const [dailyLimitCount, setDailyLimitCount] = useState("");
@@ -580,6 +603,7 @@ function QrManageTab() {
         body: JSON.stringify({
           label: label.trim(),
           upiVpa: vpa.trim() || undefined,
+          settlementKind: newKind,
           priority: priority.trim() ? Number(priority) : undefined,
           dailyLimit: dailyLimit.trim() ? Number(dailyLimit) : undefined,
           dailyLimitCount: dailyLimitCount.trim() ? Number(dailyLimitCount) : undefined,
@@ -591,7 +615,11 @@ function QrManageTab() {
         toast.error(typeof d.error === "string" ? d.error : "Upload failed — check the fields");
         return;
       }
-      toast.success(d.active ? `"${d.label}" is now the live QR.` : `"${d.label}" added to the queue (priority ${d.priority}).`);
+      toast.success(
+        d.active
+          ? `"${d.label}" is now the live ${KIND_LABEL[newKind]} QR.`
+          : `"${d.label}" added to the ${KIND_LABEL[newKind]} queue (priority ${d.priority}).`
+      );
       setLabel("");
       setVpa("");
       setPriority("100");
@@ -692,6 +720,13 @@ function QrManageTab() {
         </div>
       ),
     },
+    {
+      key: "settlementKind",
+      header: "Service",
+      render: (r) => (
+        <Badge variant={r.settlementKind === "INSTANT" ? "success" : "brand"}>{KIND_LABEL[r.settlementKind]}</Badge>
+      ),
+    },
     { key: "priority", header: "Priority", align: "right" },
     {
       key: "collectedToday",
@@ -780,6 +815,31 @@ function QrManageTab() {
           </div>
         </div>
 
+        {/* Which settlement service this QR serves — retailers collect on it
+            under the matching QR-Instant / QR-T+1 tab. */}
+        <div className="mt-4">
+          <Label>Settlement service</Label>
+          <div className="mt-1 grid gap-2 sm:grid-cols-2">
+            {(["INSTANT", "T1"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setNewKind(k)}
+                className={`flex items-center justify-between rounded-xl border-2 px-4 py-2.5 text-left text-sm font-semibold transition ${
+                  newKind === k
+                    ? "border-brand-500 bg-brand-50 text-brand-700"
+                    : "border-ink-100 bg-white text-ink-600 hover:border-ink-200"
+                }`}
+              >
+                <span>{KIND_LABEL[k]}</span>
+                <span className="text-[11px] font-normal text-ink-500">
+                  {k === "INSTANT" ? "T0 · auto-settle on approval" : "T+1 · next-day sweep"}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <Label htmlFor="qr-label">Label</Label>
@@ -858,12 +918,35 @@ function QrManageTab() {
         </Button>
       </form>
 
+      <div className="flex gap-2">
+        {(
+          [
+            { id: "ALL", label: "All services" },
+            { id: "INSTANT", label: KIND_LABEL.INSTANT },
+            { id: "T1", label: KIND_LABEL.T1 },
+          ] as const
+        ).map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setKindFilter(f.id)}
+            className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${
+              kindFilter === f.id
+                ? "border-brand-500 bg-brand-50 text-brand-700"
+                : "border-ink-100 bg-white text-ink-600 hover:border-ink-200"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       <DataTable
         title="QR queue"
         loading={loading}
-        description="Ordered by priority. Retailers see remaining headroom on the live QR and collect overflow on the next one; full QRs auto-resume tomorrow. Old QRs are never deleted so historical claims stay traceable."
+        description="Ordered by priority, per settlement service. Retailers see remaining headroom on the live QR and collect overflow on the next one; full QRs auto-resume tomorrow. Old QRs are never deleted so historical claims stay traceable."
         columns={cols}
-        data={qrs}
+        data={kindFilter === "ALL" ? qrs : qrs.filter((q) => q.settlementKind === kindFilter)}
         empty="No QR uploaded yet — retailers currently have nothing to collect on."
       />
 
@@ -962,13 +1045,15 @@ function QrManageTab() {
 
 export default function AdminQrPage() {
   const [tab, setTab] = useState<"queue" | "manage">("queue");
+  // Review queue is split by settlement stream — two tabs to approve/reject.
+  const [reviewKind, setReviewKind] = useState<QrKind>("INSTANT");
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Admin"
         title="QR Collections"
-        description="Manage the shop collection QR and verify retailer settlement claims. Money moves only after the UTR is confirmed in the provider portal."
+        description="Manage the shop collection QRs (separate pools for Instant & T+1) and verify retailer settlement claims. Money moves only after the UTR is confirmed in the provider portal."
       />
 
       <div className="flex gap-2">
@@ -993,7 +1078,30 @@ export default function AdminQrPage() {
         ))}
       </div>
 
-      {tab === "queue" ? <ReviewQueueTab /> : <QrManageTab />}
+      {tab === "queue" ? (
+        <>
+          {/* Instant vs T+1 review queues. */}
+          <div className="flex gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
+            {(["INSTANT", "T1"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setReviewKind(k)}
+                className={
+                  reviewKind === k
+                    ? "flex-1 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-ink-900 shadow-sm"
+                    : "flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-ink-500 transition-colors hover:text-ink-700"
+                }
+              >
+                {KIND_LABEL[k]}
+              </button>
+            ))}
+          </div>
+          <ReviewQueueTab key={reviewKind} kind={reviewKind} />
+        </>
+      ) : (
+        <QrManageTab />
+      )}
     </div>
   );
 }

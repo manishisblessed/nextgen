@@ -68,6 +68,7 @@ export async function GET() {
     claims: claims.map((c) => ({
       id: c.id,
       qrLabel: c.qr.label,
+      settlementKind: c.settlementKind,
       amount: Number(c.amount),
       utr: c.utr,
       cardLast4: c.cardLast4,

@@ -20,6 +20,7 @@ type Plan = {
   id: string;
   name: string;
   description: string | null;
+  machineName: string | null;
   monthlyRent: number;
   setupFee: number;
   deposit: number;
@@ -73,6 +74,7 @@ type Overview = {
     failedAmount: number;
     waivedCount: number;
   };
+  machineNames: string[];
   plans: Plan[];
   subscriptions: Sub[];
   subTotal: number;
@@ -273,7 +275,7 @@ export default function PosRentalPage() {
         ))}
       </div>
 
-      {tab === "plans" && <PlansTab plans={data?.plans ?? []} loading={loading} busy={busy} act={act} />}
+      {tab === "plans" && <PlansTab plans={data?.plans ?? []} machineNames={data?.machineNames ?? []} loading={loading} busy={busy} act={act} />}
       {tab === "subscriptions" && (
         <SubscriptionsTab
           subs={data?.subscriptions ?? []}
@@ -404,16 +406,26 @@ function WaiverCard({
 /* ─────────────────────────────────────────────────────────── Rental Plans */
 
 function PlansTab({
-  plans, loading, busy, act,
+  plans, machineNames, loading, busy, act,
 }: {
   plans: Plan[];
+  machineNames: string[];
   loading: boolean;
   busy: boolean;
   act: (b: Record<string, unknown>, m?: string) => Promise<boolean>;
 }) {
-  const [form, setForm] = useState({ name: "", description: "", monthlyRent: "", setupFee: "", deposit: "", includeGst: false });
+  const [form, setForm] = useState({ name: "", description: "", machineName: "", monthlyRent: "", setupFee: "", deposit: "", includeGst: false });
   const [editPlan, setEditPlan] = useState<Plan | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", description: "", monthlyRent: "", setupFee: "", deposit: "", includeGst: false });
+  const [editForm, setEditForm] = useState({ name: "", description: "", machineName: "", monthlyRent: "", setupFee: "", deposit: "", includeGst: false });
+
+  // Machine models already taken by another platform plan (one machine → one
+  // plan). Excludes the plan being edited so its own machine stays selectable.
+  const takenMachines = new Set(
+    plans
+      .filter((p) => p.machineName && p.id !== editPlan?.id)
+      .map((p) => p.machineName as string),
+  );
+  const availableForCreate = machineNames.filter((m) => !plans.some((p) => p.machineName === m));
 
   const columns: Column<Plan>[] = [
     {
@@ -426,9 +438,19 @@ function PlansTab({
         </div>
       ),
     },
+    {
+      key: "machine",
+      header: "Machine",
+      render: (p) =>
+        p.machineName ? (
+          <span className="font-mono text-xs font-semibold text-ink-800">{p.machineName}</span>
+        ) : (
+          <span className="text-xs text-ink-400">—</span>
+        ),
+    },
     { key: "rent", header: "Monthly Rent", render: (p) => <span className="font-semibold text-ink-900">{formatINR(p.monthlyRent)}</span> },
     { key: "setup", header: "Setup Fee", render: (p) => <span className="text-ink-600">{formatINR(p.setupFee)}</span> },
-    { key: "deposit", header: "Deposit", render: (p) => <span className="text-ink-600">{formatINR(p.deposit)}</span> },
+    { key: "deposit", header: "Security Deposit", render: (p) => <span className="text-ink-600">{formatINR(p.deposit)}</span> },
     { key: "gst", header: "GST", render: (p) => <Badge variant={p.includeGst ? "success" : "default"}>{p.includeGst ? "18% GST" : "No GST"}</Badge> },
     { key: "subs", header: "Active Subs", render: (p) => <Badge variant="brand">{p.activeSubscriptions}</Badge> },
     {
@@ -448,6 +470,7 @@ function PlansTab({
               setEditForm({
                 name: p.name,
                 description: p.description ?? "",
+                machineName: p.machineName ?? "",
                 monthlyRent: String(p.monthlyRent),
                 setupFee: String(p.setupFee),
                 deposit: String(p.deposit),
@@ -477,11 +500,32 @@ function PlansTab({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <label className={labelCls}>Plan Name *</label>
             <input className={inputCls} placeholder="e.g. Standard POS" value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label className={labelCls}>POS Machine *</label>
+            <select className={inputCls} value={form.machineName}
+              onChange={(e) => setForm((f) => ({ ...f, machineName: e.target.value }))}>
+              <option value="">Select a machine…</option>
+              {/* Keep the currently-selected value visible even if filtered out. */}
+              {form.machineName && !availableForCreate.includes(form.machineName) && (
+                <option value={form.machineName}>{form.machineName}</option>
+              )}
+              {availableForCreate.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {machineNames.length === 0 ? (
+              <p className="mt-1 text-[11px] text-amber-600">No machines in POS Fleet yet — add inventory first.</p>
+            ) : availableForCreate.length === 0 ? (
+              <p className="mt-1 text-[11px] text-ink-400">Every machine already has a plan.</p>
+            ) : (
+              <p className="mt-1 text-[11px] text-ink-400">One plan per machine model.</p>
+            )}
           </div>
           <div>
             <label className={labelCls}>Description</label>
@@ -499,7 +543,7 @@ function PlansTab({
               onChange={(e) => setForm((f) => ({ ...f, setupFee: e.target.value }))} />
           </div>
           <div>
-            <label className={labelCls}>Deposit (₹)</label>
+            <label className={labelCls}>Security Deposit (₹)</label>
             <input className={inputCls} type="number" min="0" step="0.01" placeholder="0" value={form.deposit}
               onChange={(e) => setForm((f) => ({ ...f, deposit: e.target.value }))} />
           </div>
@@ -516,28 +560,29 @@ function PlansTab({
         </div>
 
         <div className="mt-4 flex items-center gap-3">
-          <Button size="sm" disabled={busy || form.name.trim().length < 2 || !form.monthlyRent}
+          <Button size="sm" disabled={busy || form.name.trim().length < 2 || !form.machineName || !form.monthlyRent}
             onClick={async () => {
               const ok = await act({
                 action: "create_plan",
                 name: form.name,
                 description: form.description || undefined,
+                machineName: form.machineName,
                 monthlyRent: Number(form.monthlyRent),
                 setupFee: Number(form.setupFee || 0),
                 deposit: Number(form.deposit || 0),
                 includeGst: form.includeGst,
               }, "Rental plan created.");
-              if (ok) setForm({ name: "", description: "", monthlyRent: "", setupFee: "", deposit: "", includeGst: false });
+              if (ok) setForm({ name: "", description: "", machineName: "", monthlyRent: "", setupFee: "", deposit: "", includeGst: false });
             }}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Create Plan
           </Button>
           {form.monthlyRent && (
             <span className="text-xs text-ink-500">
-              Plan preview: {formatINR(Number(form.monthlyRent))}/mo
+              Plan preview: {form.machineName ? `${form.machineName} · ` : ""}{formatINR(Number(form.monthlyRent))}/mo
               {form.includeGst ? " + 18% GST" : ""}
               {Number(form.setupFee) > 0 ? ` + ${formatINR(Number(form.setupFee))} setup` : ""}
-              {Number(form.deposit) > 0 ? ` + ${formatINR(Number(form.deposit))} deposit` : ""}
+              {Number(form.deposit) > 0 ? ` + ${formatINR(Number(form.deposit))} security deposit` : ""}
             </span>
           )}
         </div>
@@ -561,13 +606,14 @@ function PlansTab({
             </Button>
             <Button
               size="sm"
-              disabled={busy || editForm.name.trim().length < 2 || !editForm.monthlyRent}
+              disabled={busy || editForm.name.trim().length < 2 || !editForm.machineName || !editForm.monthlyRent}
               onClick={async () => {
                 const ok = await act({
                   action: "update_plan",
                   planId: editPlan!.id,
                   name: editForm.name,
                   description: editForm.description || undefined,
+                  machineName: editForm.machineName,
                   monthlyRent: Number(editForm.monthlyRent),
                   setupFee: Number(editForm.setupFee || 0),
                   deposit: Number(editForm.deposit || 0),
@@ -593,6 +639,23 @@ function PlansTab({
             <input className={inputCls} placeholder="Optional description" value={editForm.description}
               onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
           </div>
+          <div>
+            <label className={labelCls}>POS Machine *</label>
+            <select className={inputCls} value={editForm.machineName}
+              onChange={(e) => setEditForm((f) => ({ ...f, machineName: e.target.value }))}>
+              <option value="">Select a machine…</option>
+              {/* Keep the current value selectable even if another plan holds it. */}
+              {editForm.machineName && (
+                <option value={editForm.machineName}>{editForm.machineName}</option>
+              )}
+              {machineNames
+                .filter((m) => m !== editForm.machineName && !takenMachines.has(m))
+                .map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+            </select>
+            <p className="mt-1 text-[11px] text-ink-400">One plan per machine model.</p>
+          </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={labelCls}>Monthly Rent (₹) *</label>
@@ -605,7 +668,7 @@ function PlansTab({
                 onChange={(e) => setEditForm((f) => ({ ...f, setupFee: e.target.value }))} />
             </div>
             <div>
-              <label className={labelCls}>Deposit (₹)</label>
+              <label className={labelCls}>Security Deposit (₹)</label>
               <input className={inputCls} type="number" min="0" step="0.01" value={editForm.deposit}
                 onChange={(e) => setEditForm((f) => ({ ...f, deposit: e.target.value }))} />
             </div>
@@ -619,10 +682,10 @@ function PlansTab({
           {editForm.monthlyRent && (
             <div className="rounded-xl border border-ink-100 bg-ink-50 p-3">
               <p className="text-xs text-ink-500">
-                Updated preview: <span className="font-semibold text-ink-900">{formatINR(Number(editForm.monthlyRent))}/mo</span>
+                Updated preview: {editForm.machineName ? `${editForm.machineName} · ` : ""}<span className="font-semibold text-ink-900">{formatINR(Number(editForm.monthlyRent))}/mo</span>
                 {editForm.includeGst ? " + 18% GST" : ""}
                 {Number(editForm.setupFee) > 0 ? ` + ${formatINR(Number(editForm.setupFee))} setup` : ""}
-                {Number(editForm.deposit) > 0 ? ` + ${formatINR(Number(editForm.deposit))} deposit` : ""}
+                {Number(editForm.deposit) > 0 ? ` + ${formatINR(Number(editForm.deposit))} security deposit` : ""}
               </p>
             </div>
           )}

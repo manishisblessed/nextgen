@@ -21,12 +21,31 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Input, Label } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
 import { formatINR } from "@/lib/utils";
 import { rejectionReasonLabel } from "@/lib/qr/rejectionReasons";
 import { QrSettlementReportTab } from "./QrSettlementReportTab";
+
+/** The two QR settlement streams the retailer picks between. */
+type QrKind = "INSTANT" | "T1";
+
+const KIND_META: Record<QrKind, { label: string; short: string; blurb: string; icon: typeof Zap }> = {
+  INSTANT: {
+    label: "QR-Instant",
+    short: "Instant settlement",
+    blurb:
+      "Collect on the Instant-settlement QR. Once your claim is verified, the amount (net of MDR) is credited to your wallet immediately.",
+    icon: Zap,
+  },
+  T1: {
+    label: "QR-T+1",
+    short: "T+1 settlement",
+    blurb:
+      "Collect on the T+1-settlement QR. Verified claims are credited to your wallet automatically on the next settlement day (T+1).",
+    icon: Clock,
+  },
+};
 
 type QrHeadroom = {
   collected: number;
@@ -57,6 +76,7 @@ type DailyUsage = {
 type Claim = {
   id: string;
   qrLabel: string;
+  settlementKind: QrKind;
   amount: number;
   utr: string | null;
   cardLast4: string | null;
@@ -70,18 +90,6 @@ type Claim = {
   rejectionReasons: string[];
   createdAt: string;
   reviewedAt: string | null;
-};
-
-type SettleableClaim = {
-  id: string;
-  qrLabel: string;
-  amount: number;
-  utr: string | null;
-  cardLast4: string | null;
-  paidAt: string | null;
-  settleableAt: string | null;
-  instant: { mdrAmount: number; netAmount: number } | null;
-  t1: { mdrAmount: number; netAmount: number } | null;
 };
 
 /**
@@ -102,6 +110,14 @@ function claimIdentifier(row: { utr: string | null; cardLast4: string | null }):
   if (row.utr) return row.utr;
   if (row.cardLast4) return `•••• ${row.cardLast4}`;
   return "—";
+}
+
+/** Human tag for a settled claim's settlement route. */
+function settledViaLabel(via: string | null): string {
+  if (!via) return "";
+  if (via === "T1_CRON") return " · T+1";
+  if (via.startsWith("INSTANT") || via === "QR_INSTANT_APPROVAL") return " · instant";
+  return "";
 }
 
 function QrHeadroomMeter({ headroom }: { headroom: QrHeadroom }) {
@@ -291,27 +307,28 @@ export default function QrCollectionsPage() {
   const role = (authSession?.user as { role?: string } | undefined)?.role;
   const isRetailer = role === "RETAILER";
 
+  // Deep-link support (?tab=report&kind=&from=&to=) from the "QR Today" card.
+  const deepLink = useMemo(() => {
+    if (typeof window === "undefined")
+      return { tab: null as string | null, kind: null as string | null, from: null as string | null, to: null as string | null };
+    const sp = new URLSearchParams(window.location.search);
+    return { tab: sp.get("tab"), kind: sp.get("kind"), from: sp.get("from"), to: sp.get("to") };
+  }, []);
+
+  // Primary tab = which settlement stream the retailer is working in.
+  const [kind, setKind] = useState<QrKind>(deepLink.kind === "T1" ? "T1" : "INSTANT");
+  // Retailers switch between "Collect & Claim" and "Settlement Report" inside a
+  // stream; everyone else is pinned to the report (they have no collect surface).
+  const [subTab, setSubTab] = useState<"collect" | "report">(deepLink.tab === "report" ? "report" : "collect");
+  const activeSubTab: "collect" | "report" = isRetailer ? subTab : "report";
+
   const [qr, setQr] = useState<ActiveQr | null>(null);
   const [overflowQr, setOverflowQr] = useState<ActiveQr | null>(null);
   const [claimQrId, setClaimQrId] = useState<string | null>(null);
   const [qrReason, setQrReason] = useState<string | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [dailyUsage, setDailyUsage] = useState<DailyUsage | null>(null);
-  const [settleable, setSettleable] = useState<SettleableClaim[]>([]);
-  const [instantEnabled, setInstantEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  // Deep-link support (?tab=report&from=&to=) from the "QR Today" overview card.
-  const deepLink = useMemo(() => {
-    if (typeof window === "undefined") return { tab: null as string | null, from: null as string | null, to: null as string | null };
-    const sp = new URLSearchParams(window.location.search);
-    return { tab: sp.get("tab"), from: sp.get("from"), to: sp.get("to") };
-  }, []);
-
-  // Retailers switch between "Collect & Claim" and "Settlement Report"; everyone
-  // else is pinned to the report (they have no QR/claim surface).
-  const [tab, setTab] = useState<"collect" | "report">(deepLink.tab === "report" ? "report" : "collect");
-  const activeTab: "collect" | "report" = isRetailer ? tab : "report";
 
   // Claim form
   const [amount, setAmount] = useState("");
@@ -322,24 +339,18 @@ export default function QrCollectionsPage() {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Instant-settle selection
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [settling, setSettling] = useState(false);
-
   const refresh = useCallback(async () => {
-    // Collect/claim/settlement data is retailer-only; the endpoints 403 for
-    // other roles, so skip the fetch entirely for them.
+    // Collect/claim data is retailer-only; the endpoints 403 for other roles, so
+    // skip the fetch entirely for them.
     if (!isRetailer) {
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const [qrRes, clRes, stRes] = await Promise.all([
-        fetch("/api/qr/active"),
+      const [qrRes, clRes] = await Promise.all([
+        fetch(`/api/qr/active?kind=${kind}`),
         fetch("/api/qr/claims"),
-        fetch("/api/qr/settlement/pending"),
       ]);
       if (qrRes.ok) {
         const d = await qrRes.json();
@@ -352,17 +363,12 @@ export default function QrCollectionsPage() {
         setClaims(cd.claims ?? []);
         setDailyUsage(cd.dailyUsage ?? null);
       }
-      if (stRes.ok) {
-        const st = await stRes.json();
-        setSettleable(st.claims ?? []);
-        setInstantEnabled(Boolean(st.instantEnabled));
-      }
     } catch {
       toast.error("Could not load QR data — check your connection.");
     } finally {
       setLoading(false);
     }
-  }, [isRetailer]);
+  }, [isRetailer, kind]);
 
   useEffect(() => {
     refresh();
@@ -448,108 +454,21 @@ export default function QrCollectionsPage() {
     }
   }
 
-  const pendingAmount = claims
+  // Claims for the active stream only (the tab is a QR-Instant / QR-T+1 view).
+  const kindClaims = useMemo(() => claims.filter((c) => c.settlementKind === kind), [claims, kind]);
+
+  const pendingAmount = kindClaims
     .filter((c) => c.status === "PENDING" || c.status === "AWAITING_SECOND_APPROVAL")
+    .reduce((s, c) => s + c.amount, 0);
+  const settleableTotal = kindClaims
+    .filter((c) => c.status === "SETTLEABLE")
     .reduce((s, c) => s + c.amount, 0);
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
-  const creditedThisMonth = claims
+  const creditedThisMonth = kindClaims
     .filter((c) => c.status === "SETTLED" && c.settledAt && new Date(c.settledAt) >= monthStart)
     .reduce((s, c) => s + (c.netAmount ?? c.amount), 0);
-
-  // ── Instant settlement ──
-  const readySettleable = settleable.filter((c) => c.instant !== null);
-  const selectedClaims = readySettleable.filter((c) => selected[c.id]);
-  const allSelected = readySettleable.length > 0 && selectedClaims.length === readySettleable.length;
-  const settleableTotal = settleable.reduce((s, c) => s + c.amount, 0);
-  const instantNet = selectedClaims.reduce((s, c) => s + (c.instant?.netAmount ?? 0), 0);
-  const instantFee = selectedClaims.reduce((s, c) => s + (c.instant?.mdrAmount ?? 0), 0);
-
-  function toggleSel(id: string) {
-    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
-  function toggleAllSel() {
-    if (allSelected) {
-      setSelected({});
-    } else {
-      const next: Record<string, boolean> = {};
-      for (const c of readySettleable) next[c.id] = true;
-      setSelected(next);
-    }
-  }
-
-  async function runInstantSettle() {
-    const ids = selectedClaims.map((c) => c.id);
-    if (ids.length === 0) return;
-    setSettling(true);
-    try {
-      const res = await fetch("/api/qr/settlement/instant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claimIds: ids }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(typeof d.error === "string" ? d.error : "Instant settlement failed");
-        return;
-      }
-      toast.success(
-        `Settled ${d.settled} claim${d.settled === 1 ? "" : "s"} · ${formatINR(d.totalAmount)} credited to your wallet.`
-      );
-      if (d.failed > 0) toast.warning(`${d.failed} could not be settled and will auto-settle T+1.`);
-      setSelected({});
-      refresh();
-    } catch {
-      toast.error("Network error — refresh before retrying to avoid duplicates.");
-    } finally {
-      setSettling(false);
-      setConfirmOpen(false);
-    }
-  }
-
-  const settleCols: Column<SettleableClaim>[] = [
-    {
-      key: "id",
-      header: "",
-      render: (r) =>
-        instantEnabled && r.instant ? (
-          <input type="checkbox" checked={!!selected[r.id]} onChange={() => toggleSel(r.id)} className="h-4 w-4 accent-brand-600" />
-        ) : (
-          <span title="Will auto-settle T+1" className="text-ink-300">—</span>
-        ),
-    },
-    { key: "utr", header: "Ref / Card", render: (r) => <span className="font-mono text-xs">{claimIdentifier(r)}</span> },
-    { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
-    {
-      key: "instant",
-      header: "Instant (now)",
-      align: "right",
-      render: (r) =>
-        r.instant ? (
-          <div>
-            <div className="font-semibold text-emerald-700">{formatINR(r.instant.netAmount)}</div>
-            <div className="text-[10px] text-ink-500">fee {formatINR(r.instant.mdrAmount)}</div>
-          </div>
-        ) : (
-          <span className="text-xs text-ink-400">—</span>
-        ),
-    },
-    {
-      key: "t1",
-      header: "T+1 (tomorrow)",
-      align: "right",
-      render: (r) =>
-        r.t1 ? (
-          <div>
-            <div className="font-medium text-ink-700">{formatINR(r.t1.netAmount)}</div>
-            <div className="text-[10px] text-ink-500">fee {formatINR(r.t1.mdrAmount)}</div>
-          </div>
-        ) : (
-          <span className="text-xs text-ink-400">—</span>
-        ),
-    },
-  ];
 
   const cols: Column<Claim>[] = [
     { key: "utr", header: "Ref / Card", render: (r) => <span className="font-mono text-xs">{claimIdentifier(r)}</span> },
@@ -563,7 +482,7 @@ export default function QrCollectionsPage() {
           {r.status === "SETTLED" && r.netAmount != null && (
             <div className="text-[10px] text-emerald-600">
               net {formatINR(r.netAmount)}
-              {r.settledVia === "INSTANT_BUTTON" ? " · instant" : r.settledVia === "T1_CRON" ? " · T+1" : ""}
+              {settledViaLabel(r.settledVia)}
             </div>
           )}
         </div>
@@ -633,6 +552,8 @@ export default function QrCollectionsPage() {
       ? Math.round((claimAmt - remainingOnCollect) * 100) / 100
       : 0;
 
+  const meta = KIND_META[kind];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -640,13 +561,50 @@ export default function QrCollectionsPage() {
         title={isRetailer ? "Collect on the shop QR" : "QR Settlement & Commission"}
         description={
           isRetailer
-            ? "Take customer payments on the live QR up to its remaining daily amount. If the customer is paying more than what's left, collect the rest on the next QR."
+            ? "Pick a settlement service, take customer payments on that QR, then claim each payment for verification."
             : "QR collections across your retailer network — volume, MDR, settlements and the commission you earn on each claim."
         }
       />
 
-      {/* Retailers toggle Collect & Claim vs Settlement Report; DT/MD/SD only
-          ever see the report, so the switcher is hidden for them. */}
+      {/* Primary stream selector: QR-Instant vs QR-T+1. Admin can add separate
+          QRs for each; retailers see the matching pool here. */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(["INSTANT", "T1"] as const).map((k) => {
+          const m = KIND_META[k];
+          const Icon = m.icon;
+          const active = kind === k;
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setKind(k)}
+              className={`flex items-start gap-3 rounded-2xl border-2 p-4 text-left transition ${
+                active
+                  ? "border-brand-500 bg-gradient-to-br from-brand-50 to-accent-50 shadow-soft"
+                  : "border-ink-100 bg-white hover:border-brand-200"
+              }`}
+            >
+              <span
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                  active ? "bg-gradient-to-br from-brand-500 to-brand-700 text-white" : "bg-ink-100 text-ink-500"
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+              </span>
+              <span>
+                <span className="flex items-center gap-2">
+                  <span className="font-display text-base font-semibold text-ink-900">{m.label}</span>
+                  {active && <Badge variant="brand">Selected</Badge>}
+                </span>
+                <span className="mt-0.5 block text-xs text-ink-500">{m.short}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Retailers toggle Collect & Claim vs Settlement Report within the stream;
+          DT/MD/SD only ever see the report, so the switcher is hidden for them. */}
       {isRetailer && (
         <div className="flex gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
           {([
@@ -655,9 +613,9 @@ export default function QrCollectionsPage() {
           ] as const).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
+              onClick={() => setSubTab(id)}
               className={
-                tab === id
+                subTab === id
                   ? "flex-1 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-ink-900 shadow-sm"
                   : "flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-ink-500 transition-colors hover:text-ink-700"
               }
@@ -672,13 +630,22 @@ export default function QrCollectionsPage() {
         <div className="rounded-2xl border border-ink-100 bg-white p-10 text-center text-sm text-ink-500">
           Loading…
         </div>
-      ) : activeTab === "report" ? (
-        <QrSettlementReportTab initialFrom={deepLink.from} initialTo={deepLink.to} />
+      ) : activeSubTab === "report" ? (
+        <QrSettlementReportTab kind={kind} initialFrom={deepLink.from} initialTo={deepLink.to} />
       ) : (
       <>
+      <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-xs text-brand-800">
+        <span className="font-semibold">{meta.label}:</span> {meta.blurb}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Under review" value={formatINR(pendingAmount)} icon={Clock} accent="accent" />
-        <StatCard label="Ready to settle" value={formatINR(settleableTotal)} icon={Banknote} accent="brand" />
+        <StatCard
+          label={kind === "INSTANT" ? "Awaiting settlement" : "Ready to settle (T+1)"}
+          value={formatINR(settleableTotal)}
+          icon={Banknote}
+          accent="brand"
+        />
         <StatCard label="Settled this month" value={formatINR(creditedThisMonth)} icon={CheckCircle2} accent="emerald" />
         <StatCard
           label={qr?.headroom?.remainingAmount != null ? "This QR remaining" : "Active QR"}
@@ -696,70 +663,6 @@ export default function QrCollectionsPage() {
         />
       </div>
 
-      {/* Ready to settle — instant or auto T+1 */}
-      {settleable.length > 0 && (
-        <div className="space-y-3 rounded-2xl border border-brand-100 bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="font-display text-base font-semibold text-ink-900">Ready to settle</h3>
-              <p className="text-xs text-ink-500">
-                {instantEnabled ? (
-                  <>
-                    Approved payments awaiting settlement. Instant-settle the ones you need now (at your scheme&apos;s
-                    instant rate); the rest settle automatically on the next day (T+1). Each is settled only once.
-                  </>
-                ) : (
-                  <>
-                    Approved payments awaiting settlement. These settle automatically on the next day (T+1) at your
-                    standard rate — no action needed.
-                  </>
-                )}
-              </p>
-            </div>
-            {instantEnabled && (
-              <div className="flex items-center gap-3">
-                {readySettleable.length > 0 && (
-                  <button type="button" onClick={toggleAllSel} className="text-xs font-semibold text-brand-700">
-                    {allSelected ? "Clear" : "Select all"}
-                  </button>
-                )}
-                {selectedClaims.length > 0 && (
-                  <span className="text-xs text-ink-600">
-                    fee {formatINR(instantFee)} · you get{" "}
-                    <span className="font-semibold text-emerald-700">{formatINR(instantNet)}</span>
-                  </span>
-                )}
-                <Button size="sm" disabled={selectedClaims.length === 0 || settling} onClick={() => setConfirmOpen(true)}>
-                  <Zap className="h-4 w-4" /> Instant settle
-                </Button>
-              </div>
-            )}
-          </div>
-          <DataTable
-            columns={settleCols}
-            data={settleable}
-            loading={loading}
-            empty="Nothing awaiting settlement."
-          />
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        busy={settling}
-        title={`Instant settle ${selectedClaims.length} claim${selectedClaims.length === 1 ? "" : "s"}?`}
-        description={
-          <>
-            <span className="font-semibold text-ink-900">{formatINR(instantNet)}</span> will be credited to your
-            wallet now (instant fee {formatINR(instantFee)}). This cannot be undone, and these claims will not
-            settle again on T+1.
-          </>
-        }
-        confirmLabel="Settle now"
-        onConfirm={runInstantSettle}
-      />
-
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Live QR + overflow QR for the rest of a split payment */}
         <div className="space-y-4">
@@ -767,7 +670,7 @@ export default function QrCollectionsPage() {
             <>
               <QrCollectCard
                 qr={qr}
-                title="Collect on this QR first"
+                title={`Collect on this ${meta.label} first`}
                 selected={claimQrId === qr.id}
                 selectable={Boolean(overflowQr)}
                 onSelect={() => setClaimQrId(qr.id)}
@@ -797,13 +700,13 @@ export default function QrCollectionsPage() {
             </>
           ) : (
             <div className="rounded-2xl border border-ink-100 bg-gradient-to-br from-brand-50 to-accent-50 p-6 text-center">
-              <h3 className="font-display text-base font-semibold text-ink-900">Shop collection QR</h3>
+              <h3 className="font-display text-base font-semibold text-ink-900">{meta.label} collection QR</h3>
               <p className="mt-6 text-sm text-ink-600">
                 {loading
                   ? "Loading…"
                   : qrReason === "LIMIT_REACHED"
-                    ? "Collections are paused right now — today's limit was reached across all QRs. Please try again shortly."
-                    : "No collection QR is configured yet — contact your admin."}
+                    ? `${meta.label} collections are paused right now — today's limit was reached across all its QRs. Please try again shortly.`
+                    : `No ${meta.label} collection QR is configured yet — contact your admin.`}
               </p>
             </div>
           )}
@@ -816,7 +719,7 @@ export default function QrCollectionsPage() {
               <IndianRupee className="h-4 w-4" />
             </span>
             <div>
-              <h3 className="font-display text-base font-semibold text-ink-900">Claim a payment</h3>
+              <h3 className="font-display text-base font-semibold text-ink-900">Claim a {meta.label} payment</h3>
               <p className="text-xs text-ink-500">
                 {collectQr
                   ? `Claim against ${collectQr.label}${collectQr.upiVpa ? ` (${collectQr.upiVpa})` : ""}.`
@@ -956,10 +859,10 @@ export default function QrCollectionsPage() {
       </div>
 
       <DataTable
-        title="My claims"
-        description="Every payment you've claimed on the collection QR and its verification status."
+        title={`My ${meta.label} claims`}
+        description={`Every payment you've claimed on the ${meta.short.toLowerCase()} QR and its verification status.`}
         columns={cols}
-        data={claims}
+        data={kindClaims}
         loading={loading}
         empty="No claims yet — collect a payment on the QR and claim it here."
       />

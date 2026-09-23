@@ -33,6 +33,9 @@ import { processKycVideoBaseline } from "@/lib/kyc/video/service";
 import { runLedgerIntegrityAudit } from "@/lib/recon/integrity";
 import { runDailyPayoutReconciliation } from "@/lib/recon/payouts";
 import { runBbpsReconciliation } from "@/lib/recon/bbps";
+import { runTopupReconciliation, runTopupIntegrityCheck } from "@/lib/recon/topups";
+import { getPartner } from "@/lib/partners";
+import { viableChannelHealth, viableConfigured } from "@/lib/partners/viable-pg";
 import { sweepDisputeSlas } from "@/lib/disputes/service";
 import { runSettlementAutosweep } from "@/lib/settlement/autosweep";
 import { runT1SettlementSweep } from "@/lib/settlement/t1";
@@ -42,6 +45,7 @@ import { runQrT1SettlementSweep } from "@/lib/qr/claims";
 import { runPosMirrorSettleSweep } from "@/lib/settlement/pos-mirror-settle";
 import { runPosMirrorSweep, runPosRecentSweep } from "@/lib/pos/mirror-sweep";
 import { runPosRentalBilling } from "@/lib/pos/rental";
+import { runMonthlyIncentives, isLastIstDayOfMonth } from "@/lib/incentive/engine";
 import { syncPosMachines } from "@/lib/pos/assignments";
 import { flags } from "@/lib/env";
 import { getSetting } from "@/lib/settings";
@@ -125,6 +129,55 @@ async function main() {
   });
   await boss.schedule(QUEUES.BBPS_RECONCILE, "*/5 * * * *");
 
+  // QUEUES.TOPUP_RECONCILE — wallet top-up / PG-collect reconciliation. Viable
+  // PG has no webhook, so this sweep is the safety net that settles payins where
+  // the customer paid but never returned to the browser, and expires dead
+  // checkout links. Idempotent via settleTopup/settlePgCollect. Every 2 minutes.
+  await boss.work(QUEUES.TOPUP_RECONCILE, async () => {
+    try {
+      const r = await runTopupReconciliation();
+      if (!r.skipped && (r.settled > 0 || r.failed > 0 || r.expired > 0))
+        log(
+          `topup.reconcile: scanned=${r.scanned} settled=${r.settled} ` +
+            `failed=${r.failed} expired=${r.expired} pending=${r.stillPending}`
+        );
+    } catch (e) {
+      await captureError(e, { where: "topup.reconcile" });
+    }
+  });
+  await boss.schedule(QUEUES.TOPUP_RECONCILE, "*/2 * * * *");
+
+  // QUEUES.PG_HEALTH — active liveness probe of the Viable PG gateways. Viable
+  // exposes no status/health endpoint, so the only way to know a gateway is up is
+  // to attempt a tiny create-order on each route. We do this on a slow cadence
+  // (default 15 min) and ONLY alert when EVERY gateway is down — i.e. no way for
+  // customers to load funds — so ops can react before users pile up. Per-route
+  // health also feeds the wallet gateway picker via the shared health cache.
+  // Probe orders are ₹1 checkout links that expire unused (no capture, no loss).
+  await boss.work(QUEUES.PG_HEALTH, async () => {
+    try {
+      if (!viableConfigured()) return; // Viable not the active PG — nothing to probe
+      const active = getPartner("upi");
+      if (active.name !== "VIABLE_PG") return;
+      const channels = await viableChannelHealth(true);
+      const usable = channels.filter((c) => c.healthy);
+      if (channels.length > 0 && usable.length === 0) {
+        await sendOpsAlert({
+          title: "ALL wallet payin gateways DOWN — customers cannot load funds",
+          severity: "critical",
+          details: {
+            gateways: channels.length,
+            down: channels.map((c) => c.route).join(", "),
+          },
+        });
+      }
+      log(`pg.health: ${usable.length}/${channels.length} gateway(s) healthy`);
+    } catch (e) {
+      await captureError(e, { where: "pg.health" });
+    }
+  });
+  await boss.schedule(QUEUES.PG_HEALTH, "*/15 * * * *");
+
   // QUEUES.REKYC_MONTHLY — flag all ACTIVE network users for re-verification.
   // The sweep is internally idempotent, so a duplicate/retried delivery is safe.
   await boss.work(QUEUES.REKYC_MONTHLY, async () => {
@@ -184,6 +237,16 @@ async function main() {
       );
     } catch (e) {
       await captureError(e, { where: "recon.daily/bbps-recon", severity: "critical" });
+    }
+
+    try {
+      const integrity = await runTopupIntegrityCheck();
+      log(
+        `recon.daily: topup integrity checked ${integrity.checked} success row(s), ` +
+          `${integrity.missingCredits} missing credit(s)`
+      );
+    } catch (e) {
+      await captureError(e, { where: "recon.daily/topup-integrity", severity: "critical" });
     }
 
     try {
@@ -394,6 +457,35 @@ async function main() {
   });
   await boss.schedule(QUEUES.POS_RENTAL_BILLING, "0 * * * *", {}, { tz: "Asia/Kolkata" });
 
+  // QUEUES.INCENTIVE_MONTHLY — monthly volume-incentive / reverse-cashback
+  // engine. Scheduled hourly; fires only on the LAST IST day of the month at the
+  // operator-configured hour (PlatformSetting "incentive.monthly"). Settles the
+  // just-closing month. Idempotent per (user, scheme, YYYY-MM), so a duplicate
+  // fire in the same hour is harmless.
+  await boss.work(QUEUES.INCENTIVE_MONTHLY, async () => {
+    const cfg = await getSetting("incentive.monthly");
+    if (!cfg.enabled) return;
+    const now = new Date();
+    const istHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        hour12: false,
+      }).format(now)
+    );
+    if (istHour !== cfg.hour || !isLastIstDayOfMonth(now)) return;
+    try {
+      const r = await runMonthlyIncentives(now);
+      log(
+        `incentive.monthly: period=${r.periodKey} schemes=${r.schemes} users=${r.users} ` +
+          `paid=${r.paid} skipped=${r.skipped} failed=${r.failed} rewarded=₹${r.totalRewarded}`
+      );
+    } catch (e) {
+      await captureError(e, { where: "incentive.monthly", severity: "critical" });
+    }
+  });
+  await boss.schedule(QUEUES.INCENTIVE_MONTHLY, "0 * * * *", {}, { tz: "Asia/Kolkata" });
+
   // QUEUES.POS_MACHINE_SYNC — pull the Same Day terminal inventory into the
   // local mirror so the fleet page stays current without a manual Sync button.
   // The sync unions across machine_type partitions + repeated passes to defeat
@@ -515,7 +607,7 @@ async function main() {
   }
 
   log(
-    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.settle.sweep (*/10 * * * * IST), pos.settlement.t1 (10 * * * * IST), pos.settlement.instant (*/3 * * * * IST), qr.settlement.t1 (12 * * * * IST), pg.settlement.t1 (14 * * * * IST), pg.settlement.instant (*/3 * * * * IST), pos.machines.sync (*/10 * * * * IST), pos.mirror.sync (*/2 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
+    "ready · handlers: payout.initiate, payout.reconcile (*/5 * * * *), bbps.reconcile (*/5 * * * *), topup.reconcile (*/2 * * * *), pg.health (*/15 * * * *), rekyc.monthly (0 0 1 * * IST), kyc.video.baseline, recon.daily (30 2 * * * IST), dispute.sla (*/30 * * * *), settlement.autosweep (30 19 * * * IST), settlement.t1 (5 * * * * IST), pos.settle.sweep (*/10 * * * * IST), pos.settlement.t1 (10 * * * * IST), pos.settlement.instant (*/3 * * * * IST), qr.settlement.t1 (12 * * * * IST), pg.settlement.t1 (14 * * * * IST), pg.settlement.instant (*/3 * * * * IST), pos.machines.sync (*/10 * * * * IST), pos.mirror.sync (*/2 * * * * IST), webhook.deliver, aml.sweep (15 * * * *), audit.anchor (20 0 * * * IST), kyc.video.retention (30 1 * * * IST)"
   );
 }
 

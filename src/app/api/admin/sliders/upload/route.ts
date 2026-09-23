@@ -3,10 +3,15 @@ import { z } from "zod";
 import { requireAdminActivity } from "@/lib/security/adminActivity";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
-import { uploadToCloudinary } from "@/lib/cloudinary";
+import { uploadToCloudinary, deleteFromCloudinary } from "@/lib/cloudinary";
 import { prisma } from "@/lib/db";
 
 export const fetchCache = "force-no-store";
+
+// Minimum source resolution so banners/pop-ups render in HD at every
+// breakpoint. Keep in sync with the admin slider UI.
+const MIN_IMAGE_WIDTH = 1200;
+const MIN_IMAGE_HEIGHT = 300;
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +48,24 @@ export async function POST(req: Request) {
       type: "slider",
       isSensitive: false,
     });
+
+    // Guarantee HD: reject (and clean up) anything below the minimum resolution
+    // so a low-res asset never lands in the slider surface.
+    if (
+      typeof result.width === "number" &&
+      typeof result.height === "number" &&
+      (result.width < MIN_IMAGE_WIDTH || result.height < MIN_IMAGE_HEIGHT)
+    ) {
+      await deleteFromCloudinary(result.public_id).catch(() => {
+        /* best-effort cleanup */
+      });
+      return NextResponse.json(
+        {
+          error: `Image is only ${result.width}×${result.height}px. Upload at least ${MIN_IMAGE_WIDTH}×${MIN_IMAGE_HEIGHT}px for a crisp HD banner.`,
+        },
+        { status: 400 }
+      );
+    }
 
     await prisma.auditLog.create({
       data: {

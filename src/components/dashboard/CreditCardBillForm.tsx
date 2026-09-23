@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle } from "lucide-react";
-import { Input, Label, Select } from "@/components/ui/Input";
+import { Input, Label } from "@/components/ui/Input";
+import { OperatorSelect } from "@/components/ui/OperatorSelect";
 import { Button } from "@/components/ui/Button";
 import {
   TransactionResult,
@@ -222,21 +223,19 @@ export function CreditCardBillForm({ route }: { route?: string } = {}) {
       >
         <div className="sm:col-span-2">
           <Label htmlFor="biller">Card issuer</Label>
-          <Select
+          <OperatorSelect
             id="biller"
             value={billerCode}
-            onChange={(e) => {
-              setBillerCode(e.target.value);
+            onChange={(code) => {
+              setBillerCode(code);
               resetBill();
             }}
-          >
-            {billers.length === 0 && <option value="">Loading billers…</option>}
-            {billers.map((b) => (
-              <option key={b.code} value={b.code}>
-                {b.name}
-              </option>
-            ))}
-          </Select>
+            options={billers.map((b) => ({ value: b.code, label: b.name }))}
+            loading={billers.length === 0}
+            loadingText="Loading billers…"
+            placeholder="Select card issuer"
+            emptyText="No issuers found"
+          />
           {billersSource && billersSource !== "CATALOG" && (
             <p className="mt-1 text-[11px] text-ink-400">
               Live biller list · {billers.length} issuers

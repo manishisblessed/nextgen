@@ -24,7 +24,12 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/settlement/engine", async () => {
   const { Prisma } = await import("@prisma/client");
   return {
-    SETTLED_VIA: { INSTANT_AUTO: "INSTANT_AUTO", INSTANT_BUTTON: "INSTANT_BUTTON", T1_CRON: "T1_CRON" },
+    SETTLED_VIA: {
+      INSTANT_AUTO: "INSTANT_AUTO",
+      INSTANT_BUTTON: "INSTANT_BUTTON",
+      QR_INSTANT_APPROVAL: "QR_INSTANT_APPROVAL",
+      T1_CRON: "T1_CRON",
+    },
     startOfTodayIst: () => {
       const d = new Date();
       d.setHours(0, 0, 0, 0);
@@ -245,6 +250,35 @@ describe("approveQrClaim — approval makes a claim SETTLEABLE (no money moves)"
     const claim = await submitQrClaim(validClaim({ amount: 50_000 }));
     await approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true });
     const r = await approveQrClaim({ claimId: claim.id as string, adminId: "admin2", portalVerified: true });
+    expect(r.status).toBe("SETTLEABLE");
+    expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
+    expect(holder.db.walletTxns).toHaveLength(0);
+  });
+});
+
+describe("approveQrClaim — QR-Instant auto-settles at approval (T0)", () => {
+  beforeEach(() => {
+    // A dedicated QR-Instant pool the retailer collects on.
+    holder.db.addStaticQr("qr-instant", { settlementKind: "INSTANT" });
+  });
+
+  it("credits net (gross − T0 MDR) the moment an admin approves — no button", async () => {
+    const claim = await submitQrClaim(validClaim({ qrId: "qr-instant", amount: 1000 }));
+    expect((claim as { settlementKind: string }).settlementKind).toBe("INSTANT");
+
+    const r = await approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true });
+    expect(r.status).toBe("SETTLED");
+    // 1000 − 3% (T0) = 970 credited immediately.
+    expect(holder.db.balanceOf("retailer1")).toBe("1970.00");
+    expect(holder.db.walletTxns).toHaveLength(1);
+    const settled = holder.db.qrClaims.find((c) => c.id === claim.id) as { status: string; settledVia: string };
+    expect(settled.status).toBe("SETTLED");
+    expect(settled.settledVia).toBe("QR_INSTANT_APPROVAL");
+  });
+
+  it("a T+1 QR claim still only becomes SETTLEABLE on approval (no auto-credit)", async () => {
+    const claim = await submitQrClaim(validClaim({ amount: 1000 })); // qr1 = T1 default
+    const r = await approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true });
     expect(r.status).toBe("SETTLEABLE");
     expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
     expect(holder.db.walletTxns).toHaveLength(0);

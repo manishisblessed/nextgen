@@ -45,6 +45,8 @@ import {
   Tag,
   TrendingUp,
   Inbox,
+  Gift,
+  Trophy,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -134,6 +136,7 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "pos-bookings", label: "POS Bookings" },
   { href: "kyc", label: "KYC Approvals" },
   { href: "schemes", label: "Scheme Manager" },
+  { href: "incentives", label: "Reward Incentives" },
   { href: "brands", label: "Brands & MDR" },
   { href: "settlement-ops", label: "Settlement Ops" },
   { href: "pos-settlement", label: "POS Settlement" },
@@ -229,6 +232,7 @@ const adminWorkspace: NavItem[] = [
   { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor, badge: "New" },
   { href: "/dashboard/admin/qr", label: "QR Collections", icon: QrCode, badge: "New" },
   { href: "/dashboard/admin/schemes", label: "Scheme Manager", icon: Layers, badge: "New" },
+  { href: "/dashboard/admin/incentives", label: "Reward Incentives", icon: Gift, badge: "New" },
   { href: "/dashboard/admin/disputes", label: "Disputes & Support", icon: LifeBuoy, badge: "New" },
   { href: "/dashboard/admin/aml", label: "AML Monitoring", icon: ShieldAlert, badge: "New" },
   { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
@@ -252,6 +256,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/admin/pos", label: "POS Fleet", icon: Monitor, badge: "New" },
         { href: "/dashboard/admin/qr", label: "QR Collections", icon: QrCode, badge: "New" },
         { href: "/dashboard/admin/schemes", label: "Scheme Manager", icon: Layers, badge: "New" },
+        { href: "/dashboard/admin/incentives", label: "Reward Incentives", icon: Gift, badge: "New" },
         { href: "/dashboard/admin/disputes", label: "Disputes & Support", icon: LifeBuoy, badge: "New" },
         { href: "/dashboard/admin/aml", label: "AML Monitoring", icon: ShieldAlert, badge: "New" },
         { href: "/dashboard/payout-approvals", label: "Payout Approvals", icon: ListChecks },
@@ -272,6 +277,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
       items: [
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/dashboard/my-scheme", label: "My Scheme", icon: Layers, badge: "New" },
+        { href: "/dashboard/rewards", label: "Rewards", icon: Gift, badge: "New" },
         { href: "/dashboard/pos-booking", label: "Book POS Machine", icon: PackagePlus, badge: "New" },
         { href: "/dashboard/pos-rental", label: "POS Rental", icon: ReceiptText, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },

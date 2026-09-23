@@ -16,6 +16,7 @@ import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { Input, Select } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { BankLogo } from "@/components/dashboard/BankLogo";
 import { formatINR } from "@/lib/utils";
 import { downloadCSV, downloadPDF, downloadZIP, type ReportColumn } from "@/lib/reports";
 
@@ -32,6 +33,8 @@ type WalletTxn = {
   createdAt: string;
   /** True for synthetic payout hold/release rows (display-only, no balance impact). */
   memo?: boolean;
+  /** Resolved bank/issuer name for logo display on card/bill rows. */
+  logo?: string | null;
 };
 
 type LedgerData = {
@@ -260,11 +263,16 @@ export default function LedgerPage() {
                       </div>
                     </td>
                     <td className="px-5 py-3">
-                      <div className="font-medium text-ink-900">
-                        {REASON_LABELS[t.reason] ?? t.reason}
+                      <div className="flex items-center gap-2">
+                        {t.logo && <BankLogo name={t.logo} size={32} />}
+                        <div className="min-w-0">
+                          <div className="font-medium text-ink-900">
+                            {REASON_LABELS[t.reason] ?? t.reason}
+                          </div>
+                          {t.note && <div className="text-xs text-ink-500">{t.note}</div>}
+                          {t.refId && <div className="text-[11px] text-ink-400 font-mono">{t.refId}</div>}
+                        </div>
                       </div>
-                      {t.note && <div className="text-xs text-ink-500">{t.note}</div>}
-                      {t.refId && <div className="text-[11px] text-ink-400 font-mono">{t.refId}</div>}
                     </td>
                     <td
                       className={`px-5 py-3 text-right font-semibold ${

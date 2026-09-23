@@ -305,6 +305,7 @@ async function reportFund(user: SessionUser, params: ReportParams): Promise<Repo
     amount: toNumber(r.amount),
     mode: r.mode,
     utr: r.utr ?? "—",
+    bankLogo: r.bankName ?? "—",
     bankName: r.bankName ?? "—",
     status: r.status,
   }));

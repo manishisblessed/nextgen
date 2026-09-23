@@ -10,6 +10,7 @@ import * as mock from "./mock";
 import { paysprintAeps, paysprintConfigured, paysprintDmt } from "./paysprint";
 import { razorpayPayout, razorpayPayoutConfigured, razorpayUpi, razorpayUpiConfigured } from "./razorpay";
 import { bulkpeConfigured, bulkpePayout, bulkpeUpi } from "./bulkpe";
+import { viableConfigured, viableUpi } from "./viable-pg";
 import { bulkpeBbps, bulkpeBbpsConfigured } from "./bulkpe-bbps";
 import { samedayBbps, samedayBbpsConfigured } from "./sameday-bbps";
 import { samedaySettlementConfigured } from "./sameday-settlement";
@@ -134,7 +135,8 @@ export function getPartner<V extends Vertical>(v: V): ProviderMap[V] {
     case "dmt":
       return (flags.dmt && paysprintConfigured() ? paysprintDmt : mock.mockDmt) as ProviderMap[V];
     case "upi":
-      // Prefer BulkPe Simple PG; fall back to Razorpay when only that is configured.
+      // Prefer Viable DigiSeva PG; then BulkPe Simple PG; then Razorpay.
+      if (flags.upi && viableConfigured()) return viableUpi as ProviderMap[V];
       if (flags.upi && bulkpeConfigured()) return bulkpeUpi as ProviderMap[V];
       if (flags.upi && razorpayUpiConfigured()) return razorpayUpi as ProviderMap[V];
       return mock.mockUpi as ProviderMap[V];
@@ -221,7 +223,7 @@ export function partnerStatus() {
   return {
     aeps:     { live: flags.aeps && paysprintConfigured(), provider: flags.aeps && paysprintConfigured() ? "PAYSPRINT" : "MOCK" },
     dmt:      { live: flags.dmt && paysprintConfigured(), provider: flags.dmt && paysprintConfigured() ? "PAYSPRINT" : "MOCK" },
-    upi:      { live: flags.upi && (bulkpeConfigured() || razorpayUpiConfigured()), provider: flags.upi && bulkpeConfigured() ? "BULKPE_PG" : flags.upi && razorpayUpiConfigured() ? "RAZORPAY" : "MOCK" },
+    upi:      { live: flags.upi && (viableConfigured() || bulkpeConfigured() || razorpayUpiConfigured()), provider: flags.upi && viableConfigured() ? "VIABLE_PG" : flags.upi && bulkpeConfigured() ? "BULKPE_PG" : flags.upi && razorpayUpiConfigured() ? "RAZORPAY" : "MOCK" },
     payout:   (() => {
       const p = resolvePayout();
       const live = p.name !== "MOCK-PAYOUT";

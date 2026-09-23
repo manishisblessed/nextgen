@@ -20,9 +20,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { getPartner, assertRealMoneyProvider } from "../partners";
 import { round } from "../money";
+import { sendOpsAlert } from "../monitoring/alerts";
+import { isAmountMismatch } from "./guards";
 import { handlePgCapture } from "../settlement/pg";
 
-export type PgCollectState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED";
+export type PgCollectState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED" | "HOLD";
 
 export class PgCollectError extends Error {
   public statusCode: number;
@@ -142,6 +144,29 @@ export async function settlePgCollect(refId: string): Promise<{ refId: string; s
   if (!r.ok) throw new PgCollectError(r.message, 502, r.code);
 
   if (r.data.status === "PAID") {
+    // MONEY-SAFETY: cross-check the provider-verified amount before settling any
+    // money to the retailer. A mismatch is parked in HOLD for manual review and
+    // alerted — never auto-settled. HOLD rows are ignored by the reconcile sweep.
+    const verified = r.data.amount;
+    if (isAmountMismatch(verified, Number(txn.amount))) {
+      const held = await prisma.transaction.updateMany({
+        where: { id: txn.id, status: { in: ["INITIATED", "PROCESSING"] } },
+        data: {
+          status: "HOLD",
+          errorCode: "AMOUNT_MISMATCH",
+          errorMessage: `Verified ₹${verified} ≠ initiated ₹${txn.amount}`,
+        },
+      });
+      if (held.count > 0) {
+        await sendOpsAlert({
+          title: "PG collection amount mismatch — HELD (not settled)",
+          severity: "critical",
+          details: { refId, initiated: txn.amount.toString(), verified, provider: txn.partner ?? "" },
+        });
+      }
+      return { refId, status: "HOLD" };
+    }
+
     // Settle to the retailer through the scheme-priced PG engine. Idempotent via
     // the `pg-settle:<ref>` ledger key + the PgSettlementEntry unique ref.
     const result = await handlePgCapture({

@@ -70,9 +70,16 @@ export interface UpiCollectInput extends IdempotencyContext {
   amount: Money;
   vpa?: string; // payer VPA (optional for QR)
   note?: string;
+  customerName?: string; // payer name (hosted-checkout providers require it)
   customerEmail?: string;
   customerPhone: string;
   callbackUrl: string;
+  /**
+   * Optional gateway channel/route selector for multi-gateway providers
+   * (e.g. Viable PG exposes razorpay1/razorpay2/openmoney/…). Ignored by
+   * single-gateway providers. Falls back to the provider's configured default.
+   */
+  channel?: string;
 }
 export interface UpiCollectOutput {
   orderId: string;
@@ -80,10 +87,22 @@ export interface UpiCollectOutput {
   upiIntent?: string;
   qrSvg?: string;
 }
+export interface UpiStatusOutput {
+  status: "CREATED" | "PAID" | "FAILED" | "EXPIRED";
+  paidAt?: string;
+  /**
+   * Provider-VERIFIED amount (rupees), when the provider reports it. Money-safety
+   * rails cross-check this against the initiated amount BEFORE crediting a wallet
+   * — a mismatch must never auto-credit.
+   */
+  amount?: number;
+  /** Bank/UTR reference for the settled payment, when available (receipts). */
+  reference?: string;
+}
 export interface UpiProvider {
   name: string;
   collect(input: UpiCollectInput): Promise<PartnerResult<UpiCollectOutput>>;
-  status(orderId: string): Promise<PartnerResult<{ status: "CREATED" | "PAID" | "FAILED" | "EXPIRED"; paidAt?: string }>>;
+  status(orderId: string): Promise<PartnerResult<UpiStatusOutput>>;
 }
 
 // ---------- Payouts ----------

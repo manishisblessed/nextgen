@@ -83,6 +83,21 @@ const SETTING_SCHEMAS = {
     thresholdPerMachine: z.number().positive().default(5_000_000), // ₹50 lakh
   }),
 
+  /**
+   * Monthly volume-incentive engine (reverse cashback / rewards). Runs daily and
+   * fires only on the LAST day of the IST month at `hour`, settling that closed
+   * month. Reads each user's assigned IncentiveSchemes, matches their monthly
+   * QR/POS volume to a reward tier, and credits the reward (idempotent per
+   * user/scheme/month). `minAmount` skips crediting rewards below this ₹ value.
+   */
+  "incentive.monthly": z.object({
+    enabled: z.boolean().default(false),
+    /** Cron hour (IST, 0-23) the last-day run fires at. */
+    hour: z.number().int().min(0).max(23).default(22),
+    /** Don't credit rewards smaller than this (₹). */
+    minAmount: z.number().nonnegative().default(1),
+  }),
+
   /** Default settlement tier caps applied when a user has no UserLimit row (₹). */
   "limits.settlement_defaults": z.object({
     dailyCap: z.number().positive().default(200_000),

@@ -3,11 +3,12 @@ import { requireRole } from "@/lib/auth-server";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
 import { getQrClaimOverview, secondApprovalThreshold } from "@/lib/qr/claims";
-import type { QrClaimStatus } from "@prisma/client";
+import type { Prisma, QrClaimStatus, QrSettlementKind } from "@prisma/client";
 
 /**
  * Admin — QR claim review queue.
  *   GET ?status=PENDING|AWAITING_SECOND_APPROVAL|APPROVED|REJECTED|CLAWED_BACK|ALL
+ *       &kind=INSTANT|T1  (optional — split the queue by settlement stream)
  * Default shows everything awaiting action. Screenshot URLs are short-lived
  * signed links (assets are private in Cloudinary).
  */
@@ -32,7 +33,8 @@ export async function GET(req: Request) {
     return toErrorResponse(e);
   }
 
-  const statusParam = new URL(req.url).searchParams.get("status");
+  const params = new URL(req.url).searchParams;
+  const statusParam = params.get("status");
   const statuses: QrClaimStatus[] =
     !statusParam || statusParam === "REVIEWABLE"
       ? REVIEWABLE
@@ -42,9 +44,16 @@ export async function GET(req: Request) {
           ? [statusParam as QrClaimStatus]
           : REVIEWABLE;
 
+  const kindParam = params.get("kind")?.toUpperCase();
+  const kind: QrSettlementKind | undefined =
+    kindParam === "INSTANT" ? "INSTANT" : kindParam === "T1" ? "T1" : undefined;
+
+  const where: Prisma.QrClaimWhereInput = { status: { in: statuses } };
+  if (kind) where.settlementKind = kind;
+
   const [claims, overview] = await Promise.all([
     prisma.qrClaim.findMany({
-      where: { status: { in: statuses } },
+      where,
       orderBy: { createdAt: "asc" }, // oldest first — FIFO review
       take: 200,
       include: {
@@ -54,7 +63,7 @@ export async function GET(req: Request) {
         firstApprovedBy: { select: { id: true, name: true, userCode: true } },
       },
     }),
-    getQrClaimOverview(),
+    getQrClaimOverview(kind),
   ]);
 
   return NextResponse.json({
@@ -65,6 +74,7 @@ export async function GET(req: Request) {
       retailer: c.user,
       qrLabel: c.qr.label,
       qrVpa: c.qr.upiVpa,
+      settlementKind: c.settlementKind,
       amount: Number(c.amount),
       utr: c.utr,
       cardLast4: c.cardLast4,

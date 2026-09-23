@@ -20,6 +20,8 @@ const schema = z.object({
   date_to: z.string().min(1, "date_to is required"),
   status: z.enum(["UNDER_REVIEW", "SETTLEABLE", "SETTLED", "REJECTED"]).nullable().optional(),
   retailer_id: z.string().nullable().optional(),
+  /** Optional settlement stream: QR-Instant / QR-T+1. */
+  kind: z.enum(["INSTANT", "T1"]).nullable().optional(),
   page: z.number().int().positive().optional().default(1),
   page_size: z.number().int().min(1).max(100).optional().default(50),
   /** When true, ignore pagination and return every matching row (capped). */
@@ -61,6 +63,7 @@ export async function POST(req: Request) {
     dateTo,
     statusFilter: parsed.data.status ?? null,
     retailerId: parsed.data.retailer_id?.trim() || null,
+    settlementKind: parsed.data.kind ?? null,
   };
 
   try {

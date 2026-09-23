@@ -8,7 +8,6 @@ import {
   Users,
   Wallet,
   ArrowRight,
-  Plus,
   Monitor,
   CreditCard,
   QrCode,
@@ -22,7 +21,6 @@ import { Sparkline } from "@/components/dashboard/Sparkline";
 import { StatSkeleton } from "@/components/ui/Skeleton";
 import { services } from "@/lib/data";
 import type { Transaction } from "@/lib/data";
-import { Button } from "@/components/ui/Button";
 import type { Session } from "@/lib/auth";
 import { formatINR, cn } from "@/lib/utils";
 import { hrefToServiceKey } from "@/lib/services/catalog";
@@ -100,20 +98,6 @@ export function RetailerOverview({ session }: { session: Session }) {
           <p className="mt-1 text-sm text-ink-600">
             Here&apos;s a snapshot of your shop today.
           </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href="/dashboard/funds-request">
-            <Button variant="outline">
-              <Plus className="h-4 w-4" />
-              Request funds
-            </Button>
-          </Link>
-          <Link href="/dashboard/money-transfer">
-            <Button>
-              Send money
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
         </div>
       </div>
 

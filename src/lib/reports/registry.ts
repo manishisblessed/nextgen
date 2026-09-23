@@ -172,6 +172,7 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
       { key: "amount", header: "Amount", format: "money", align: "right" },
       { key: "mode", header: "Mode" },
       { key: "utr", header: "UTR", format: "mono" },
+      { key: "bankLogo", header: "Logo", format: "avatar", align: "center" },
       { key: "bankName", header: "Bank" },
       { key: "status", header: "Status", format: "badge" },
     ],

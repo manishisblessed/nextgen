@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { getPartner, partnerStatus } from "@/lib/partners";
+import { viableChannelHealthCached } from "@/lib/partners/viable-pg";
 import { flags } from "@/lib/env";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { add, dec, toNumber } from "@/lib/money";
@@ -212,6 +213,11 @@ export async function GET() {
       provider: val.provider,
     }));
 
+    // Per-gateway PG payin health (Viable) — cache-only read so polling the admin
+    // dashboard never mints probe orders. Empty unless Viable PG is the live UPI
+    // provider. `healthy: null` = no sample yet.
+    const pgGateways = partners.upi?.provider === "VIABLE_PG" ? viableChannelHealthCached() : [];
+
     const severityMap = (action: string) => {
       if (["user.suspend", "user.close", "kyc.reject"].includes(action)) return "danger";
       if (["commission.update", "commission.deactivate", "fund_request.reject"].includes(action)) return "warn";
@@ -242,6 +248,7 @@ export async function GET() {
       monthlyGmv: Number(monthlyGmv._sum.amount ?? 0),
       dailyGmv,
       serviceHealth,
+      pgGateways,
       auditEvents,
       // --- additive: Service Overview + Vendor Balances ---
       services,

@@ -6,6 +6,7 @@ import { enforceRateLimit, RATE_LIMITS, RateLimitError } from "@/lib/security/ra
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { isAdminRole } from "@/lib/security/ownership";
+import { bankLogoSlug } from "@/lib/bank-logos";
 
 const CreateBody = z.object({
   service: z.string().trim().min(1).max(64).optional(),
@@ -71,6 +72,25 @@ export async function GET(req: Request) {
     take: limit,
   });
 
+  // Resolve a bank/issuer display name for each row's operator so credit-card /
+  // bill rows can show the real bank logo. CC-1 stores a biller *code* as the
+  // operator (resolve via the biller table); CC-2 already stores the bank name.
+  const opCodes = [
+    ...new Set(rows.map((t) => t.operator).filter((c): c is string => !!c)),
+  ];
+  const billers = opCodes.length
+    ? await prisma.biller.findMany({
+        where: { code: { in: opCodes } },
+        select: { code: true, name: true },
+      })
+    : [];
+  const billerName = new Map(billers.map((b) => [b.code, b.name]));
+  /** Bank name for logo resolution, only when it maps to a known bank logo. */
+  const logoName = (operator: string | null): string | null => {
+    const name = (operator && billerName.get(operator)) || operator || null;
+    return name && bankLogoSlug(name) ? name : null;
+  };
+
   // Retailers do not see commission on the transaction feed: on settlement rails
   // (POS/QR/PG) the `commission` on their bridge txn is the UPLINE's distributed
   // commission, not the retailer's income, so surfacing it here is misleading.
@@ -92,6 +112,7 @@ export async function GET(req: Request) {
     }),
     customer: t.customer ?? "—",
     commission: hideCommission ? 0 : toNumber(t.commission),
+    logo: logoName(t.operator),
   }));
 
   return NextResponse.json({ ok: true, data });

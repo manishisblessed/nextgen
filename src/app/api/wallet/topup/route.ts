@@ -22,6 +22,7 @@ const Body = z.object({
   amount: z.number().positive().max(200000),
   vpa: z.string().regex(/^[\w.\-]{2,}@[a-zA-Z]{2,}$/).optional(),
   note: z.string().max(80).optional(),
+  channel: z.string().max(40).optional(),
   idempotencyKey: z.string().min(8)
 }).strict();
 
@@ -51,6 +52,8 @@ export async function POST(req: Request) {
           amount: parsed.data.amount,
           vpa: parsed.data.vpa,
           note: parsed.data.note,
+          channel: parsed.data.channel,
+          customerName: user.name || undefined,
           customerPhone: user.phone,
           customerEmail: user.email || undefined,
           ip: clientIp(req),

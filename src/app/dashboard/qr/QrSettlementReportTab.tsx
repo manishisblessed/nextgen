@@ -170,10 +170,13 @@ type View = "transactions" | "rollup";
 export function QrSettlementReportTab({
   initialFrom,
   initialTo,
+  kind = null,
 }: {
   /** Optional deep-link range (YYYY-MM-DD), e.g. from the "QR Today" card. */
   initialFrom?: string | null;
   initialTo?: string | null;
+  /** Scope the report to one settlement stream (QR-Instant / QR-T+1). */
+  kind?: "INSTANT" | "T1" | null;
 } = {}) {
   const defaults = defaultDateRange();
   const [dateFrom, setDateFrom] = useState(initialFrom || defaults.from);
@@ -190,10 +193,11 @@ export function QrSettlementReportTab({
       date_to: `${dateTo}T23:59:59.999+05:30`,
       status: statusFilter || null,
       retailer_id: retailerId,
+      kind,
       page,
       page_size: 50,
     }),
-    [dateFrom, dateTo, statusFilter, retailerId, page]
+    [dateFrom, dateTo, statusFilter, retailerId, kind, page]
   );
 
   const { data, error, isLoading, mutate } = useSWR<ReportResponse>(

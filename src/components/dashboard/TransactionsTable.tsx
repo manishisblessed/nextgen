@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { BankLogo } from "@/components/dashboard/BankLogo";
 import type { Transaction } from "@/lib/data";
 import { formatINR } from "@/lib/utils";
 
@@ -80,7 +81,12 @@ export function TransactionsTable({
               {data.map((t) => (
                 <tr key={t.id} className="hover:bg-ink-50/40">
                   <td className="px-5 py-3 font-mono text-xs">{t.id}</td>
-                  <td className="px-5 py-3">{t.service}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      {t.logo && <BankLogo name={t.logo} size={28} />}
+                      <span>{t.service}</span>
+                    </div>
+                  </td>
                   <td className="px-5 py-3 text-ink-600">{t.customer}</td>
                   <td className="px-5 py-3 text-right font-semibold">
                     {formatINR(t.amount)}

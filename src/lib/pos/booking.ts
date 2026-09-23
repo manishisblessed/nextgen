@@ -62,7 +62,7 @@ export const bookingSelect = {
   createdAt: true,
   updatedAt: true,
   subscriptionId: true,
-  plan: { select: { id: true, name: true, description: true } },
+  plan: { select: { id: true, name: true, description: true, machineName: true } },
   machine: { select: { id: true, tid: true, serial: true, model: true, provider: true, status: true } },
   user: { select: { id: true, name: true, email: true, phone: true, role: true, userCode: true, shopName: true } },
   events: {
@@ -98,7 +98,7 @@ export type SerializedBooking = {
   createdAt: string;
   updatedAt: string;
   subscriptionId: string | null;
-  plan: { id: string; name: string; description: string | null };
+  plan: { id: string; name: string; description: string | null; machineName: string | null };
   machine: {
     id: string;
     tid: string | null;

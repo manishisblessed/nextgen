@@ -1,4 +1,4 @@
-import type { Prisma, QrClaimStatus } from "@prisma/client";
+import type { Prisma, QrClaimStatus, QrSettlementKind } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { AuthError, type SessionUser } from "@/lib/auth-server";
 import { getDescendantIds, isAdminRole } from "@/lib/security/ownership";
@@ -74,6 +74,8 @@ export type QrSettlementReportFilters = {
   statusFilter?: QrReportStatusFilter | null;
   /** Optional drill-down to a single downline user (must be within scope). */
   retailerId?: string | null;
+  /** Optional settlement stream (QR-Instant / QR-T+1). Null = both. */
+  settlementKind?: QrSettlementKind | null;
 };
 
 export type QrReportRetailer = {
@@ -181,6 +183,10 @@ function buildWhere(
     where.status = { in: STATUS_GROUPS[filters.statusFilter] };
   }
 
+  if (filters.settlementKind) {
+    where.settlementKind = filters.settlementKind;
+  }
+
   return where;
 }
 
@@ -216,6 +222,11 @@ async function loadCommission(
   };
   if (filters.retailerId) txnWhere.userId = filters.retailerId;
   else if (allowed) txnWhere.userId = { in: allowed };
+  // The synthetic QR bridge txn stores the settlement leg (T0 for INSTANT, T1
+  // for T+1), so scope commission to the same stream as the claim filter.
+  if (filters.settlementKind) {
+    txnWhere.settlementType = filters.settlementKind === "INSTANT" ? "T0" : "T1";
+  }
 
   const credits = await prisma.commissionCredit.findMany({
     where: {

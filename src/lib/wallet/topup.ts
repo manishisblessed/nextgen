@@ -18,9 +18,12 @@ import { creditWallet } from "../ledger";
 import { getPartner, assertRealMoneyProvider } from "../partners";
 import { round } from "../money";
 import { emitWebhookEvent } from "../platform/webhooks";
+import { sendOpsAlert } from "../monitoring/alerts";
+import { logger } from "../logger";
+import { isAmountMismatch } from "./guards";
 import { assertPushWithinCap, WalletOpError } from "./operations";
 
-export type TopupState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED";
+export type TopupState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED" | "HOLD";
 
 export class TopupError extends Error {
   public statusCode: number;
@@ -36,8 +39,11 @@ export async function initiateTopup(input: {
   amount: number;
   vpa?: string;
   note?: string;
+  customerName?: string;
   customerPhone: string;
   customerEmail?: string;
+  /** Optional PG gateway channel (Viable multi-gateway); defaults to primary. */
+  channel?: string;
   ip?: string;
 }): Promise<{ refId: string; orderId: string; paymentUrl?: string; upiIntent?: string; provider: string }> {
   // Wallet cap gate — refuse the collect up front rather than bouncing money
@@ -74,7 +80,12 @@ export async function initiateTopup(input: {
       status: "INITIATED",
       customer: input.customerPhone,
       partner: upi.name,
-      request: { amount: input.amount, vpa: input.vpa ?? null, note: input.note ?? null } as Prisma.InputJsonValue,
+      request: {
+        amount: input.amount,
+        vpa: input.vpa ?? null,
+        note: input.note ?? null,
+        channel: input.channel ?? null,
+      } as Prisma.InputJsonValue,
       ipAddress: input.ip,
     },
   });
@@ -85,8 +96,10 @@ export async function initiateTopup(input: {
     amount: input.amount,
     vpa: input.vpa,
     note: input.note ?? "Wallet top-up",
+    customerName: input.customerName,
     customerPhone: input.customerPhone,
     customerEmail: input.customerEmail,
+    channel: input.channel,
     callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/wallet?topup=${refId}`,
   });
 
@@ -150,11 +163,49 @@ export async function settleTopup(refId: string): Promise<{ refId: string; statu
   if (!r.ok) throw new TopupError(r.message, 502, r.code);
 
   if (r.data.status === "PAID") {
+    // MONEY-SAFETY: never credit unless the provider-VERIFIED amount matches
+    // what we initiated. A mismatch is anomalous (tamper / double-spend / bug),
+    // so we park the payin in HOLD for manual review and alert ops — we NEVER
+    // auto-credit a mismatched amount. HOLD rows are ignored by the reconcile
+    // sweep, so this alerts at most once.
+    const verified = r.data.amount;
+    if (isAmountMismatch(verified, Number(txn.amount))) {
+      const held = await prisma.transaction.updateMany({
+        where: { id: txn.id, status: { in: ["INITIATED", "PROCESSING"] } },
+        data: {
+          status: "HOLD",
+          errorCode: "AMOUNT_MISMATCH",
+          errorMessage: `Verified ₹${verified} ≠ initiated ₹${txn.amount}`,
+        },
+      });
+      if (held.count > 0) {
+        await prisma.auditLog.create({
+          data: {
+            userId: txn.userId,
+            action: "wallet.topup_amount_mismatch",
+            entity: "Transaction",
+            entityId: txn.id,
+            meta: { refId, initiated: txn.amount.toString(), verified, utr: r.data.reference ?? null },
+          },
+        });
+        await sendOpsAlert({
+          title: "Wallet top-up amount mismatch — HELD (not credited)",
+          severity: "critical",
+          details: { refId, initiated: txn.amount.toString(), verified, provider: txn.partner ?? "" },
+        });
+      }
+      return { refId, status: "HOLD" };
+    }
+
+    const utr = r.data.reference ?? null;
     await prisma.$transaction(async (tx) => {
       // Claim the terminal state first so concurrent settlers do nothing.
       const claimed = await tx.transaction.updateMany({
         where: { id: txn.id, status: { in: ["INITIATED", "PROCESSING"] } },
-        data: { status: "SUCCESS" },
+        data: {
+          status: "SUCCESS",
+          response: { utr, verifiedAmount: verified ?? null, settledAt: new Date().toISOString() } as Prisma.InputJsonValue,
+        },
       });
       if (claimed.count === 0) return;
       await creditWallet(
@@ -175,9 +226,18 @@ export async function settleTopup(refId: string): Promise<{ refId: string; statu
           action: "wallet.topup_credited",
           entity: "Transaction",
           entityId: txn.id,
-          meta: { refId, amount: txn.amount.toString(), provider: txn.partner },
+          meta: { refId, amount: txn.amount.toString(), provider: txn.partner, utr },
         },
       });
+    });
+    // Structured settle log for support/reconciliation lookups.
+    logger.info({
+      action: "wallet.topup_settled",
+      refId,
+      topupId: txn.partnerTxnId,
+      amount: Number(txn.amount),
+      utr,
+      provider: txn.partner,
     });
     // NOTE: wallet top-ups are intentionally NOT mirrored into the company payin
     // monitor — a top-up is an agent loading their own wallet (a liability), not
@@ -188,6 +248,7 @@ export async function settleTopup(refId: string): Promise<{ refId: string; statu
       refId,
       amount: Number(txn.amount),
       provider: txn.partner,
+      utr,
     });
     return { refId, status: "SUCCESS" };
   }

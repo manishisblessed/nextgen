@@ -1162,6 +1162,8 @@ export type Transaction = {
   date: string;
   customer: string;
   commission: number;
+  /** Resolved bank/issuer name for logo display; null when it maps to no bank. */
+  logo?: string | null;
 };
 
 export type NetworkUser = {

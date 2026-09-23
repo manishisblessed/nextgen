@@ -63,7 +63,7 @@ export async function GET() {
       where: { active: true, ownerId: null },
       orderBy: { monthlyRent: "asc" },
       select: {
-        id: true, name: true, description: true,
+        id: true, name: true, description: true, machineName: true,
         monthlyRent: true, setupFee: true, deposit: true, includeGst: true,
       },
     }),
@@ -80,6 +80,7 @@ export async function GET() {
       id: p.id,
       name: p.name,
       description: p.description,
+      machineName: p.machineName,
       monthlyRent: toNumber(p.monthlyRent),
       setupFee: toNumber(p.setupFee),
       deposit: toNumber(p.deposit),

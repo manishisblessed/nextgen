@@ -258,6 +258,7 @@ export class FakeDb {
       dailyLimit?: number | null;
       dailyLimitCount?: number | null;
       autoPausedOn?: Date | null;
+      settlementKind?: "INSTANT" | "T1";
     }
   ) {
     this.staticQrs.push({
@@ -265,6 +266,7 @@ export class FakeDb {
       label: `QR ${id}`,
       upiVpa: "merchant@upi",
       imageUrl: `https://example.test/${id}.png`,
+      settlementKind: opts?.settlementKind ?? "T1",
       active: opts?.active ?? true,
       enabled: opts?.enabled ?? true,
       priority: opts?.priority ?? 100,
@@ -289,11 +291,12 @@ export class FakeDb {
     },
     findFirst: async ({
       where,
-    }: { where?: { active?: boolean; enabled?: boolean; id?: string } } = {}) => {
+    }: { where?: { active?: boolean; enabled?: boolean; id?: string; settlementKind?: string } } = {}) => {
       const row = this.staticQrs.find(
         (q) =>
           (where?.active === undefined || q.active === where.active) &&
           (where?.enabled === undefined || q.enabled === where.enabled) &&
+          (where?.settlementKind === undefined || q.settlementKind === where.settlementKind) &&
           (where?.id === undefined || q.id === where.id)
       );
       return row ? { ...row } : null;
@@ -307,12 +310,14 @@ export class FakeDb {
         autoPausedOn?: null | { lt: Date };
         id?: { not?: string };
         active?: boolean;
+        settlementKind?: string;
       };
       orderBy?: Array<{ priority?: "asc" | "desc"; createdAt?: "asc" | "desc" }>;
     } = {}) => {
       let rows = this.staticQrs.filter((q) => {
         if (where.enabled !== undefined && q.enabled !== where.enabled) return false;
         if (where.active !== undefined && q.active !== where.active) return false;
+        if (where.settlementKind !== undefined && q.settlementKind !== where.settlementKind) return false;
         if (where.id?.not !== undefined && q.id === where.id.not) return false;
         if (where.autoPausedOn === null && q.autoPausedOn != null) return false;
         if (where.autoPausedOn && "lt" in where.autoPausedOn) {
@@ -349,6 +354,7 @@ export class FakeDb {
             if (q.id === (where.id as { not: string }).not) return false;
           }
         }
+        if (where.settlementKind !== undefined && q.settlementKind !== where.settlementKind) return false;
         if (where.active !== undefined && q.active !== where.active) return false;
         if (where.autoPausedOn !== undefined) {
           if (where.autoPausedOn === null) {

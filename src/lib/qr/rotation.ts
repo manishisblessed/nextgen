@@ -20,7 +20,7 @@
  * exactly like the rest of the QR code — `updateMany` guards inside a
  * transaction keep the "at most one active QR" invariant race-safe.
  */
-import type { StaticQr } from "@prisma/client";
+import type { StaticQr, QrSettlementKind } from "@prisma/client";
 import { prisma } from "../db";
 import { startOfTodayIst } from "../settlement/engine";
 
@@ -125,13 +125,14 @@ export function toRetailerQrPayload(qr: StaticQr, used: QrUsage): RetailerQrPayl
 }
 
 /**
- * Next enabled QR after the live one that still has headroom today — the QR
- * retailers should collect the overflow (amount above the live QR's remaining)
- * on. Does not mutate queue state; call after `resolveLiveQr`.
+ * Next enabled QR (of the SAME settlement kind) after the live one that still
+ * has headroom today — the QR retailers should collect the overflow (amount
+ * above the live QR's remaining) on. Does not mutate queue state; call after
+ * `resolveLiveQr`.
  */
-export async function peekOverflowQr(liveId: string): Promise<StaticQr | null> {
+export async function peekOverflowQr(liveId: string, kind: QrSettlementKind): Promise<StaticQr | null> {
   const candidates = await prisma.staticQr.findMany({
-    where: { enabled: true, autoPausedOn: null, id: { not: liveId } },
+    where: { enabled: true, autoPausedOn: null, settlementKind: kind, id: { not: liveId } },
     orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
   });
   for (const qr of candidates) {
@@ -143,17 +144,18 @@ export async function peekOverflowQr(liveId: string): Promise<StaticQr | null> {
 }
 
 /**
- * True when `qrId` is the overflow QR currently shown beside the live one, so
- * a retailer can file a claim for the rest of a split payment before rotation
- * promotes it. Does not call `resolveLiveQr` (that has side effects).
+ * True when `qrId` is the overflow QR currently shown beside the live one (of
+ * the same settlement kind), so a retailer can file a claim for the rest of a
+ * split payment before rotation promotes it. Does not call `resolveLiveQr`
+ * (that has side effects).
  */
-export async function isOverflowCollectQr(qrId: string): Promise<boolean> {
+export async function isOverflowCollectQr(qrId: string, kind: QrSettlementKind): Promise<boolean> {
   const live = await prisma.staticQr.findFirst({
-    where: { active: true, enabled: true },
+    where: { active: true, enabled: true, settlementKind: kind },
     select: { id: true },
   });
   if (!live || live.id === qrId) return false;
-  const overflow = await peekOverflowQr(live.id);
+  const overflow = await peekOverflowQr(live.id, kind);
   return overflow?.id === qrId;
 }
 
@@ -172,26 +174,30 @@ export function qrLiveState(
 }
 
 /**
- * Resolve — and persist — the single QR retailers should collect on right now.
+ * Resolve — and persist — the single QR retailers should collect on right now,
+ * scoped to a settlement kind (INSTANT or T1). Because rotation is per-kind,
+ * both streams can have their own live QR simultaneously.
  *
- * Walks enabled QRs by ascending priority, auto-pausing any that have filled
- * their daily cap, and makes the first one with headroom the sole `active` QR.
- * Returns that QR, or null when the whole pool is exhausted for the day (the
- * caller should then tell retailers collections are paused).
+ * Walks enabled QRs of that kind by ascending priority, auto-pausing any that
+ * have filled their daily cap, and makes the first one with headroom the sole
+ * `active` QR FOR THAT KIND. Returns that QR, or null when the kind's pool is
+ * exhausted for the day (the caller then tells retailers collections are paused).
  */
-export async function resolveLiveQr(): Promise<StaticQr | null> {
+export async function resolveLiveQr(kind: QrSettlementKind): Promise<StaticQr | null> {
   const dayStart = startOfTodayIst();
 
   // Daily reset: clear auto-pauses set on an earlier IST day so those QRs rejoin
   // the queue. (A QR paused earlier TODAY stays paused for the rest of the day,
-  // even if a later rejection freed capacity — conservative by design.)
+  // even if a later rejection freed capacity — conservative by design.) This is
+  // global (kind-agnostic) — clearing a stale pause never breaks the per-kind
+  // "at most one active" invariant, which is enforced below.
   await prisma.staticQr.updateMany({
     where: { autoPausedOn: { lt: dayStart } },
     data: { autoPausedOn: null },
   });
 
   const candidates = await prisma.staticQr.findMany({
-    where: { enabled: true, autoPausedOn: null },
+    where: { enabled: true, autoPausedOn: null, settlementKind: kind },
     orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
   });
 
@@ -206,10 +212,11 @@ export async function resolveLiveQr(): Promise<StaticQr | null> {
       continue;
     }
 
-    // Winner. Make it the sole live QR (race-safe: guard both writes).
+    // Winner. Make it the sole live QR FOR THIS KIND (race-safe: guard both
+    // writes, scoped to the kind so the other stream's live QR is untouched).
     await prisma.$transaction(async (tx) => {
       await tx.staticQr.updateMany({
-        where: { active: true, id: { not: qr.id } },
+        where: { active: true, settlementKind: kind, id: { not: qr.id } },
         data: { active: false, disabledAt: new Date() },
       });
       await tx.staticQr.updateMany({
@@ -221,9 +228,9 @@ export async function resolveLiveQr(): Promise<StaticQr | null> {
     return { ...qr, active: true, disabledAt: null, disabledById: null };
   }
 
-  // Pool exhausted — make sure nothing is left showing as live.
+  // This kind's pool is exhausted — make sure nothing of THIS kind is left live.
   await prisma.staticQr.updateMany({
-    where: { active: true },
+    where: { active: true, settlementKind: kind },
     data: { active: false, disabledAt: new Date() },
   });
   return null;

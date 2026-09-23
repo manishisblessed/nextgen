@@ -25,6 +25,9 @@ const CreateBody = z
   .object({
     label: z.string().min(2).max(120),
     upiVpa: z.string().regex(/^[\w.\-]{2,}@[a-zA-Z]{2,}$/).optional(),
+    // Which settlement stream this QR serves: INSTANT (T0, auto-settled on
+    // approval) or T1 (next-day). Retailers collect on the matching tab.
+    settlementKind: z.enum(["INSTANT", "T1"]),
     priority: z.number().int().min(0).max(100_000).optional(),
     dailyLimit: z.number().positive().max(100_000_000).optional(),
     dailyLimitCount: z.number().int().positive().max(1_000_000).optional(),
@@ -65,6 +68,7 @@ export async function GET() {
         label: q.label,
         upiVpa: q.upiVpa,
         imageUrl: q.imageUrl,
+        settlementKind: q.settlementKind,
         active: q.active,
         enabled: q.enabled,
         priority: q.priority,
@@ -113,6 +117,7 @@ export async function POST(req: Request) {
       data: {
         label: parsed.data.label,
         upiVpa: parsed.data.upiVpa ?? null,
+        settlementKind: parsed.data.settlementKind,
         imagePublicId: uploaded.public_id,
         imageUrl: uploaded.secure_url,
         active: false,
@@ -124,7 +129,8 @@ export async function POST(req: Request) {
       },
     });
 
-    const live = await resolveLiveQr();
+    // Re-resolve only this QR's stream (each kind rotates independently).
+    const live = await resolveLiveQr(qr.settlementKind);
 
     await prisma.auditLog.create({
       data: {
@@ -135,6 +141,7 @@ export async function POST(req: Request) {
         meta: {
           label: qr.label,
           upiVpa: qr.upiVpa,
+          settlementKind: qr.settlementKind,
           priority: qr.priority,
           dailyLimit: parsed.data.dailyLimit ?? null,
           dailyLimitCount: parsed.data.dailyLimitCount ?? null,
@@ -148,6 +155,7 @@ export async function POST(req: Request) {
         id: qr.id,
         label: qr.label,
         upiVpa: qr.upiVpa,
+        settlementKind: qr.settlementKind,
         imageUrl: qr.imageUrl,
         priority: qr.priority,
         active: live?.id === qr.id,

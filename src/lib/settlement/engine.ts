@@ -30,6 +30,8 @@ export const SETTLED_VIA = {
   INSTANT_AUTO: "INSTANT_AUTO",
   /** Retailer pressed "Instant settle" on the dashboard (T0 rate). */
   INSTANT_BUTTON: "INSTANT_BUTTON",
+  /** QR-Instant claim auto-settled (T0) the moment an admin approved it. */
+  QR_INSTANT_APPROVAL: "QR_INSTANT_APPROVAL",
   /** Swept by the next-day T+1 settlement cron (T1 rate). */
   T1_CRON: "T1_CRON",
 } as const;

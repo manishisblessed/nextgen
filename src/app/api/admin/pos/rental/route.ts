@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
     const pageSize = 25;
 
-    const [cfg, waiverCfg, summary, plans, subs, subTotal, invoices] = await Promise.all([
+    const [cfg, waiverCfg, summary, plans, subs, subTotal, invoices, machineModels] = await Promise.all([
       getSetting("pos.rental_billing"),
       getSetting("pos.rental_waiver"),
       rentalBillingSummary(),
@@ -60,16 +60,28 @@ export async function GET(req: Request) {
           },
         },
       }),
+      // Distinct POS machine models (the machine "name" shown in POS Fleet),
+      // used to populate the machine selector when creating/editing a plan.
+      prisma.posMachine.findMany({
+        where: { model: { not: null } },
+        distinct: ["model"],
+        select: { model: true },
+        orderBy: { model: "asc" },
+      }),
     ]);
 
     return NextResponse.json({
       config: cfg,
       waiver: waiverCfg,
       summary,
+      machineNames: machineModels
+        .map((m) => m.model)
+        .filter((m): m is string => Boolean(m && m.trim())),
       plans: plans.map((p) => ({
         id: p.id,
         name: p.name,
         description: p.description,
+        machineName: p.machineName,
         monthlyRent: toNumber(dec(p.monthlyRent)),
         setupFee: toNumber(dec(p.setupFee)),
         deposit: toNumber(dec(p.deposit)),
@@ -122,6 +134,7 @@ const ActionBody = z.discriminatedUnion("action", [
     action: z.literal("create_plan"),
     name: z.string().min(2).max(80),
     description: z.string().max(300).optional(),
+    machineName: z.string().trim().min(1, "Pick a POS machine").max(120),
     monthlyRent: z.number().nonnegative(),
     setupFee: z.number().nonnegative().default(0),
     deposit: z.number().nonnegative().default(0),
@@ -133,6 +146,7 @@ const ActionBody = z.discriminatedUnion("action", [
     planId: z.string().min(1),
     name: z.string().min(2).max(80),
     description: z.string().max(300).optional(),
+    machineName: z.string().trim().min(1, "Pick a POS machine").max(120),
     monthlyRent: z.number().nonnegative(),
     setupFee: z.number().nonnegative().default(0),
     deposit: z.number().nonnegative().default(0),
@@ -203,20 +217,40 @@ export async function POST(req: Request) {
   try {
     switch (body.action) {
       case "create_plan": {
+        const machineName = body.machineName.trim();
         const exists = await prisma.posRentalPlan.findFirst({ where: { ownerId: null, name: body.name.trim() } });
         if (exists)
           return NextResponse.json({ error: `A plan named "${body.name}" already exists` }, { status: 409 });
-        const plan = await prisma.posRentalPlan.create({
-          data: {
-            name: body.name.trim(),
-            description: body.description?.trim(),
-            monthlyRent: dec(body.monthlyRent),
-            setupFee: dec(body.setupFee),
-            deposit: dec(body.deposit),
-            includeGst: body.includeGst,
-          },
-        });
-        await audit("pos.rental_plan_created", { planId: plan.id, name: plan.name, includeGst: body.includeGst });
+        // One machine → one plan.
+        const machineTaken = await prisma.posRentalPlan.findFirst({ where: { ownerId: null, machineName } });
+        if (machineTaken)
+          return NextResponse.json(
+            { error: `A plan already exists for machine "${machineName}". Edit that plan instead.` },
+            { status: 409 },
+          );
+        let plan;
+        try {
+          plan = await prisma.posRentalPlan.create({
+            data: {
+              name: body.name.trim(),
+              description: body.description?.trim(),
+              machineName,
+              monthlyRent: dec(body.monthlyRent),
+              setupFee: dec(body.setupFee),
+              deposit: dec(body.deposit),
+              includeGst: body.includeGst,
+            },
+          });
+        } catch (e) {
+          // Race backstop against the partial unique indexes (name / machineName).
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
+            return NextResponse.json(
+              { error: `A plan already exists for this name or machine ("${machineName}").` },
+              { status: 409 },
+            );
+          throw e;
+        }
+        await audit("pos.rental_plan_created", { planId: plan.id, name: plan.name, machineName, includeGst: body.includeGst });
         return NextResponse.json({ ok: true, planId: plan.id }, { status: 201 });
       }
 
@@ -230,6 +264,7 @@ export async function POST(req: Request) {
       }
 
       case "update_plan": {
+        const machineName = body.machineName.trim();
         const existing = await prisma.posRentalPlan.findUnique({ where: { id: body.planId } });
         if (!existing) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
         const duplicate = await prisma.posRentalPlan.findFirst({
@@ -237,20 +272,40 @@ export async function POST(req: Request) {
         });
         if (duplicate)
           return NextResponse.json({ error: `Another plan named "${body.name}" already exists` }, { status: 409 });
-        await prisma.posRentalPlan.update({
-          where: { id: body.planId },
-          data: {
-            name: body.name.trim(),
-            description: body.description?.trim() || null,
-            monthlyRent: dec(body.monthlyRent),
-            setupFee: dec(body.setupFee),
-            deposit: dec(body.deposit),
-            includeGst: body.includeGst,
-          },
+        // One machine → one plan (ignore this plan itself).
+        const machineTaken = await prisma.posRentalPlan.findFirst({
+          where: { ownerId: null, machineName, id: { not: body.planId } },
         });
+        if (machineTaken)
+          return NextResponse.json(
+            { error: `Another plan already exists for machine "${machineName}".` },
+            { status: 409 },
+          );
+        try {
+          await prisma.posRentalPlan.update({
+            where: { id: body.planId },
+            data: {
+              name: body.name.trim(),
+              description: body.description?.trim() || null,
+              machineName,
+              monthlyRent: dec(body.monthlyRent),
+              setupFee: dec(body.setupFee),
+              deposit: dec(body.deposit),
+              includeGst: body.includeGst,
+            },
+          });
+        } catch (e) {
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
+            return NextResponse.json(
+              { error: `Another plan already exists for this name or machine ("${machineName}").` },
+              { status: 409 },
+            );
+          throw e;
+        }
         await audit("pos.rental_plan_updated", {
           planId: body.planId,
           name: body.name,
+          machineName,
           monthlyRent: body.monthlyRent,
           setupFee: body.setupFee,
           deposit: body.deposit,

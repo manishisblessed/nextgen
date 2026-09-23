@@ -54,6 +54,24 @@ const ROLE_OPTIONS: { value: string; label: string }[] = [
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+// Minimum source resolution so banners/pop-ups stay crisp ("HD") on large,
+// high-DPI screens. Images smaller than this get upscaled by the browser and
+// look soft, so we block them at upload time.
+const MIN_IMAGE_WIDTH = 1200;
+const MIN_IMAGE_HEIGHT = 300;
+// Below this longest edge we consider the image "not truly HD" and warn.
+const RECOMMENDED_IMAGE_WIDTH = 1600;
+
+/** Read an image's intrinsic pixel dimensions from a data URL. */
+function readImageDimensions(dataUrl: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => reject(new Error("Could not read the image."));
+    img.src = dataUrl;
+  });
+}
+
 /** ISO → value for <input type="datetime-local"> in the user's local tz. */
 function isoToLocalInput(iso: string | null): string {
   if (!iso) return "";
@@ -503,6 +521,7 @@ function SliderForm({
 }) {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
@@ -538,6 +557,22 @@ function SliderForm({
     setUploading(true);
     try {
       const dataUrl = await fileToDataUrl(file);
+
+      // Enforce a minimum resolution so the banner renders in HD at every
+      // breakpoint (the pop-up modal scales up to ~3xl on large screens).
+      const { w, h } = await readImageDimensions(dataUrl);
+      if (w < MIN_IMAGE_WIDTH || h < MIN_IMAGE_HEIGHT) {
+        onError(
+          `Image is only ${w}×${h}px. Upload at least ${MIN_IMAGE_WIDTH}×${MIN_IMAGE_HEIGHT}px for a crisp HD banner.`
+        );
+        return;
+      }
+      if (w < RECOMMENDED_IMAGE_WIDTH) {
+        onError(
+          `Heads up: ${w}px wide is below the recommended ${RECOMMENDED_IMAGE_WIDTH}px — it may look soft on large screens.`
+        );
+      }
+
       const res = await fetch("/api/admin/sliders/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -546,6 +581,7 @@ function SliderForm({
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error?.formErrors?.[0] ?? data?.error ?? "Upload failed");
       setForm((f) => (f ? { ...f, imagePublicId: data.publicId, imageUrl: data.url } : f));
+      setDims({ w, h });
     } catch (e) {
       onError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -619,10 +655,32 @@ function SliderForm({
         <form onSubmit={submit} className="space-y-5 p-6">
           <div>
             <Label>Image</Label>
-            <div className="overflow-hidden rounded-xl border border-ink-200 bg-ink-50">
+            <div className="relative overflow-hidden rounded-xl border border-ink-200 bg-ink-50">
               {form.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={form.imageUrl} alt="Preview" className="aspect-[16/7] w-full object-contain" />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={form.imageUrl}
+                    alt="Preview"
+                    className="aspect-[16/7] w-full object-contain"
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      if (img.naturalWidth) setDims({ w: img.naturalWidth, h: img.naturalHeight });
+                    }}
+                  />
+                  {dims && (
+                    <span
+                      className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold shadow ${
+                        dims.w >= RECOMMENDED_IMAGE_WIDTH && dims.h >= MIN_IMAGE_HEIGHT
+                          ? "bg-emerald-500/90 text-white"
+                          : "bg-amber-500/90 text-white"
+                      }`}
+                    >
+                      {dims.w}×{dims.h}px
+                      {dims.w >= RECOMMENDED_IMAGE_WIDTH && dims.h >= MIN_IMAGE_HEIGHT ? " · HD" : " · low-res"}
+                    </span>
+                  )}
+                </>
               ) : (
                 <div className="grid aspect-[16/7] w-full place-items-center text-ink-400">
                   <div className="text-center">
@@ -632,6 +690,10 @@ function SliderForm({
                 </div>
               )}
             </div>
+            <p className="mt-1.5 text-xs text-ink-500">
+              Use a high-resolution image — at least {RECOMMENDED_IMAGE_WIDTH}px wide (min {MIN_IMAGE_WIDTH}×
+              {MIN_IMAGE_HEIGHT}px) — so it stays sharp on large screens.
+            </p>
             <input
               ref={fileRef}
               type="file"

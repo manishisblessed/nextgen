@@ -97,6 +97,22 @@ export const QUEUES = {
   // is what keeps us under the partner's 100 req/min limit. Idempotent per txn
   // ref. See src/lib/pos/mirror-sweep.ts.
   POS_MIRROR_SYNC: "pos.mirror.sync",
+  // Wallet top-up / PG-collect reconciliation. Viable PG has no webhook, so this
+  // sweep re-verifies every in-flight payin with the provider and settles the
+  // ones actually PAID (catches "paid but browser closed"), expiring dead
+  // checkout links. Idempotent via settleTopup/settlePgCollect. Every 2 minutes.
+  TOPUP_RECONCILE: "topup.reconcile",
+  // Active liveness probe of the Viable PG gateways (no provider health endpoint
+  // exists). Attempts a tiny create-order per route on a slow cadence, refreshes
+  // the per-route health cache that feeds the wallet gateway picker, and alerts
+  // only when EVERY gateway is down. See scripts/worker.ts + partners/viable-pg.
+  PG_HEALTH: "pg.health",
+  // Monthly volume-incentive / reverse-cashback engine. Scheduled daily; the
+  // handler fires only on the LAST IST day of the month at the configured hour,
+  // measures each assigned user's monthly QR/POS volume, matches a reward tier,
+  // and credits the reward. Idempotent per (user, scheme, YYYY-MM). See
+  // src/lib/incentive/engine.ts.
+  INCENTIVE_MONTHLY: "incentive.monthly",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

@@ -19,6 +19,7 @@ type Plan = {
   id: string;
   name: string;
   description: string | null;
+  machineName: string | null;
   monthlyRent: number;
   setupFee: number;
   deposit: number;
@@ -50,7 +51,7 @@ type Booking = {
   cancelledAt: string | null;
   cancelReason: string | null;
   createdAt: string;
-  plan: { id: string; name: string; description: string | null };
+  plan: { id: string; name: string; description: string | null; machineName: string | null };
   machine: { id: string; tid: string | null; serial: string | null; model: string | null; status: string } | null;
   events: { id: string; status: BookingStatus; note: string | null; createdAt: string }[];
 };
@@ -170,6 +171,11 @@ export default function PosBookingPage() {
                   {p.includeGst && <Badge variant="default">+18% GST</Badge>}
                 </div>
                 <h3 className="mt-3 font-display text-base font-bold text-ink-900">{p.name}</h3>
+                {p.machineName && (
+                  <span className="mt-1.5 inline-flex items-center gap-1 rounded-lg bg-ink-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-700">
+                    <Monitor className="h-3 w-3" /> {p.machineName}
+                  </span>
+                )}
                 {p.description && <p className="mt-0.5 text-xs text-ink-500">{p.description}</p>}
 
                 <div className="mt-4 flex items-end gap-1">
@@ -180,7 +186,7 @@ export default function PosBookingPage() {
                 <ul className="mt-3 space-y-1.5 text-xs text-ink-600">
                   {p.deposit > 0 && (
                     <li className="flex items-center justify-between">
-                      <span>Deposit (refundable via ops)</span>
+                      <span>Security deposit (refundable via ops)</span>
                       <span className="font-semibold text-ink-800">{formatINR(p.deposit)}</span>
                     </li>
                   )}
@@ -315,7 +321,9 @@ function BookingCard({ booking, onRequestCancel }: { booking: Booking; onRequest
               <p className="text-xs text-ink-500">{booking.machine?.model ?? ""}</p>
             </>
           ) : (
-            <p className="mt-1 text-sm text-ink-500">Awaiting allocation</p>
+            <p className="mt-1 text-sm text-ink-500">
+              Awaiting allocation{booking.plan.machineName ? ` · ${booking.plan.machineName}` : ""}
+            </p>
           )}
           {booking.trackingRef && (
             <p className="mt-1 text-xs text-ink-500">Tracking: <span className="font-medium text-ink-700">{booking.courier ? `${booking.courier} · ` : ""}{booking.trackingRef}</span></p>
@@ -474,8 +482,13 @@ function BookingModal({
             </div>
             <p className="mt-1 pl-6 text-sm text-ink-600">
               {formatINR(plan.monthlyRent)}{plan.includeGst ? " + GST" : ""}
-              {plan.deposit > 0 && <> (<span className="font-medium">{formatINR(plan.deposit)}</span> Deposit)</>}
+              {plan.deposit > 0 && <> (<span className="font-medium">{formatINR(plan.deposit)}</span> Security Deposit)</>}
             </p>
+            {plan.machineName && (
+              <p className="mt-1 flex items-center gap-1 pl-6 text-xs text-ink-500">
+                <Monitor className="h-3.5 w-3.5" /> Machine: <span className="font-semibold text-ink-700">{plan.machineName}</span>
+              </p>
+            )}
           </div>
 
           {/* Delivery address */}
@@ -510,7 +523,7 @@ function BookingModal({
               <Row label="First month's rent" value={formatINR(plan.monthlyRent)} />
               {plan.includeGst && <Row label="GST (18%)" value={formatINR(gst)} />}
               {plan.setupFee > 0 && <Row label="One-time setup fee" value={formatINR(plan.setupFee)} />}
-              {plan.deposit > 0 && <Row label="Deposit" value={formatINR(plan.deposit)} />}
+              {plan.deposit > 0 && <Row label="Security deposit" value={formatINR(plan.deposit)} />}
               <div className="flex items-center justify-between border-t border-ink-200 pt-2">
                 <span className="font-semibold text-ink-800">Total payable now</span>
                 <span className="text-base font-bold text-ink-900">{formatINR(total)}</span>
@@ -539,7 +552,7 @@ function BookingModal({
                 <ShieldCheck className="h-4 w-4 text-emerald-600" /> Are you sure you want to purchase {plan.name}?
               </span>
               Amount debited from your wallet will be <span className="font-semibold">{formatINR(total)}</span>
-              {plan.deposit > 0 && <> (incl. {formatINR(plan.deposit)} deposit)</>}.
+              {plan.deposit > 0 && <> (incl. {formatINR(plan.deposit)} security deposit)</>}.
             </span>
           </label>
         </div>

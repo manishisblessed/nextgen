@@ -180,7 +180,7 @@ export async function POST(req: Request) {
       id: true, userId: true, planId: true, status: true, machineId: true,
       subscriptionId: true, monthlyRent: true, includeGst: true, billingDay: true,
       amountPaid: true, refundTxnId: true,
-      plan: { select: { name: true } },
+      plan: { select: { name: true, machineName: true } },
     },
   });
   if (!booking)
@@ -193,12 +193,25 @@ export async function POST(req: Request) {
 
     const machine = await prisma.posMachine.findUnique({
       where: { id: data.machineId },
-      select: { id: true, tid: true, serial: true, assignedUserId: true, status: true },
+      select: { id: true, tid: true, serial: true, model: true, assignedUserId: true, status: true },
     });
     if (!machine)
       return NextResponse.json({ error: "Machine not found" }, { status: 404 });
     if (machine.assignedUserId)
       return NextResponse.json({ error: "That machine is already assigned to someone else" }, { status: 409 });
+
+    // One machine → one plan: the allocated hardware must match the plan's
+    // machine model. Legacy plans without a machineName skip this guard.
+    if (
+      booking.plan.machineName &&
+      (machine.model ?? "").trim().toLowerCase() !== booking.plan.machineName.trim().toLowerCase()
+    )
+      return NextResponse.json(
+        {
+          error: `This booking is for a "${booking.plan.machineName}" machine, but the selected unit is "${machine.model ?? "unknown"}". Pick a matching machine.`,
+        },
+        { status: 409 },
+      );
 
     const periodKey = istPeriodKey();
     const { rent, gst, total } = computeRentalAmounts(booking.monthlyRent.toString(), booking.includeGst);

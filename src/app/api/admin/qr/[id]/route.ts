@@ -74,8 +74,12 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
 
   if (parsed.data.makeLiveNow) {
     // Jump the queue: clear today's auto-pause and take a strictly-lower
-    // priority than every other enabled QR so the engine picks it next.
-    const top = await prisma.staticQr.aggregate({ _min: { priority: true }, where: { enabled: true } });
+    // priority than every other enabled QR OF THE SAME KIND so the engine picks
+    // it next (rotation is per-stream, so we only compete within our own kind).
+    const top = await prisma.staticQr.aggregate({
+      _min: { priority: true },
+      where: { enabled: true, settlementKind: qr.settlementKind },
+    });
     const minPriority = top._min.priority ?? 100;
     data.enabled = true;
     data.autoPausedOn = null;
@@ -84,7 +88,8 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
 
   await prisma.staticQr.update({ where: { id: qr.id }, data });
 
-  const live = await resolveLiveQr();
+  // Re-resolve only the edited QR's stream (each kind rotates independently).
+  const live = await resolveLiveQr(qr.settlementKind);
 
   await prisma.auditLog.create({
     data: {
@@ -94,6 +99,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
       entityId: qr.id,
       meta: {
         label: qr.label,
+        settlementKind: qr.settlementKind,
         enabled: data.enabled ?? qr.enabled,
         priority: data.priority ?? qr.priority,
         dailyLimit: parsed.data.dailyLimit,

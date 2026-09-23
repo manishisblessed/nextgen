@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, RefreshCw, Loader2 } from "lucide-react";
 import { Input, Label, Select } from "@/components/ui/Input";
+import { OperatorSelect } from "@/components/ui/OperatorSelect";
 import { Button } from "@/components/ui/Button";
 import {
   TransactionResult,
@@ -254,19 +255,17 @@ export function RechargekitDirectCCForm() {
           <Label htmlFor="operator">Card issuer / Bank</Label>
           <div className="flex gap-2">
             <div className="flex-1">
-              <Select
+              <OperatorSelect
                 id="operator"
                 value={operatorCode}
-                onChange={(e) => setOperatorCode(e.target.value)}
+                onChange={setOperatorCode}
+                options={operators.map((op) => ({
+                  value: op.operatorCode,
+                  label: op.operatorName,
+                }))}
+                loading={loadingOps}
                 disabled={loadingOps}
-              >
-                {loadingOps && <option value="">Loading operators…</option>}
-                {operators.map((op) => (
-                  <option key={op.operatorCode} value={op.operatorCode}>
-                    {op.operatorName}
-                  </option>
-                ))}
-              </Select>
+              />
             </div>
             <button
               type="button"

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
 import { REPORTS } from "@/lib/reports/registry";
 import { brandLogoUrl, brandBadge, brandLocalLogos } from "@/lib/brand/logos";
+import { bankLogoPath } from "@/lib/bank-logos";
 import type { ReportColumnDef, Accent, ReportConfig } from "@/lib/reports/registry";
 import type { ReportType, ReportResult } from "@/lib/reports/types";
 import type { ReportColumn } from "@/lib/reports";
@@ -111,9 +112,13 @@ function AvatarCell({ value }: { value: string }) {
   if (!s || s === "—") return <span className="text-ink-400">—</span>;
 
   const isUrl = /^https?:\/\//i.test(s) || s.startsWith("/");
+  // Prefer the curated credit-card issuer logo (same assets shown in the payment
+  // operator picker) so a paid card's real logo appears in the report/ledger.
   const sources = isUrl
     ? [s]
-    : [...brandLocalLogos(s), brandLogoUrl(s)].filter((u): u is string => !!u);
+    : [bankLogoPath(s), ...brandLocalLogos(s), brandLogoUrl(s)].filter(
+        (u): u is string => !!u
+      );
 
   if (attempt < sources.length) {
     return (

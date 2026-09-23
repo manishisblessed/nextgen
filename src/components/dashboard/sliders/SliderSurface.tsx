@@ -183,14 +183,14 @@ function PopupModal({ popups, userId }: { popups: PublicSlider[]; userId: string
     <AnimatePresence>
       {active && (
         <motion.div
-          className="fixed inset-0 z-[60] grid place-items-center bg-ink-900/50 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-ink-900/50 p-4 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={dismiss}
         >
           <motion.div
-            className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+            className="relative my-auto flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-w-lg md:max-w-xl lg:max-w-2xl xl:max-w-3xl"
             initial={{ scale: 0.9, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -209,11 +209,23 @@ function PopupModal({ popups, userId }: { popups: PublicSlider[]; userId: string
             {active.linkUrl ? (
               <a href={active.linkUrl} target="_blank" rel="noreferrer" onClick={dismiss}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={active.imageUrl} alt={active.title} className="w-full object-contain" />
+                <img
+                  src={active.imageUrl}
+                  alt={active.title}
+                  loading="eager"
+                  decoding="async"
+                  className="block h-auto w-full object-contain [image-rendering:auto]"
+                />
               </a>
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={active.imageUrl} alt={active.title} className="w-full object-contain" />
+              <img
+                src={active.imageUrl}
+                alt={active.title}
+                loading="eager"
+                decoding="async"
+                className="block h-auto w-full object-contain [image-rendering:auto]"
+              />
             )}
 
             <div className="p-5">

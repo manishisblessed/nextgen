@@ -5,6 +5,8 @@ import { mapPay2NewBill, mapPay2NewStatus } from "@/lib/partners/sameday-bbps";
 import { mapSettlementStatus, type SettlementAccount, type VerificationStatus } from "@/lib/partners/sameday-settlement";
 import { mapSettlementToPayoutStatus } from "@/lib/partners/sameday-payout";
 import { mapPgStatus } from "@/lib/partners/bulkpe";
+import { mapViableStatus, resolveChannelRoute, viableChannels } from "@/lib/partners/viable-pg";
+import { isAmountMismatch } from "@/lib/wallet/guards";
 import {
   buildCustParams,
   mapBulkpeBbpsStatus,
@@ -296,6 +298,47 @@ describe("BulkPe BBPS mapping", () => {
   });
 });
 
+describe("Viable PG status mapping", () => {
+  it("maps only Approved/A to PAID (the credit trigger)", () => {
+    // Verified live: a paid card txn returns status "A" / "Approved".
+    expect(mapViableStatus("A", "Approved")).toBe("PAID");
+    expect(mapViableStatus("", "Success")).toBe("PAID");
+    expect(mapViableStatus("A", "authorized")).toBe("PAID");
+  });
+
+  it("maps Pending/unknown to CREATED (keep polling, never credit)", () => {
+    expect(mapViableStatus("P", "Pending")).toBe("CREATED");
+    expect(mapViableStatus("", "")).toBe("CREATED");
+    // An unseen code must NEVER be treated as paid.
+    expect(mapViableStatus("Z", "Weird new state")).toBe("CREATED");
+  });
+
+  it("maps clear failures and expiry", () => {
+    expect(mapViableStatus("F", "Failed")).toBe("FAILED");
+    expect(mapViableStatus("R", "Rejected")).toBe("FAILED");
+    expect(mapViableStatus("C", "Cancelled")).toBe("FAILED");
+    expect(mapViableStatus("", "Declined")).toBe("FAILED");
+    expect(mapViableStatus("E", "Expired")).toBe("EXPIRED");
+  });
+});
+
+describe("Viable PG channels", () => {
+  it("exposes channels with exactly one primary and resolves routes", () => {
+    const channels = viableChannels();
+    expect(channels.length).toBeGreaterThan(0);
+    expect(channels.filter((c) => c.primary)).toHaveLength(1);
+    // premimumpg5 is excluded (it 500s live).
+    expect(channels.some((c) => c.route === "premimumpg5")).toBe(false);
+  });
+
+  it("resolves a requested channel, falling back to primary", () => {
+    expect(resolveChannelRoute("razorpay2")).toBe("razorpay2");
+    const primary = viableChannels().find((c) => c.primary)!;
+    expect(resolveChannelRoute(undefined)).toBe(primary.route);
+    expect(resolveChannelRoute("does-not-exist")).toBe(primary.route);
+  });
+});
+
 describe("Leegality document status derivation", () => {
   it("is COMPLETED only when every invitee signed", () => {
     expect(
@@ -318,5 +361,25 @@ describe("Leegality document status derivation", () => {
   it("defaults to PENDING with no signatures", () => {
     expect(deriveEsignStatus({ invitations: [{ signed: false }] })).toBe("PENDING");
     expect(deriveEsignStatus({})).toBe("PENDING");
+  });
+});
+
+describe("payin money-safety guard (isAmountMismatch)", () => {
+  it("treats exact + within-tolerance amounts as a match (no hold)", () => {
+    expect(isAmountMismatch(100, 100)).toBe(false);
+    expect(isAmountMismatch(100.01, 100)).toBe(false); // 1 paisa noise tolerated
+    expect(isAmountMismatch(99.99, 100)).toBe(false);
+  });
+
+  it("flags any amount beyond tolerance as a mismatch (must HOLD, never credit)", () => {
+    expect(isAmountMismatch(100.02, 100)).toBe(true);
+    expect(isAmountMismatch(1, 100)).toBe(true); // provider paid less
+    expect(isAmountMismatch(10000, 100)).toBe(true); // provider paid more
+  });
+
+  it("does NOT flag when the provider reports no verifiable amount", () => {
+    // Absent/NaN verified amount can't contradict us; other rails still guard.
+    expect(isAmountMismatch(undefined, 100)).toBe(false);
+    expect(isAmountMismatch(NaN, 100)).toBe(false);
   });
 });

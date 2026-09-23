@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { buildPayoutLedgerMemos } from "@/lib/payout/ledgerMemos";
+import { bankLogoSlug } from "@/lib/bank-logos";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,51 @@ type LedgerRow = {
   refId: string | null;
   createdAt: string;
   memo: boolean;
+  /** Resolved bank/issuer name for logo display; only set on card/bill rows. */
+  logo?: string | null;
 };
+
+/**
+ * Attach a bank/issuer name (for logo rendering) to the ledger rows that point
+ * at a service Transaction — so card & bill payments show the real bank logo in
+ * the wallet ledger. Resolves CC-1 biller *codes* to names via the biller table;
+ * CC-2 already stores the bank name as the operator. Only rows that map to a
+ * known bank logo get a `logo` value (others render no icon).
+ */
+async function attachBankLogos(rows: LedgerRow[]): Promise<LedgerRow[]> {
+  const txnIds = [
+    ...new Set(
+      rows
+        .filter((r) => r.refType === "Transaction" && r.refId)
+        .map((r) => r.refId as string)
+    ),
+  ];
+  if (txnIds.length === 0) return rows;
+
+  const txns = await prisma.transaction.findMany({
+    where: { id: { in: txnIds } },
+    select: { id: true, operator: true },
+  });
+  const opById = new Map(txns.map((t) => [t.id, t.operator]));
+
+  const opCodes = [
+    ...new Set(txns.map((t) => t.operator).filter((c): c is string => !!c)),
+  ];
+  const billers = opCodes.length
+    ? await prisma.biller.findMany({
+        where: { code: { in: opCodes } },
+        select: { code: true, name: true },
+      })
+    : [];
+  const billerName = new Map(billers.map((b) => [b.code, b.name]));
+
+  return rows.map((r) => {
+    if (r.refType !== "Transaction" || !r.refId) return r;
+    const operator = opById.get(r.refId) ?? null;
+    const name = (operator && billerName.get(operator)) || operator || null;
+    return { ...r, logo: name && bankLogoSlug(name) ? name : null };
+  });
+}
 
 // Cap how deep we merge synthetic memos. Reservation memos are read-time overlays,
 // so injecting them requires reading real rows from the top; bound that work to a
@@ -95,14 +140,19 @@ export async function GET(req: Request) {
   }));
 
   if (!canInject) {
-    return NextResponse.json({ txns: realRows, total, page, pageSize });
+    return NextResponse.json({
+      txns: await attachBankLogos(realRows),
+      total,
+      page,
+      pageSize,
+    });
   }
 
   const merged = [...realRows, ...memos].sort(byNewest);
   const pageRows = merged.slice((page - 1) * pageSize, page * pageSize);
 
   return NextResponse.json({
-    txns: pageRows,
+    txns: await attachBankLogos(pageRows),
     total: total + memos.length,
     page,
     pageSize,
