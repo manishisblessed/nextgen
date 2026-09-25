@@ -2,15 +2,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
+import { clientIp } from "@/lib/security/audit";
 import { requireAdminActivity } from "@/lib/security/adminActivity";
+import { requireTxnPin } from "@/lib/security/txnPin";
 import { approveQrClaim } from "@/lib/qr/claims";
 
 /**
- * Admin — approve a QR claim.
+ * Admin — approve a QR claim (SINGLE-approval model).
  * `portalVerified: true` is mandatory: the admin attests (audit-logged) that
- * the UTR was found in the third-party provider's merchant portal. Amounts
- * above the maker-checker threshold are staged on the first call and need a
- * second, different admin. The wallet credit is idempotent.
+ * the UTR was found in the third-party provider's merchant portal. One admin
+ * approval is sufficient — but the approving admin must confirm their
+ * transaction PIN (`x-txn-pin` header) as the authorization control. The wallet
+ * credit is idempotent.
  */
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -33,6 +36,14 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       entityId: params.id,
     });
     await enforceRateLimit(`qr:review:${admin.id}`, RATE_LIMITS.sensitiveWrite);
+    // A single admin approval is enough, but it authorizes money movement, so
+    // require the approving admin's transaction PIN (x-txn-pin header) — this
+    // replaces the old second-admin maker-checker control.
+    await requireTxnPin(admin, req, {
+      action: "qr.claim.approve",
+      ip: clientIp(req),
+      userAgent: req.headers.get("user-agent"),
+    });
   } catch (e) {
     return toErrorResponse(e);
   }

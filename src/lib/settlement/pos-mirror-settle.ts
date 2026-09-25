@@ -2,6 +2,7 @@ import { flags } from "@/lib/env";
 import { getSetting, isCardClassificationEnabled } from "@/lib/settings";
 import { prisma } from "@/lib/db";
 import { handlePosCapture } from "@/lib/settlement/pos";
+import { getDefaultScheme } from "@/lib/scheme/resolve-scheme";
 
 /**
  * POS settlement sweep — MIRROR-DRIVEN.
@@ -51,19 +52,30 @@ function istStartDaysAgo(days: number): Date {
  * Resolve the terminal IDs eligible for settlement: assigned to an ACTIVE
  * retailer who has a scheme assigned. Brand-priced machines don't strictly need
  * a user scheme, so those are included whenever assigned to an active user too.
+ *
+ * When the global default-scheme fallback is enabled AND a platform default
+ * exists, EVERY active-assigned terminal is eligible — a retailer with no
+ * explicit scheme is priced off the default. `handlePosCapture`'s own gates
+ * remain the final safety net for anything that still can't be priced.
  */
 async function eligibleTerminalIds(): Promise<string[]> {
+  const defaultPricesEveryone = flags.schemeDefaultFallback && !!(await getDefaultScheme());
+
   const machines = await prisma.posMachine.findMany({
     where: {
       tid: { not: null },
       assignedUserId: { not: null },
       assignedUser: { status: "ACTIVE" },
-      OR: [
-        // Retailer-scheme priced: retailer must carry a scheme.
-        { assignedUser: { schemeId: { not: null } } },
-        // Brand-priced: the brand rate card prices it regardless of user scheme.
-        { brandId: { not: null } },
-      ],
+      ...(defaultPricesEveryone
+        ? {}
+        : {
+            OR: [
+              // Retailer-scheme priced: retailer must carry a scheme.
+              { assignedUser: { schemeId: { not: null } } },
+              // Brand-priced: the brand rate card prices it regardless of scheme.
+              { brandId: { not: null } },
+            ],
+          }),
     },
     select: { tid: true },
   });

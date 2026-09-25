@@ -144,8 +144,10 @@ export async function POST(
 
       await tx.user.update({
         where: { id: target.id },
-        // schemeId: null → the scheme resolver falls back to the platform
-        // default scheme (the old parent's scheme no longer applies).
+        // schemeId: null → the old parent's scheme no longer applies. With
+        // SCHEME_DEFAULT_FALLBACK on, resolveUserScheme prices them off the
+        // platform default until admin assigns a new scheme; with it off, they
+        // are gate-blocked until reassigned.
         data: { parentId: newParentId, schemeId: null },
       });
 

@@ -47,6 +47,7 @@ import {
   Inbox,
   Gift,
   Trophy,
+  Gauge,
   type LucideIcon
 } from "lucide-react";
 import type { Role } from "@/lib/auth";
@@ -154,6 +155,7 @@ export const ASSIGNABLE_ADMIN_TABS = [
   { href: "verify", label: "Identity Toolkit" },
   { href: "services", label: "On/Off Services" },
   { href: "controls", label: "Platform Controls" },
+  { href: "limits", label: "Limits" },
   { href: "slider", label: "Slider & Pop-ups" },
   { href: "audit", label: "Audit Log" },
   { href: "system", label: "System Health" },
@@ -195,6 +197,7 @@ const adminMoneyOps: NavItem[] = [
   { href: "/dashboard/admin/agreements", label: "Agreements Vault", icon: FileSignature, badge: "New" },
   { href: "/dashboard/admin/verify", label: "Identity Toolkit", icon: ScanSearch, badge: "New" },
   { href: "/dashboard/admin/controls", label: "Platform Controls", icon: SlidersHorizontal, badge: "New" },
+  { href: "/dashboard/admin/limits", label: "Limits", icon: Gauge, badge: "New" },
 ];
 
 /** Money / operations tabs for the platform OWNER (master-admin). Identical to

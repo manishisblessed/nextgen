@@ -25,7 +25,11 @@ const Body = z.object({
   // override — single user
   userId: z.string().min(1).optional(),
   minAmount: z.number().nonnegative().max(1_000_000_000).nullable().optional(),
+  // Per-user T+1 (standard) rate override.
   rewardValue: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  // Per-user instant (T+0) rate override. Null clears it (instant falls back to
+  // the tier's T0 rate, or to the effective T+1 rate when the tier T0 is 0).
+  rewardValueT0: z.number().nonnegative().max(1_000_000).nullable().optional(),
 });
 
 export async function POST(req: Request) {
@@ -120,6 +124,7 @@ export async function POST(req: Request) {
     data: {
       ...(b.minAmount !== undefined ? { minAmount: b.minAmount } : {}),
       ...(b.rewardValue !== undefined ? { rewardValue: b.rewardValue } : {}),
+      ...(b.rewardValueT0 !== undefined ? { rewardValueT0: b.rewardValueT0 } : {}),
     },
   });
 
@@ -129,7 +134,13 @@ export async function POST(req: Request) {
       action: "incentive.override",
       entity: "UserIncentiveConfig",
       entityId: updated.id,
-      meta: { schemeId: b.schemeId, userId: b.userId, minAmount: b.minAmount, rewardValue: b.rewardValue },
+      meta: {
+        schemeId: b.schemeId,
+        userId: b.userId,
+        minAmount: b.minAmount,
+        rewardValue: b.rewardValue,
+        rewardValueT0: b.rewardValueT0,
+      },
       ip: clientIp(req),
     },
   });
@@ -140,6 +151,7 @@ export async function POST(req: Request) {
       id: updated.id,
       minAmount: updated.minAmount != null ? Number(updated.minAmount) : null,
       rewardValue: updated.rewardValue != null ? Number(updated.rewardValue) : null,
+      rewardValueT0: updated.rewardValueT0 != null ? Number(updated.rewardValueT0) : null,
     },
   });
 }

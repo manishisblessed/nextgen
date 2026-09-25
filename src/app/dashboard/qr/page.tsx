@@ -73,6 +73,21 @@ type DailyUsage = {
   countLimit: number;
 };
 
+/** The MDR rate the caller's scheme applies to a QR stream (from /api/qr/active). */
+type QrRate = { type: "PERCENT" | "FLAT"; value: number };
+
+/** Format an MDR rate the same way the "My Scheme" card does. */
+function fmtRate(rate: QrRate): string {
+  return rate.type === "PERCENT" ? `${(rate.value * 100).toFixed(2)}%` : `₹${rate.value}`;
+}
+
+/** Format the T+1 settlement hour (0–23 IST) as a friendly wall-clock time. */
+function fmtSettlementHour(hour: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  const suffix = hour < 12 ? "AM" : "PM";
+  return `${h12}:00 ${suffix} IST`;
+}
+
 type Claim = {
   id: string;
   qrLabel: string;
@@ -297,6 +312,158 @@ const STATUS_BADGE: Record<Claim["status"], { label: string; variant: "success" 
   CLAWED_BACK: { label: "Reversed", variant: "danger" },
 };
 
+/**
+ * The transaction report's traffic-light status model:
+ *   success (green)  — money reached / is reaching the wallet (SETTLED/APPROVED)
+ *   pending (orange) — still in the settlement pipeline (under review / ready)
+ *   failed  (red)    — rejected or clawed back (nothing settles)
+ */
+type ReportTone = "success" | "pending" | "failed";
+
+const REPORT_STATUS: Record<Claim["status"], { tone: ReportTone; label: string }> = {
+  PENDING: { tone: "pending", label: "Pending" },
+  AWAITING_SECOND_APPROVAL: { tone: "pending", label: "Pending" },
+  SETTLEABLE: { tone: "pending", label: "Pending (ready to settle)" },
+  APPROVED: { tone: "success", label: "Success" },
+  SETTLED: { tone: "success", label: "Success (settled)" },
+  REJECTED: { tone: "failed", label: "Failed (rejected)" },
+  CLAWED_BACK: { tone: "failed", label: "Failed (reversed)" },
+};
+
+const TONE_STYLES: Record<ReportTone, { badge: string; dot: string; rowBorder: string; net: string }> = {
+  success: {
+    badge: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+    dot: "bg-emerald-500",
+    rowBorder: "border-l-emerald-400",
+    net: "text-emerald-700",
+  },
+  pending: {
+    badge: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+    dot: "bg-amber-500",
+    rowBorder: "border-l-amber-400",
+    net: "text-amber-700",
+  },
+  failed: {
+    badge: "bg-rose-50 text-rose-700 ring-1 ring-rose-200",
+    dot: "bg-rose-500",
+    rowBorder: "border-l-rose-400",
+    net: "text-rose-700",
+  },
+};
+
+/**
+ * Per-transaction QR report for the retailer: for every claimed payment in the
+ * stream it shows the gross amount, the MDR the scheme deducted, and the NET
+ * that was (or will be) settled to the wallet — colour-coded green (success),
+ * orange (pending) and red (failed). MDR/net show only once the claim settles;
+ * before that they read "—" (nothing has been deducted yet).
+ */
+function QrTxnReport({
+  claims,
+  meta,
+  loading,
+}: {
+  claims: Claim[];
+  meta: { label: string; short: string };
+  loading: boolean;
+}) {
+  const settled = claims.filter((c) => c.status === "SETTLED");
+  const settledNet = settled.reduce((s, c) => s + (c.netAmount ?? 0), 0);
+  const settledMdr = settled.reduce((s, c) => s + (c.mdrAmount ?? 0), 0);
+  const pendingGross = claims
+    .filter((c) => REPORT_STATUS[c.status].tone === "pending")
+    .reduce((s, c) => s + c.amount, 0);
+  const failedCount = claims.filter((c) => REPORT_STATUS[c.status].tone === "failed").length;
+
+  return (
+    <div className="space-y-4">
+      {/* Legend + colour-coded totals */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Settled to wallet (net)</p>
+          <p className="mt-1 font-display text-xl font-bold text-emerald-800">{formatINR(settledNet)}</p>
+          <p className="mt-0.5 text-[11px] text-emerald-700/80">MDR deducted: {formatINR(settledMdr)} · {settled.length} txn{settled.length === 1 ? "" : "s"}</p>
+        </div>
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Pending (gross)</p>
+          <p className="mt-1 font-display text-xl font-bold text-amber-800">{formatINR(pendingGross)}</p>
+          <p className="mt-0.5 text-[11px] text-amber-700/80">Awaiting verification / settlement</p>
+        </div>
+        <div className="rounded-2xl border border-rose-100 bg-rose-50/60 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Failed</p>
+          <p className="mt-1 font-display text-xl font-bold text-rose-800">{failedCount}</p>
+          <p className="mt-0.5 text-[11px] text-rose-700/80">Rejected or reversed — nothing settled</p>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-ink-100 bg-white">
+        <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
+          <div>
+            <h3 className="font-display text-sm font-semibold text-ink-900">{meta.label} — transaction report</h3>
+            <p className="text-xs text-ink-500">Gross amount, MDR deducted and the net settled to your wallet, per payment.</p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-ink-100 bg-ink-50/60 text-left text-[11px] uppercase tracking-wide text-ink-500">
+                <th className="px-4 py-2 font-semibold">Ref / Card</th>
+                <th className="px-4 py-2 font-semibold">Date</th>
+                <th className="px-4 py-2 text-right font-semibold">Amount</th>
+                <th className="px-4 py-2 text-right font-semibold">MDR deducted</th>
+                <th className="px-4 py-2 text-right font-semibold">Net settled</th>
+                <th className="px-4 py-2 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-ink-500">Loading…</td>
+                </tr>
+              ) : claims.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-ink-500">
+                    No transactions yet on the {meta.short.toLowerCase()} QR.
+                  </td>
+                </tr>
+              ) : (
+                claims.map((c) => {
+                  const st = REPORT_STATUS[c.status];
+                  const styles = TONE_STYLES[st.tone];
+                  const isSettled = c.status === "SETTLED";
+                  const when = c.settledAt ?? c.paidAt ?? c.createdAt;
+                  return (
+                    <tr key={c.id} className={`border-b border-l-4 border-ink-50 ${styles.rowBorder}`}>
+                      <td className="px-4 py-2.5 font-mono text-xs text-ink-700">{claimIdentifier(c)}</td>
+                      <td className="px-4 py-2.5 text-xs text-ink-600">
+                        {new Date(when).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-ink-900">{formatINR(c.amount)}</td>
+                      <td className="px-4 py-2.5 text-right text-ink-600">
+                        {isSettled && c.mdrAmount != null ? `− ${formatINR(c.mdrAmount)}` : <span className="text-ink-300">—</span>}
+                      </td>
+                      <td className={`px-4 py-2.5 text-right font-semibold ${isSettled ? styles.net : "text-ink-300"}`}>
+                        {isSettled && c.netAmount != null ? formatINR(c.netAmount) : "—"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${styles.badge}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${styles.dot}`} />
+                          {st.label}
+                          {isSettled && settledViaLabel(c.settledVia)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function QrCollectionsPage() {
   const { data: authSession, status: sessionStatus } = useSession();
   // Only RETAILERs collect on the shop QR and file claims. DT/MD/SD (and any
@@ -317,15 +484,20 @@ export default function QrCollectionsPage() {
 
   // Primary tab = which settlement stream the retailer is working in.
   const [kind, setKind] = useState<QrKind>(deepLink.kind === "T1" ? "T1" : "INSTANT");
-  // Retailers switch between "Collect & Claim" and "Settlement Report" inside a
-  // stream; everyone else is pinned to the report (they have no collect surface).
-  const [subTab, setSubTab] = useState<"collect" | "report">(deepLink.tab === "report" ? "report" : "collect");
-  const activeSubTab: "collect" | "report" = isRetailer ? subTab : "report";
+  // Retailers switch between "Collect & Claim", "Transaction Report" and
+  // "Settlement Report" inside a stream; everyone else is pinned to the
+  // settlement report (they have no collect surface).
+  const [subTab, setSubTab] = useState<"collect" | "txn" | "report">(
+    deepLink.tab === "report" ? "report" : deepLink.tab === "txn" ? "txn" : "collect"
+  );
+  const activeSubTab: "collect" | "txn" | "report" = isRetailer ? subTab : "report";
 
   const [qr, setQr] = useState<ActiveQr | null>(null);
   const [overflowQr, setOverflowQr] = useState<ActiveQr | null>(null);
   const [claimQrId, setClaimQrId] = useState<string | null>(null);
   const [qrReason, setQrReason] = useState<string | null>(null);
+  const [rate, setRate] = useState<QrRate | null>(null);
+  const [settlementHour, setSettlementHour] = useState<number | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [dailyUsage, setDailyUsage] = useState<DailyUsage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -357,6 +529,8 @@ export default function QrCollectionsPage() {
         setQr(d.qr);
         setOverflowQr(d.overflowQr ?? null);
         setQrReason(d.reason ?? null);
+        setRate(d.rate ?? null);
+        setSettlementHour(typeof d.settlementHour === "number" ? d.settlementHour : null);
       }
       if (clRes.ok) {
         const cd = await clRes.json();
@@ -609,7 +783,8 @@ export default function QrCollectionsPage() {
         <div className="flex gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
           {([
             { id: "collect", label: "Collect & Claim", icon: Store },
-            { id: "report", label: "Settlement Report", icon: Receipt },
+            { id: "txn", label: "Transaction Report", icon: Receipt },
+            { id: "report", label: "Settlement Report", icon: Banknote },
           ] as const).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -632,10 +807,29 @@ export default function QrCollectionsPage() {
         </div>
       ) : activeSubTab === "report" ? (
         <QrSettlementReportTab kind={kind} initialFrom={deepLink.from} initialTo={deepLink.to} />
+      ) : activeSubTab === "txn" ? (
+        <QrTxnReport claims={kindClaims} meta={meta} loading={loading} />
       ) : (
       <>
       <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-xs text-brand-800">
         <span className="font-semibold">{meta.label}:</span> {meta.blurb}
+      </div>
+
+      {/* Applicable MDR for this stream (T+0 for Instant, T+1 for T+1) plus, for
+          T+1, when verified claims are auto-settled — straight from the scheme. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {rate && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-800">
+            <IndianRupee className="h-3.5 w-3.5 text-brand-600" />
+            MDR {kind === "INSTANT" ? "T+0" : "T+1"}: {fmtRate(rate)}
+          </span>
+        )}
+        {kind === "T1" && settlementHour != null && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-800">
+            <Clock className="h-3.5 w-3.5 text-accent-600" />
+            Settles daily at {fmtSettlementHour(settlementHour)}
+          </span>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

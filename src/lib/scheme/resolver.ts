@@ -2,6 +2,7 @@ import type { Prisma, RateType, ServiceCode, SchemeSlab } from "@prisma/client";
 import { prisma } from "../db";
 import { add, dec, gt, gte, lte, mul, round, sub, type Money } from "../money";
 import { priceScopeFamily } from "../services/priceScope";
+import { resolveUserScheme, type SchemeSource } from "./resolve-scheme";
 
 /**
  * Scheme resolver — the single source of truth for "what does this user pay
@@ -23,10 +24,11 @@ import { priceScopeFamily } from "../services/priceScope";
  * All money math goes through money.ts Decimal helpers — never JS floats.
  */
 
-export type ResolvedRateSource = "USER_SCHEME" | "NONE";
+/** @deprecated Use SchemeSource from ./resolve-scheme (kept as an alias). */
+export type ResolvedRateSource = SchemeSource;
 
 export type EffectiveRate = {
-  source: ResolvedRateSource;
+  source: SchemeSource;
   schemeId: string | null;
   schemeName: string | null;
   slabId: string | null;
@@ -82,9 +84,10 @@ function emptyRate(): EffectiveRate {
 
 /**
  * Resolve the effective charge + commission for a user's service transaction.
- * ONLY the user's assigned active scheme resolves (no default fallback).
- * Returns a zeroed `NONE` result when the user has no scheme or the scheme has
- * no matching slab — the scheme gate blocks transactions in that state.
+ * The scheme is resolved via `resolveUserScheme`: the user's assigned active
+ * scheme, else the platform default (when SCHEME_DEFAULT_FALLBACK is enabled).
+ * Returns a zeroed `NONE` result when no scheme resolves or the scheme has no
+ * matching slab — the scheme gate blocks transactions in that state.
  */
 export async function getEffectiveRate(
   userId: string,
@@ -94,44 +97,31 @@ export async function getEffectiveRate(
 ): Promise<EffectiveRate> {
   const amt = round(amount);
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { schemeId: true },
-  });
-  if (!user) return emptyRate();
+  const resolved = await resolveUserScheme(userId);
+  if (resolved.source === "NONE" || !resolved.schemeId) return emptyRate();
 
-  if (user.schemeId) {
-    const scheme = await prisma.scheme.findFirst({
-      where: { id: user.schemeId, active: true },
-      select: { id: true, name: true },
-    });
-    if (scheme) {
-      const slab = await findSlab(scheme.id, service, amt, provider);
-      if (slab) {
-        const charge = applyRate(amt, slab.chargeType, slab.chargeValue);
-        const commission = applyRate(amt, slab.commissionType, slab.commissionValue);
-        // Vendor cost uses the same rate type as the charge (BBPS/Payout: flat
-        // ₹/txn). Revenue is the company margin, floored at zero. Defaults to 0
-        // when the slab predates the vendorCharge column (legacy / no rate card).
-        const vendorCharge = applyRate(amt, slab.chargeType, slab.vendorCharge ?? 0);
-        const revenue = gt(charge, vendorCharge) ? round(sub(charge, vendorCharge)) : dec(0);
-        return {
-          source: "USER_SCHEME",
-          schemeId: scheme.id,
-          schemeName: scheme.name,
-          slabId: slab.id,
-          charge,
-          chargeType: slab.chargeType,
-          chargeGstInclusive: (slab as any).chargeGstInclusive ?? false,
-          commission,
-          vendorCharge,
-          revenue,
-        };
-      }
-    }
-  }
+  const slab = await findSlab(resolved.schemeId, service, amt, provider);
+  if (!slab) return emptyRate();
 
-  return emptyRate();
+  const charge = applyRate(amt, slab.chargeType, slab.chargeValue);
+  const commission = applyRate(amt, slab.commissionType, slab.commissionValue);
+  // Vendor cost uses the same rate type as the charge (BBPS/Payout: flat
+  // ₹/txn). Revenue is the company margin, floored at zero. Defaults to 0
+  // when the slab predates the vendorCharge column (legacy / no rate card).
+  const vendorCharge = applyRate(amt, slab.chargeType, slab.vendorCharge ?? 0);
+  const revenue = gt(charge, vendorCharge) ? round(sub(charge, vendorCharge)) : dec(0);
+  return {
+    source: resolved.source,
+    schemeId: resolved.schemeId,
+    schemeName: resolved.schemeName,
+    slabId: slab.id,
+    charge,
+    chargeType: slab.chargeType,
+    chargeGstInclusive: (slab as any).chargeGstInclusive ?? false,
+    commission,
+    vendorCharge,
+    revenue,
+  };
 }
 
 /**
@@ -196,27 +186,19 @@ async function findSlab(
 
 /**
  * Return the maximum allowed transaction amount for a user+service based on
- * their scheme slabs. If the user has no scheme or no slabs for the service,
- * returns null (no limit).
+ * their scheme slabs. Uses the same resolution as pricing (assigned scheme,
+ * else the platform default when enabled). If no scheme resolves or there are
+ * no slabs for the service, returns null (no limit).
  */
 export async function getSchemeLimit(
   userId: string,
   service: ServiceCode
 ): Promise<Money | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { schemeId: true },
-  });
-  if (!user?.schemeId) return null;
-
-  const scheme = await prisma.scheme.findFirst({
-    where: { id: user.schemeId, active: true },
-    select: { id: true },
-  });
-  if (!scheme) return null;
+  const resolved = await resolveUserScheme(userId);
+  if (resolved.source === "NONE" || !resolved.schemeId) return null;
 
   const topSlab = await prisma.schemeSlab.findFirst({
-    where: { schemeId: scheme.id, service, active: true },
+    where: { schemeId: resolved.schemeId, service, active: true },
     orderBy: { maxAmount: "desc" },
     select: { maxAmount: true },
   });

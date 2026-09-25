@@ -3,12 +3,15 @@ import { prisma } from "@/lib/db";
 import { dec, gte, lte, mul, round, type Money } from "@/lib/money";
 import { canonicalCardLevel } from "@/lib/pos/binLookup";
 import { isCardClassificationEnabled } from "@/lib/settings";
+import { resolveUserScheme, type SchemeSource } from "@/lib/scheme/resolve-scheme";
 
 /**
  * MDR engine — resolves the merchant discount rate + commission share for
- * acquiring-style rails (POS / PG / QR / UPI). Flat model: ONLY the user's
- * assigned active Scheme resolves — no platform-default fallback. Admin assigns
- * schemes directly to any user; commission values are credited flat (no chain).
+ * acquiring-style rails (POS / PG / QR / UPI). Flat model: the user's assigned
+ * active Scheme resolves, else the platform default scheme when
+ * SCHEME_DEFAULT_FALLBACK is enabled (see lib/scheme/resolve-scheme.ts). Admin
+ * assigns schemes directly to any user; commission values are credited flat
+ * (no chain).
  *
  * Slab matching: (serviceKind, amount band) plus the card/acquirer dimensions
  * paymentMode, company, cardType, brandType, classification. A null/"*"
@@ -30,7 +33,7 @@ export type MdrDimensions = {
 };
 
 export type EffectiveMdr = {
-  source: "USER_SCHEME" | "NONE";
+  source: SchemeSource;
   schemeId: string | null;
   schemeName: string | null;
   slabId: string | null;
@@ -186,11 +189,6 @@ export async function getEffectiveMdr(
   // Back-compat: a plain string argument is the payment mode.
   const d: MdrDimensions = typeof dims === "string" ? { paymentMode: dims } : dims;
   const amt = round(amount);
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { schemeId: true },
-  });
-  if (!user) return emptyMdr();
 
   const build = (
     slab: MdrSlab,
@@ -223,16 +221,11 @@ export async function getEffectiveMdr(
     };
   };
 
-  if (user.schemeId) {
-    const scheme = await prisma.scheme.findFirst({
-      where: { id: user.schemeId, active: true },
-      select: { id: true, name: true },
-    });
-    if (scheme) {
-      const useClassification = await isCardClassificationEnabled();
-      const slab = await resolveFromScheme(scheme.id, serviceKind, d, amt, useClassification);
-      if (slab) return build(slab, scheme.id, scheme.name, "USER_SCHEME");
-    }
+  const resolved = await resolveUserScheme(userId);
+  if (resolved.source !== "NONE" && resolved.schemeId) {
+    const useClassification = await isCardClassificationEnabled();
+    const slab = await resolveFromScheme(resolved.schemeId, serviceKind, d, amt, useClassification);
+    if (slab) return build(slab, resolved.schemeId, resolved.schemeName ?? "", resolved.source);
   }
 
   return emptyMdr();

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth-server";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
-import { getQrClaimOverview, secondApprovalThreshold } from "@/lib/qr/claims";
+import { getQrClaimOverview } from "@/lib/qr/claims";
 import type { Prisma, QrClaimStatus, QrSettlementKind } from "@prisma/client";
 
 /**
@@ -68,7 +68,6 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     overview,
-    secondApprovalThreshold: secondApprovalThreshold(),
     claims: claims.map((c) => ({
       id: c.id,
       retailer: c.user,

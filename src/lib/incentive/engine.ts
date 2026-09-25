@@ -1,9 +1,14 @@
-import type { IncentiveScheme, IncentiveTier, UserIncentiveConfig } from "@prisma/client";
+import type {
+  IncentiveScheme,
+  IncentiveTier,
+  UserIncentiveConfig,
+  IncentiveLeg,
+} from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { creditWallet, LedgerError } from "@/lib/ledger";
 import { dec, mul, round, gte, gt, toNumber, type Money } from "@/lib/money";
 import { getSetting } from "@/lib/settings";
-import { measureRailVolume, type RailVolume } from "./volume";
+import { measureRailVolume, type RailVolume, type SplitVolume } from "./volume";
 
 /**
  * Monthly volume-incentive engine — the retailer reward / reverse-cashback
@@ -12,13 +17,23 @@ import { measureRailVolume, type RailVolume } from "./volume";
  * to a reward tier ("slab"), and credits the reward (e.g. reverse cashback = a %
  * of the MDR the user paid that month) to their wallet.
  *
- * Idempotency: exactly one IncentivePayout per (user, scheme, YYYY-MM) via the
- * unique key, and the wallet credit shares idempotency key
- * `incentive:<user>:<scheme>:<period>`, so a re-run in the same period never
- * double-pays.
+ * Per-leg independence: the reward is computed, credited and recorded
+ * INDEPENDENTLY for the INSTANT (T+0) and T1 (next-day) settlement legs. Tier
+ * qualification uses the TOTAL monthly volume (the milestone the retailer
+ * chases), but each leg is then rewarded at its OWN rate on its OWN base and
+ * gets its OWN wallet credit + IncentivePayout row. Reports can therefore show
+ * one leg at a time or both together.
+ *
+ * Idempotency: exactly one IncentivePayout per (user, scheme, YYYY-MM, leg) via
+ * the unique key, and each leg's wallet credit uses idempotency key
+ * `incentive:<user>:<scheme>:<period>:<leg>`, so a re-run in the same period
+ * never double-pays either leg.
  */
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** The two settlement legs, in report order. */
+export const LEGS: IncentiveLeg[] = ["INSTANT", "T1"];
 
 /** IST calendar parts (year, 1-indexed month, day) for a UTC instant. */
 function istYmd(now: Date): { y: number; m: number; d: number } {
@@ -56,26 +71,48 @@ export function isLastIstDayOfMonth(now: Date = new Date()): boolean {
 // Tier resolution + reward computation
 // ---------------------------------------------------------------------------
 
+type IncentiveConfigRates = Pick<
+  UserIncentiveConfig,
+  "minAmount" | "rewardValue" | "rewardValueT0"
+>;
+
 export type ResolvedTier = {
   tier: IncentiveTier;
   /** Effective entry threshold after any per-user override (₹). */
   effectiveMin: Money;
-  /** Effective reward rate after any per-user override (fraction or ₹). */
-  effectiveRate: Money;
+  /** Effective T+1 (standard) reward rate after any per-user override. */
+  effectiveRateT1: Money;
+  /** Effective T+0 (instant) reward rate after fallback + any per-user override. */
+  effectiveRateT0: Money;
 };
 
 /**
- * Pick the reward tier a user qualifies for given their monthly `volume`.
- *
- * Whole-month model: the HIGHEST tier whose (effective) entry threshold is met
- * applies to the whole month's base. A per-user `config.minAmount` override
- * shifts the entry threshold of the LOWEST tier (e.g. the scheme defaults to
- * ₹20 lakh but this retailer unlocks at ₹15 lakh); `config.rewardValue`
- * overrides the rate for every tier this user hits.
+ * Effective per-leg rates for a single tier, applying per-user overrides and the
+ * T0→T1 fallback (a tier `rewardValueT0` of 0 means "reward instant at the same
+ * rate as T+1"). A per-user override wins for its own leg.
+ */
+function effectiveRatesFor(
+  tier: IncentiveTier,
+  config: IncentiveConfigRates | null
+): { t1: Money; t0: Money } {
+  const overrideT1 = config?.rewardValue ?? null;
+  const overrideT0 = config?.rewardValueT0 ?? null;
+  const t1 = overrideT1 != null ? dec(overrideT1) : dec(tier.rewardValue);
+  const tierT0 = dec(tier.rewardValueT0);
+  const baseT0 = gt(tierT0, 0) ? tierT0 : t1; // 0 ⇒ follow the effective T+1 rate
+  const t0 = overrideT0 != null ? dec(overrideT0) : baseT0;
+  return { t1, t0 };
+}
+
+/**
+ * Pick the reward tier a user qualifies for given their TOTAL monthly `volume`
+ * (both legs combined — the milestone they chase). A per-user `config.minAmount`
+ * override shifts the entry threshold of the LOWEST tier; rate overrides are
+ * applied per leg in {@link effectiveRatesFor}.
  */
 export function resolveTier(
   tiers: IncentiveTier[],
-  config: Pick<UserIncentiveConfig, "minAmount" | "rewardValue"> | null,
+  config: IncentiveConfigRates | null,
   volume: Money
 ): ResolvedTier | null {
   const active = tiers
@@ -85,7 +122,6 @@ export function resolveTier(
 
   const lowestId = active[0].id;
   const overrideMin = config?.minAmount ?? null;
-  const overrideRate = config?.rewardValue ?? null;
 
   let best: ResolvedTier | null = null;
   for (const t of active) {
@@ -93,47 +129,87 @@ export function resolveTier(
       overrideMin != null && t.id === lowestId ? dec(overrideMin) : dec(t.minAmount);
     if (!gte(volume, effectiveMin)) continue;
     // Highest qualifying tier wins (list is ascending, so last match is highest).
+    const rates = effectiveRatesFor(t, config);
     best = {
       tier: t,
       effectiveMin,
-      effectiveRate: overrideRate != null ? dec(overrideRate) : dec(t.rewardValue),
+      effectiveRateT1: rates.t1,
+      effectiveRateT0: rates.t0,
     };
   }
   return best;
 }
 
 /**
- * Compute the reward amount (₹, rounded to money scale) for a resolved tier.
- *   - CASHBACK_ON_MDR    → base = mdrPaid
- *   - CASHBACK_ON_VOLUME → base = gross volume
- *   - FLAT (scheme)      → flat ₹ = the effective rate (base ignored)
- * The tier's rewardType decides PERCENT (rate × base) vs FLAT (flat ₹).
+ * Compute the reward amount (₹, rounded) for ONE leg of a resolved tier.
+ *   - CASHBACK_ON_MDR    → base = that leg's mdrPaid
+ *   - CASHBACK_ON_VOLUME → base = that leg's gross volume
+ *   - FLAT               → flat ₹ (handled at the split level, not here)
  */
-export function computeReward(
+function computeLegReward(
   scheme: Pick<IncentiveScheme, "rewardType">,
   resolved: ResolvedTier,
-  vol: RailVolume
+  leg: IncentiveLeg,
+  legVol: RailVolume
 ): Money {
-  const rate = resolved.effectiveRate;
-  if (scheme.rewardType === "FLAT") return round(rate);
-  const base = scheme.rewardType === "CASHBACK_ON_MDR" ? vol.mdrPaid : vol.volume;
-  if (resolved.tier.rewardType === "FLAT") return round(rate);
+  const rate = leg === "INSTANT" ? resolved.effectiveRateT0 : resolved.effectiveRateT1;
+  const base = scheme.rewardType === "CASHBACK_ON_MDR" ? legVol.mdrPaid : legVol.volume;
   return round(mul(base, rate));
+}
+
+/** Per-leg reward split. */
+export type RewardSplit = { instant: Money; t1: Money };
+
+/**
+ * Compute the INDEPENDENT reward for each settlement leg. PERCENT rewards apply
+ * each leg's own rate to that leg's own base. A FLAT reward is a single
+ * milestone payout (base-independent), so it is attributed once — to the leg
+ * that carried the larger volume (ties → T1) — and the other leg gets ₹0.
+ */
+export function computeRewardSplit(
+  scheme: Pick<IncentiveScheme, "rewardType">,
+  resolved: ResolvedTier,
+  vol: SplitVolume
+): RewardSplit {
+  const isFlat = scheme.rewardType === "FLAT" || resolved.tier.rewardType === "FLAT";
+  if (isFlat) {
+    const flat = round(resolved.effectiveRateT1);
+    return gt(vol.instant.volume, vol.t1.volume)
+      ? { instant: flat, t1: dec(0) }
+      : { instant: dec(0), t1: flat };
+  }
+  return {
+    instant: computeLegReward(scheme, resolved, "INSTANT", vol.instant),
+    t1: computeLegReward(scheme, resolved, "T1", vol.t1),
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Month-end run
 // ---------------------------------------------------------------------------
 
+/** Per-leg run tally. */
+export type LegTally = {
+  paid: number;
+  skipped: number;
+  failed: number;
+  rewarded: number;
+};
+
+const emptyLegTally = (): LegTally => ({ paid: 0, skipped: 0, failed: 0, rewarded: 0 });
+
 export type IncentiveRunResult = {
   skippedRun: boolean;
   periodKey: string;
   schemes: number;
   users: number;
+  // Sums across both legs (each leg is a separate payout record).
   paid: number;
   skipped: number;
   failed: number;
   totalRewarded: number;
+  // Per-leg breakdown for one-at-a-time reporting.
+  legs: { instant: LegTally; t1: LegTally };
 };
 
 export type RunOptions = {
@@ -164,6 +240,7 @@ export async function runMonthlyIncentives(
     skipped: 0,
     failed: 0,
     totalRewarded: 0,
+    legs: { instant: emptyLegTally(), t1: emptyLegTally() },
   };
 
   if (!opts.force && !cfg.enabled) {
@@ -185,6 +262,8 @@ export async function runMonthlyIncentives(
     },
   });
 
+  const tallyOf = (leg: IncentiveLeg) => (leg === "INSTANT" ? result.legs.instant : result.legs.t1);
+
   for (const scheme of schemes) {
     result.schemes++;
     for (const config of scheme.configs) {
@@ -193,94 +272,98 @@ export async function runMonthlyIncentives(
       result.users++;
 
       const vol = await measureRailVolume(config.userId, scheme.rail, start, end);
-      const resolved = resolveTier(scheme.tiers, config, vol.volume);
+      const resolved = resolveTier(scheme.tiers, config, vol.total.volume);
+      const rewards = resolved ? computeRewardSplit(scheme, resolved, vol) : null;
 
-      if (!resolved) {
-        result.skipped++;
-        if (!opts.dryRun) {
-          await upsertPayout(scheme.id, config.userId, periodKey, scheme.rail, {
-            tierId: null,
-            measuredVolume: vol.volume,
-            mdrPaid: vol.mdrPaid,
-            rewardAmount: dec(0),
-            status: "SKIPPED",
-            detail: "No reward tier reached this month",
-          });
+      for (const leg of LEGS) {
+        const legVol = leg === "INSTANT" ? vol.instant : vol.t1;
+        const tally = tallyOf(leg);
+        const reward = rewards ? (leg === "INSTANT" ? rewards.instant : rewards.t1) : dec(0);
+
+        // No tier reached, or this leg's reward is below the payout floor → SKIPPED.
+        if (!resolved || !gt(reward, 0) || !gte(reward, minReward)) {
+          result.skipped++;
+          tally.skipped++;
+          if (!opts.dryRun) {
+            const detail = !resolved
+              ? "No reward tier reached this month"
+              : `Reward ₹${toNumber(reward)} below the ₹${toNumber(minReward)} minimum`;
+            await upsertPayout(scheme.id, config.userId, periodKey, leg, scheme.rail, {
+              tierId: resolved?.tier.id ?? null,
+              measuredVolume: legVol.volume,
+              mdrPaid: legVol.mdrPaid,
+              rewardAmount: reward,
+              status: "SKIPPED",
+              detail,
+            });
+          }
+          continue;
         }
-        continue;
-      }
 
-      const reward = computeReward(scheme, resolved, vol);
-
-      if (!gt(reward, 0) || !gte(reward, minReward)) {
-        result.skipped++;
-        if (!opts.dryRun) {
-          await upsertPayout(scheme.id, config.userId, periodKey, scheme.rail, {
-            tierId: resolved.tier.id,
-            measuredVolume: vol.volume,
-            mdrPaid: vol.mdrPaid,
-            rewardAmount: reward,
-            status: "SKIPPED",
-            detail: `Reward ₹${toNumber(reward)} below the ₹${toNumber(minReward)} minimum`,
-          });
+        if (opts.dryRun) {
+          result.paid++;
+          result.totalRewarded += toNumber(reward);
+          tally.paid++;
+          tally.rewarded += toNumber(reward);
+          continue;
         }
-        continue;
-      }
 
-      if (opts.dryRun) {
-        result.paid++;
-        result.totalRewarded += toNumber(reward);
-        continue;
-      }
-
-      // Skip if already paid this period (defensive — the credit is idempotent too).
-      const existing = await prisma.incentivePayout.findUnique({
-        where: {
-          userId_schemeId_periodKey: {
-            userId: config.userId,
-            schemeId: scheme.id,
-            periodKey,
+        // Skip if already paid this leg (defensive — the credit is idempotent too).
+        const existing = await prisma.incentivePayout.findUnique({
+          where: {
+            userId_schemeId_periodKey_leg: {
+              userId: config.userId,
+              schemeId: scheme.id,
+              periodKey,
+              leg,
+            },
           },
-        },
-      });
-      if (existing && existing.status === "PAID") {
-        result.paid++;
-        result.totalRewarded += toNumber(existing.rewardAmount);
-        continue;
-      }
+        });
+        if (existing && existing.status === "PAID") {
+          result.paid++;
+          result.totalRewarded += toNumber(existing.rewardAmount);
+          tally.paid++;
+          tally.rewarded += toNumber(existing.rewardAmount);
+          continue;
+        }
 
-      try {
-        const txn = await creditWallet({
-          userId: config.userId,
-          amount: reward,
-          reason: "INCENTIVE",
-          refType: "IncentivePayout",
-          refId: `${scheme.id}:${periodKey}`,
-          note: rewardNote(scheme, resolved, vol, periodKey),
-          idempotencyKey: `incentive:${config.userId}:${scheme.id}:${periodKey}`,
-        });
-        await upsertPayout(scheme.id, config.userId, periodKey, scheme.rail, {
-          tierId: resolved.tier.id,
-          measuredVolume: vol.volume,
-          mdrPaid: vol.mdrPaid,
-          rewardAmount: reward,
-          status: "PAID",
-          walletTxnId: txn.id,
-          detail: null,
-        });
-        result.paid++;
-        result.totalRewarded += toNumber(reward);
-      } catch (e) {
-        const detail = e instanceof LedgerError ? e.code : e instanceof Error ? e.message : "ledger error";
-        await upsertPayout(scheme.id, config.userId, periodKey, scheme.rail, {
-          tierId: resolved.tier.id,
-          measuredVolume: vol.volume,
-          mdrPaid: vol.mdrPaid,
-          rewardAmount: reward,
-          status: "FAILED",
-          detail,
-        });
-        result.failed++;
+        try {
+          const txn = await creditWallet({
+            userId: config.userId,
+            amount: reward,
+            reason: "INCENTIVE",
+            refType: "IncentivePayout",
+            refId: `${scheme.id}:${periodKey}:${leg}`,
+            note: rewardNote(scheme, resolved, leg, legVol, periodKey),
+            idempotencyKey: `incentive:${config.userId}:${scheme.id}:${periodKey}:${leg}`,
+          });
+          await upsertPayout(scheme.id, config.userId, periodKey, leg, scheme.rail, {
+            tierId: resolved.tier.id,
+            measuredVolume: legVol.volume,
+            mdrPaid: legVol.mdrPaid,
+            rewardAmount: reward,
+            status: "PAID",
+            walletTxnId: txn.id,
+            detail: null,
+          });
+          result.paid++;
+          result.totalRewarded += toNumber(reward);
+          tally.paid++;
+          tally.rewarded += toNumber(reward);
+        } catch (e) {
+          const detail =
+            e instanceof LedgerError ? e.code : e instanceof Error ? e.message : "ledger error";
+          await upsertPayout(scheme.id, config.userId, periodKey, leg, scheme.rail, {
+            tierId: resolved.tier.id,
+            measuredVolume: legVol.volume,
+            mdrPaid: legVol.mdrPaid,
+            rewardAmount: reward,
+            status: "FAILED",
+            detail,
+          });
+          result.failed++;
+          tally.failed++;
+        }
       }
     }
   }
@@ -288,18 +371,21 @@ export async function runMonthlyIncentives(
   return result;
 }
 
+const LEG_LABEL: Record<IncentiveLeg, string> = { INSTANT: "Instant (T+0)", T1: "T+1" };
+
 function rewardNote(
   scheme: Pick<IncentiveScheme, "name" | "rewardType" | "rail">,
   resolved: ResolvedTier,
-  vol: RailVolume,
+  leg: IncentiveLeg,
+  legVol: RailVolume,
   periodKey: string
 ): string {
   const tierLabel = resolved.tier.label ? ` (${resolved.tier.label})` : "";
   const base =
     scheme.rewardType === "CASHBACK_ON_MDR"
-      ? `MDR ₹${toNumber(vol.mdrPaid)}`
-      : `volume ₹${toNumber(vol.volume)}`;
-  return `${scheme.name}${tierLabel} · ${scheme.rail} ${periodKey} reward on ${base}`;
+      ? `MDR ₹${toNumber(legVol.mdrPaid)}`
+      : `volume ₹${toNumber(legVol.volume)}`;
+  return `${scheme.name}${tierLabel} · ${scheme.rail} ${LEG_LABEL[leg]} ${periodKey} reward on ${base}`;
 }
 
 type PayoutData = {
@@ -316,11 +402,12 @@ async function upsertPayout(
   schemeId: string,
   userId: string,
   periodKey: string,
+  leg: IncentiveLeg,
   rail: IncentiveScheme["rail"],
   data: PayoutData
 ): Promise<void> {
   await prisma.incentivePayout.upsert({
-    where: { userId_schemeId_periodKey: { userId, schemeId, periodKey } },
+    where: { userId_schemeId_periodKey_leg: { userId, schemeId, periodKey, leg } },
     update: {
       tierId: data.tierId,
       rail,
@@ -335,6 +422,7 @@ async function upsertPayout(
       userId,
       schemeId,
       periodKey,
+      leg,
       rail,
       tierId: data.tierId,
       measuredVolume: data.measuredVolume,
@@ -351,6 +439,16 @@ async function upsertPayout(
 // Retailer progress (live, current month)
 // ---------------------------------------------------------------------------
 
+/** One settlement leg's live progress figures. */
+export type LegProgress = {
+  volume: number;
+  mdrPaid: number;
+  /** Effective reward rate for this leg (fraction or ₹). */
+  rate: number;
+  /** Reward earned so far on this leg if the month closed now (₹). */
+  projectedReward: number;
+};
+
 export type IncentiveProgress = {
   schemeId: string;
   schemeName: string;
@@ -358,24 +456,42 @@ export type IncentiveProgress = {
   rail: IncentiveScheme["rail"];
   rewardType: IncentiveScheme["rewardType"];
   periodKey: string;
+  /** Totals across both legs (the "Both" view). */
   volume: number;
   mdrPaid: number;
   /** Tier currently reached (null if below the lowest threshold). */
-  currentTier: { id: string; label: string | null; rate: number; rewardType: string } | null;
-  /** Reward earned so far this month if the month closed now (₹). */
+  currentTier: {
+    id: string;
+    label: string | null;
+    /** T+1 (standard) rate. */
+    rate: number;
+    /** T+0 (instant) rate. */
+    rateT0: number;
+    rewardType: string;
+  } | null;
+  /** Reward earned so far this month across both legs if it closed now (₹). */
   projectedReward: number;
   /** Entry threshold of the lowest tier for this user (₹). */
   entryThreshold: number;
   /** Next tier to chase, if any. */
-  nextTier: { id: string; label: string | null; threshold: number; remaining: number; rate: number } | null;
+  nextTier: {
+    id: string;
+    label: string | null;
+    threshold: number;
+    remaining: number;
+    rate: number;
+    rateT0: number;
+  } | null;
   /** Progress toward the next milestone (0..1). */
   progress: number;
   achieved: boolean;
+  /** Per-leg breakdown for the Instant / T+1 / Both toggle. */
+  legs: { instant: LegProgress; t1: LegProgress };
 };
 
 /**
  * Live current-month progress across every incentive scheme a user is assigned
- * to. Powers the retailer Rewards page (gamified tier progress).
+ * to. Powers the retailer Rewards page (gamified tier progress, per-leg split).
  */
 export async function getUserIncentiveProgress(
   userId: string,
@@ -392,7 +508,9 @@ export async function getUserIncentiveProgress(
   for (const config of configs) {
     const scheme = config.scheme;
     const vol = await measureRailVolume(userId, scheme.rail, start, now);
-    const resolved = resolveTier(scheme.tiers, config, vol.volume);
+    const totalVolume = vol.total.volume;
+    const resolved = resolveTier(scheme.tiers, config, totalVolume);
+    const rewards = resolved ? computeRewardSplit(scheme, resolved, vol) : null;
 
     const activeTiers = scheme.tiers
       .filter((t) => t.active)
@@ -409,18 +527,21 @@ export async function getUserIncentiveProgress(
       overrideMin != null && t.id === lowestId ? dec(overrideMin) : dec(t.minAmount);
 
     // The next tier above the current one (the milestone to chase).
-    const next = activeTiers.find((t) => gt(effMin(t), vol.volume)) ?? null;
+    const next = activeTiers.find((t) => gt(effMin(t), totalVolume)) ?? null;
 
-    const projectedReward = resolved ? toNumber(computeReward(scheme, resolved, vol)) : 0;
+    const instantReward = rewards ? toNumber(rewards.instant) : 0;
+    const t1Reward = rewards ? toNumber(rewards.t1) : 0;
 
     // Progress: toward the next milestone, or full if the top tier is reached.
     let progress = 1;
     if (next) {
       const target = toNumber(effMin(next));
-      progress = target > 0 ? Math.min(1, toNumber(vol.volume) / target) : 0;
+      progress = target > 0 ? Math.min(1, toNumber(totalVolume) / target) : 0;
     } else if (!resolved) {
-      progress = entryThreshold > 0 ? Math.min(1, toNumber(vol.volume) / entryThreshold) : 0;
+      progress = entryThreshold > 0 ? Math.min(1, toNumber(totalVolume) / entryThreshold) : 0;
     }
+
+    const nextRates = next ? effectiveRatesFor(next, config) : null;
 
     out.push({
       schemeId: scheme.id,
@@ -429,30 +550,46 @@ export async function getUserIncentiveProgress(
       rail: scheme.rail,
       rewardType: scheme.rewardType,
       periodKey,
-      volume: toNumber(vol.volume),
-      mdrPaid: toNumber(vol.mdrPaid),
+      volume: toNumber(totalVolume),
+      mdrPaid: toNumber(vol.total.mdrPaid),
       currentTier: resolved
         ? {
             id: resolved.tier.id,
             label: resolved.tier.label,
-            rate: toNumber(resolved.effectiveRate),
+            rate: toNumber(resolved.effectiveRateT1),
+            rateT0: toNumber(resolved.effectiveRateT0),
             rewardType: resolved.tier.rewardType,
           }
         : null,
-      projectedReward,
+      projectedReward: instantReward + t1Reward,
       entryThreshold,
-      nextTier: next
-        ? {
-            id: next.id,
-            label: next.label,
-            threshold: toNumber(effMin(next)),
-            remaining: Math.max(0, toNumber(effMin(next)) - toNumber(vol.volume)),
-            rate:
-              config.rewardValue != null ? toNumber(config.rewardValue) : toNumber(next.rewardValue),
-          }
-        : null,
+      nextTier:
+        next && nextRates
+          ? {
+              id: next.id,
+              label: next.label,
+              threshold: toNumber(effMin(next)),
+              remaining: Math.max(0, toNumber(effMin(next)) - toNumber(totalVolume)),
+              rate: toNumber(nextRates.t1),
+              rateT0: toNumber(nextRates.t0),
+            }
+          : null,
       progress,
       achieved: !!resolved && !next,
+      legs: {
+        instant: {
+          volume: toNumber(vol.instant.volume),
+          mdrPaid: toNumber(vol.instant.mdrPaid),
+          rate: resolved ? toNumber(resolved.effectiveRateT0) : 0,
+          projectedReward: instantReward,
+        },
+        t1: {
+          volume: toNumber(vol.t1.volume),
+          mdrPaid: toNumber(vol.t1.mdrPaid),
+          rate: resolved ? toNumber(resolved.effectiveRateT1) : 0,
+          projectedReward: t1Reward,
+        },
+      },
     });
   }
   return out;

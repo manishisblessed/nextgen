@@ -89,6 +89,9 @@ export async function POST(
     }),
     prisma.user.update({
       where: { id: transfer.userId },
+      // schemeId: null → old parent's scheme no longer applies. With
+      // SCHEME_DEFAULT_FALLBACK on, the user is priced off the platform default
+      // until reassigned; with it off, they are gate-blocked until reassigned.
       data: {
         parentId: transfer.newParentId,
         schemeId: null,

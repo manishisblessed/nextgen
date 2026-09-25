@@ -97,6 +97,7 @@ function groupByFamily(slabs: Slab[]): Array<readonly [ServiceFamily, Slab[]]> {
 export default function MyAssignedSchemePage() {
   const [loading, setLoading] = useState(true);
   const [scheme, setScheme] = useState<Scheme | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   // Direct-child scheme viewer: null = the caller's own scheme.
   const [children, setChildren] = useState<DirectChild[]>([]);
@@ -108,6 +109,7 @@ export default function MyAssignedSchemePage() {
       const url = userId ? `/api/me/scheme?userId=${encodeURIComponent(userId)}` : "/api/me/scheme";
       const data = await fetch(url).then((r) => r.json());
       setScheme(data.scheme ?? null);
+      setSource(data.source ?? null);
       setRole(data.role ?? null);
     } catch {
       // network hiccup
@@ -207,6 +209,7 @@ export default function MyAssignedSchemePage() {
             <Layers className="h-4 w-4 text-ink-400" />
             <h3 className="font-display text-sm font-semibold text-ink-900">{scheme.name}</h3>
             <Badge variant="success">Active</Badge>
+            {source === "DEFAULT_SCHEME" && <Badge variant="warning">Platform default</Badge>}
             <Badge variant="brand">{scheme.slabCount} slabs</Badge>
             {scheme.mdrSlabCount > 0 && <Badge variant="warning">{scheme.mdrSlabCount} MDR</Badge>}
           </div>

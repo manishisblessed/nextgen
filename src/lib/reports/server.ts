@@ -795,6 +795,22 @@ function billReference(partnerTxnId: string | null, response: Prisma.JsonValue |
   return candidate != null ? String(candidate) : null;
 }
 
+/**
+ * Provider-side settlement reference pulled from the response bag only
+ * (operator reference / RRN / UTR / NPCI ref / receipt). Distinct from the
+ * `Order ID` (partnerTxnId) so the report can show both the order handle and the
+ * bank/operator reference. Falls back to null when none is present.
+ */
+function providerReference(response: Prisma.JsonValue | null): string | null {
+  if (!response || typeof response !== "object" || Array.isArray(response)) return null;
+  const r = response as Record<string, unknown>;
+  const data = r.data && typeof r.data === "object" && !Array.isArray(r.data) ? (r.data as Record<string, unknown>) : {};
+  const candidate =
+    r.operatorReference ?? r.operator_reference ?? r.rrn ?? r.utr ?? r.npciRef ?? r.npci_txn_id ?? r.receipt ?? r.txnRefId ??
+    data.operatorReference ?? data.operator_reference ?? data.rrn ?? data.utr ?? data.npciRef ?? data.receipt ?? data.txnRefId;
+  return candidate != null ? String(candidate) : null;
+}
+
 async function reportBillPayment(user: SessionUser, params: ReportParams): Promise<ReportResult> {
   const ids = await allowedUserIds(user);
   const createdAt = dateFilter(params);
@@ -854,27 +870,32 @@ async function reportBillPayment(user: SessionUser, params: ReportParams): Promi
     const charge = dec(r.fee).div(GST_DIVISOR);
     const gst = sub(dec(r.fee), charge);
     return {
-      sno: startNo + i + 1,
-      retailerId: r.user?.userCode ?? r.userId.slice(0, 8).toUpperCase(),
-      refId: r.refId,
-      operator: r.operator ?? "—",
-      bankName: bank,
-      bankLogo: (r.operator ? logoUrl.get(r.operator) : null) ?? bank,
+      // Reporting order: date · order no · customer · order id · logo · amounts · status · mobile · card · reference
+      date: r.createdAt.toISOString(),
+      orderNo: r.orderNo,
       customerName:
         pickField(bag, ["customername", "name", "consumername", "beneficiaryname", "customer_name"]) ?? "—",
-      card:
-        maskCard(pickField(bag, ["cardlast4", "cardnumber", "card", "accountno", "number"], ["card"])) ?? "—",
+      orderId: r.partnerTxnId ?? "—",
+      bankLogo: (r.operator ? logoUrl.get(r.operator) : null) ?? bank,
+      paymentAmount: toNumber(r.amount),
+      charge: toNumber(charge),
+      gst: toNumber(gst),
+      totalDebit: toNumber(add(r.amount, r.fee)),
+      status: r.status,
       mobile:
         pickField(
           bag,
           ["mobileno", "mobile", "customermobile", "customernumber", "registeredmobile", "contactnumber", "phone", "msisdn"],
           ["mobile"]
         ) ?? "—",
-      charge: toNumber(charge),
-      gst: toNumber(gst),
-      totalDebit: toNumber(add(r.amount, r.fee)),
-      referenceNo: billReference(r.partnerTxnId, r.response) ?? "—",
-      status: r.status,
+      card:
+        maskCard(pickField(bag, ["cardlast4", "cardnumber", "card", "accountno", "number"], ["card"])) ?? "—",
+      referenceNo: providerReference(r.response) ?? r.partnerTxnId ?? "—",
+      // Retained (not shown) for search / debugging parity with the raw txn.
+      sno: startNo + i + 1,
+      retailerId: r.user?.userCode ?? r.userId.slice(0, 8).toUpperCase(),
+      refId: r.refId,
+      bankName: bank,
     };
   });
 
@@ -899,7 +920,8 @@ async function reportBillPayment(user: SessionUser, params: ReportParams): Promi
     page: params.page,
     pageSize: params.pageSize,
     totals: {
-      sno: "Total",
+      date: "Total",
+      paymentAmount: toNumber(volume),
       charge: toNumber(chargeTotal),
       gst: toNumber(gstTotal),
       totalDebit: toNumber(totalDebitTotal),
@@ -980,26 +1002,31 @@ async function reportCreditCard(user: SessionUser, params: ReportParams): Promis
     const charge = dec(r.fee).div(GST_DIVISOR);
     const gst = sub(dec(r.fee), charge);
     return {
-      sno: startNo + i + 1,
-      retailerId: r.user?.userCode ?? r.userId.slice(0, 8).toUpperCase(),
-      refId: r.refId,
-      operator: bank,
-      bankName: bank,
-      bankLogo: (r.operator ? logoUrl.get(r.operator) : null) ?? bank,
+      // Reporting order: date · order no · customer · order id · logo · amounts · status · mobile · card · reference
+      date: r.createdAt.toISOString(),
+      orderNo: r.orderNo,
       customerName:
         pickField(bag, ["customername", "name", "consumername", "beneficiaryname", "customer_name"]) ?? "—",
-      card: maskCard(pickField(bag, ["cardlast4", "cardnumber", "card", "accountno", "number"], ["card"]) ?? r.customer) ?? "—",
+      orderId: r.partnerTxnId ?? "—",
+      bankLogo: (r.operator ? logoUrl.get(r.operator) : null) ?? bank,
+      paymentAmount: toNumber(r.amount),
+      charge: toNumber(charge),
+      gst: toNumber(gst),
+      totalDebit: toNumber(add(r.amount, r.fee)),
+      status: r.status,
       mobile:
         pickField(
           bag,
           ["mobileno", "mobile", "customermobile", "customernumber", "registeredmobile", "contactnumber", "phone", "msisdn"],
           ["mobile"]
         ) ?? "—",
-      charge: toNumber(charge),
-      gst: toNumber(gst),
-      totalDebit: toNumber(add(r.amount, r.fee)),
-      referenceNo: billReference(r.partnerTxnId, r.response) ?? "—",
-      status: r.status,
+      card: maskCard(pickField(bag, ["cardlast4", "cardnumber", "card", "accountno", "number"], ["card"]) ?? r.customer) ?? "—",
+      referenceNo: providerReference(r.response) ?? r.partnerTxnId ?? "—",
+      // Retained (not shown) for search / debugging parity with the raw txn.
+      sno: startNo + i + 1,
+      retailerId: r.user?.userCode ?? r.userId.slice(0, 8).toUpperCase(),
+      refId: r.refId,
+      bankName: bank,
     };
   });
 
@@ -1018,7 +1045,8 @@ async function reportCreditCard(user: SessionUser, params: ReportParams): Promis
     page: params.page,
     pageSize: params.pageSize,
     totals: {
-      sno: "Total",
+      date: "Total",
+      paymentAmount: toNumber(volume),
       charge: toNumber(chargeTotal),
       gst: toNumber(gstTotal),
       totalDebit: toNumber(totalDebitTotal),

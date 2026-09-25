@@ -38,28 +38,42 @@ export class QrClaimError extends Error {
   }
 }
 
-// ── Limits (env-overridable; sane defaults) ─────────────────────────────────
+// ── Limits (admin-configurable via the "Limits" tab; sane defaults) ─────────
 
 const num = (v: string | undefined, fallback: number) => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
 
-/** Max single-claim amount. */
-export function maxClaimAmount(): number {
-  return num(process.env.QR_CLAIM_MAX_AMOUNT, 100_000);
+/**
+ * The QR claim caps. Single source of truth is the `limits.qr_claim` platform
+ * setting — edited from the admin "Limits" tab with no deploy — falling back to
+ * the schema defaults when unset. Prefer reading this once per request (as
+ * `precheckQrClaim` does) over calling the individual wrappers repeatedly.
+ */
+export async function qrClaimLimits() {
+  return getSetting("limits.qr_claim");
 }
-/** Claims above this need a second, different admin approval. */
+
+/** Max single-claim amount (₹). */
+export async function maxClaimAmount(): Promise<number> {
+  return (await qrClaimLimits()).maxAmount;
+}
+/**
+ * Claims above this need a second, different admin approval. Deliberately NOT
+ * part of the Limits tab — it is a maker-checker FRAUD control, kept as an env
+ * knob so raising a user's transaction ceiling can never disarm dual approval.
+ */
 export function secondApprovalThreshold(): number {
   return num(process.env.QR_CLAIM_SECOND_APPROVAL_THRESHOLD, 10_000);
 }
 /** Max claims a user may file per calendar day (any status — attempts count). */
-export function dailyClaimCountLimit(): number {
-  return num(process.env.QR_CLAIM_DAILY_LIMIT_COUNT, 10);
+export async function dailyClaimCountLimit(): Promise<number> {
+  return (await qrClaimLimits()).dailyCount;
 }
-/** Max total amount a user may claim per calendar day. */
-export function dailyClaimAmountLimit(): number {
-  return num(process.env.QR_CLAIM_DAILY_LIMIT_AMOUNT, 200_000);
+/** Max total amount a user may claim per calendar day (₹). */
+export async function dailyClaimAmountLimit(): Promise<number> {
+  return (await qrClaimLimits()).dailyAmount;
 }
 
 /**
@@ -68,12 +82,14 @@ export function dailyClaimAmountLimit(): number {
  * still be claimed. Protects a customer who was already mid-scan when the QR
  * flipped. Default 10 minutes.
  */
-export function switchGraceMs(): number {
-  return num(process.env.QR_CLAIM_SWITCH_GRACE_MINUTES, 10) * 60 * 1000;
+export async function switchGraceMs(): Promise<number> {
+  return (await qrClaimLimits()).switchGraceMinutes * 60 * 1000;
 }
 
-/** How far back a payment may be dated. */
-export const QR_CLAIM_MAX_AGE_DAYS = 7;
+/** How far back a payment may be dated (days). */
+export async function qrClaimMaxAgeDays(): Promise<number> {
+  return (await qrClaimLimits()).maxAgeDays;
+}
 /** Clock-skew allowance for "paidAt is in the future" checks. */
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
@@ -113,15 +129,16 @@ export type RetailerDailyClaimUsage = {
 export async function getRetailerDailyClaimUsage(userId: string): Promise<RetailerDailyClaimUsage> {
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
-  const [count, sum] = await Promise.all([
+  const [count, sum, limits] = await Promise.all([
     prisma.qrClaim.count({ where: { userId, createdAt: { gte: dayStart } } }),
     prisma.qrClaim.aggregate({ _sum: { amount: true }, where: { userId, createdAt: { gte: dayStart } } }),
+    qrClaimLimits(),
   ]);
   return {
     amount: Number(sum._sum.amount ?? 0),
     count,
-    amountLimit: dailyClaimAmountLimit(),
-    countLimit: dailyClaimCountLimit(),
+    amountLimit: limits.dailyAmount,
+    countLimit: limits.dailyCount,
   };
 }
 
@@ -165,10 +182,14 @@ export async function precheckQrClaim(
     throw new QrClaimError("UTR must be the 12-digit UPI reference number shown in the payment app", 400, "INVALID_UTR");
   }
 
+  // Read the admin-configured caps ONCE for the whole precheck (per-claim max,
+  // claim window, and daily velocity) — the "Limits" tab is the source of truth.
+  const limits = await qrClaimLimits();
+
   const amount = toNumber(round(input.amount));
   if (!(amount > 0)) throw new QrClaimError("Amount must be positive", 400, "INVALID_AMOUNT");
-  if (amount > maxClaimAmount()) {
-    throw new QrClaimError(`Amount exceeds the per-claim limit of ₹${maxClaimAmount().toLocaleString("en-IN")}`, 400, "AMOUNT_TOO_LARGE");
+  if (amount > limits.maxAmount) {
+    throw new QrClaimError(`Amount exceeds the per-claim limit of ₹${limits.maxAmount.toLocaleString("en-IN")}`, 400, "AMOUNT_TOO_LARGE");
   }
 
   // paidAt is optional; validate only when the retailer supplied it.
@@ -179,8 +200,8 @@ export async function precheckQrClaim(
     if (paidAtMs > now + FUTURE_SKEW_MS) {
       throw new QrClaimError("Payment date/time cannot be in the future", 400, "INVALID_PAID_AT");
     }
-    if (paidAtMs < now - QR_CLAIM_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) {
-      throw new QrClaimError(`Payments older than ${QR_CLAIM_MAX_AGE_DAYS} days cannot be claimed`, 400, "PAID_AT_TOO_OLD");
+    if (paidAtMs < now - limits.maxAgeDays * 24 * 60 * 60 * 1000) {
+      throw new QrClaimError(`Payments older than ${limits.maxAgeDays} days cannot be claimed`, 400, "PAID_AT_TOO_OLD");
     }
   }
 
@@ -197,7 +218,7 @@ export async function precheckQrClaim(
     if (!overflow) {
       const cutoff = qr.disabledAt?.getTime();
       const effectivePaidMs = paidAtMs ?? now;
-      if (!cutoff || effectivePaidMs > cutoff + switchGraceMs()) {
+      if (!cutoff || effectivePaidMs > cutoff + limits.switchGraceMinutes * 60 * 1000) {
         throw new QrClaimError("This QR code is disabled or full — payments after the switch must be claimed on the current live QR", 400, "QR_DISABLED");
       }
     }
@@ -221,11 +242,11 @@ export async function precheckQrClaim(
     prisma.qrClaim.count({ where: { userId: input.userId, createdAt: { gte: dayStart } } }),
     prisma.qrClaim.aggregate({ _sum: { amount: true }, where: { userId: input.userId, createdAt: { gte: dayStart } } }),
   ]);
-  if (count >= dailyClaimCountLimit()) {
+  if (count >= limits.dailyCount) {
     throw new QrClaimError("Daily claim limit reached — try again tomorrow or contact support", 429, "DAILY_COUNT_LIMIT");
   }
   const claimedToday = Number(sum._sum.amount ?? 0);
-  if (claimedToday + amount > dailyClaimAmountLimit()) {
+  if (claimedToday + amount > limits.dailyAmount) {
     throw new QrClaimError("Daily claim amount limit reached — try again tomorrow or contact support", 429, "DAILY_AMOUNT_LIMIT");
   }
 
@@ -299,16 +320,16 @@ export type QrClaimReviewInput = {
 };
 
 /**
- * Approve a claim — the FRAUD gate. Approval attests the payment is real (UTR
- * found in the provider portal) and makes the claim SETTLEABLE. It NO LONGER
- * moves money: settlement is a separate step where the scheme's QR MDR is
- * deducted (instant/T0 via the retailer button, or T1 via the daily cron).
+ * Approve a claim — the FRAUD gate. A SINGLE admin approval attests the payment
+ * is real (UTR found in the provider portal) and makes the claim SETTLEABLE.
+ * The approving admin must confirm their transaction PIN (enforced at the route
+ * layer) — the PIN, not a second admin, is the authorization control. Approval
+ * NO LONGER moves money: settlement is a separate step where the scheme's QR MDR
+ * is deducted (instant/T0 via the retailer button, or T1 via the daily cron).
  *
- * Below the maker-checker threshold this goes straight to SETTLEABLE; above it,
- * the first call stages the claim (AWAITING_SECOND_APPROVAL) and a DIFFERENT
- * admin must approve again before it becomes SETTLEABLE.
- *
- * Race-safe: the status transition is claimed with updateMany.
+ * Race-safe: the status transition is claimed with updateMany. Any legacy claim
+ * still parked in AWAITING_SECOND_APPROVAL is finalized by this single approval
+ * too (no second, different admin required).
  */
 export async function approveQrClaim(input: QrClaimReviewInput): Promise<{ id: string; status: QrClaimStatus }> {
   if (!input.portalVerified) {
@@ -323,37 +344,9 @@ export async function approveQrClaim(input: QrClaimReviewInput): Promise<{ id: s
 
   const amount = Number(claim.amount);
 
-  // Stage 1 for large amounts: record the first approver, move no money.
-  if (claim.status === "PENDING" && amount > secondApprovalThreshold()) {
-    const staged = await prisma.qrClaim.updateMany({
-      where: { id: claim.id, status: "PENDING" },
-      data: {
-        status: "AWAITING_SECOND_APPROVAL",
-        firstApprovedById: input.adminId,
-        firstApprovedAt: new Date(),
-        portalVerified: true,
-      },
-    });
-    if (staged.count === 0) throw new QrClaimError("Claim was reviewed by someone else — refresh", 409, "NOT_REVIEWABLE");
-    await prisma.auditLog.create({
-      data: {
-        userId: input.adminId,
-        action: "qr_claim.first_approval",
-        entity: "QrClaim",
-        entityId: claim.id,
-        meta: { amount, utr: claim.utr, note: input.note ?? null },
-      },
-    });
-    return { id: claim.id, status: "AWAITING_SECOND_APPROVAL" };
-  }
-
-  // Maker-checker: the finalizing admin must differ from the first approver.
-  if (claim.status === "AWAITING_SECOND_APPROVAL" && claim.firstApprovedById === input.adminId) {
-    throw new QrClaimError("A different admin must give the second approval", 403, "SECOND_APPROVER_MUST_DIFFER");
-  }
-
-  // Terminal transition to SETTLEABLE (no money moves here). Claim it first so
-  // concurrent approvers do nothing.
+  // Single-approval model: any reviewable claim (PENDING or a legacy
+  // AWAITING_SECOND_APPROVAL row) transitions straight to SETTLEABLE. No money
+  // moves here. Claim the transition first so concurrent approvers do nothing.
   const approved = await prisma.qrClaim.updateMany({
     where: { id: claim.id, status: claim.status },
     data: {
@@ -380,7 +373,6 @@ export async function approveQrClaim(input: QrClaimReviewInput): Promise<{ id: s
         utr: claim.utr,
         beneficiaryId: claim.userId,
         portalVerified: true,
-        secondApproval: claim.status === "AWAITING_SECOND_APPROVAL",
         settlementKind: claim.settlementKind,
         note: input.note ?? null,
       },

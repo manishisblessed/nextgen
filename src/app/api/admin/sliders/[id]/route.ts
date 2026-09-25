@@ -26,6 +26,7 @@ const UpdateBody = z
     kind: SliderKindEnum.optional(),
     audienceRoles: z.array(SliderRoleEnum).max(SLIDER_ROLES.length).optional(),
     active: z.boolean().optional(),
+    repeatEveryVisit: z.boolean().optional(),
     sortOrder: z.number().int().min(0).max(100000).optional(),
     startAt: z.string().datetime().nullable().optional(),
     endAt: z.string().datetime().nullable().optional(),
@@ -87,6 +88,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
         ? { audienceRoles: Array.from(new Set(body.audienceRoles)) }
         : {}),
       ...(body.active !== undefined ? { active: body.active } : {}),
+      ...(body.repeatEveryVisit !== undefined ? { repeatEveryVisit: body.repeatEveryVisit } : {}),
       ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
       ...(body.startAt !== undefined
         ? { startAt: body.startAt ? new Date(body.startAt) : null }

@@ -192,7 +192,7 @@ describe("submitQrClaim — dedupe (the anti-double-settlement core)", () => {
   });
 
   it("enforces the daily claim-count velocity cap", async () => {
-    for (let i = 0; i < dailyClaimCountLimit(); i++) {
+    for (let i = 0; i < (await dailyClaimCountLimit()); i++) {
       await submitQrClaim(validClaim());
     }
     await expect(submitQrClaim(validClaim())).rejects.toThrow(/Daily claim limit/);
@@ -229,30 +229,20 @@ describe("approveQrClaim — approval makes a claim SETTLEABLE (no money moves)"
     expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
   });
 
-  it("stages large amounts for a second approval and moves no money yet", async () => {
+  it("large amounts also settle on a SINGLE admin approval (no second admin)", async () => {
+    // Maker-checker is gone: one approval (authorized by the admin's TPIN at the
+    // route layer) moves even a large T+1 claim straight to SETTLEABLE.
     const claim = await submitQrClaim(validClaim({ amount: 50_000 }));
     const r = await approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true });
-    expect(r.status).toBe("AWAITING_SECOND_APPROVAL");
-    expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
-    expect(holder.db.walletTxns).toHaveLength(0);
-  });
-
-  it("the same admin cannot give the second approval", async () => {
-    const claim = await submitQrClaim(validClaim({ amount: 50_000 }));
-    await approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true });
-    await expect(
-      approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true })
-    ).rejects.toThrow(/different admin/);
-    expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
-  });
-
-  it("a different admin's second approval makes it SETTLEABLE (still no credit)", async () => {
-    const claim = await submitQrClaim(validClaim({ amount: 50_000 }));
-    await approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true });
-    const r = await approveQrClaim({ claimId: claim.id as string, adminId: "admin2", portalVerified: true });
     expect(r.status).toBe("SETTLEABLE");
     expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
     expect(holder.db.walletTxns).toHaveLength(0);
+
+    // A repeat approve (racing admin / retry) is refused — no longer reviewable.
+    await expect(
+      approveQrClaim({ claimId: claim.id as string, adminId: "admin1", portalVerified: true })
+    ).rejects.toThrow(/already SETTLEABLE/);
+    expect(holder.db.balanceOf("retailer1")).toBe("1000.00");
   });
 });
 
@@ -354,7 +344,7 @@ describe("rejectQrClaim / clawbackQrClaim", () => {
     const claim = await submitQrClaim(validClaim());
     await expect(
       rejectQrClaim({ claimId: claim.id as string, adminId: "admin1", note: "  " })
-    ).rejects.toThrow(/note is required/);
+    ).rejects.toThrow(/at least one rejection reason is required/i);
     const r = await rejectQrClaim({ claimId: claim.id as string, adminId: "admin1", note: "UTR not in portal" });
     expect(r.status).toBe("REJECTED");
     expect(holder.db.balanceOf("retailer1")).toBe("1000.00");

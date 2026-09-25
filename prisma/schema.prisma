@@ -110,8 +110,10 @@ model User {
   txnPinFailedAttempts Int       @default(0)
   txnPinLockedUntil    DateTime?
 
-  // Commission/charge scheme assigned to this user. Null = fall back to the
-  // platform default scheme (Scheme.isDefault). Resolved by getEffectiveRate.
+  // Commission/charge scheme assigned to this user. When null (or the assigned
+  // scheme is inactive) and SCHEME_DEFAULT_FALLBACK is enabled, pricing falls
+  // back to the platform default scheme (Scheme.isDefault). Resolved centrally
+  // by resolveUserScheme (src/lib/scheme/resolve-scheme.ts).
   schemeId String?
   scheme   Scheme? @relation("UserScheme", fields: [schemeId], references: [id])
 
@@ -682,6 +684,10 @@ enum TxnStatus {
 model Transaction {
   id             String      @id @default(cuid())
   refId          String      @unique // human-friendly: TXN8K2X9P
+  // Sequential, human-facing order number (pure integer) shown on reports /
+  // receipts. Auto-assigned by Postgres; existing rows are backfilled in
+  // chronological (createdAt) order by the accompanying migration.
+  orderNo        Int         @unique @default(autoincrement())
   userId         String // retailer who originated it
   user           User        @relation(fields: [userId], references: [id])
   service        ServiceCode
@@ -760,13 +766,14 @@ model CommissionSlab {
 
 // ---------- Scheme Manager (named groupings of charge/commission slabs) ----------
 // A Scheme bundles per-service charge + commission slabs and is assigned to
-// users (User.schemeId). Assignment cascades down the network: admin assigns a
-// platform scheme to super-distributors; each parent derives their own scheme
-// (ownerId/parentSchemeId) with per-slab markup and assigns it to children.
-// Users with NO active scheme are blocked from financial transactions (see
-// src/lib/scheme/gate.ts). The resolver (src/lib/scheme/resolver.ts) reads
-// these; isDefault is retained for admin bookkeeping but is no longer a
-// runtime pricing fallback.
+// users (User.schemeId). Admin assigns a scheme directly to any user (flat
+// model — the derived/ownerId/parentSchemeId columns are legacy).
+// Scheme resolution runs through resolveUserScheme (src/lib/scheme/
+// resolve-scheme.ts): a user's explicit active scheme wins; otherwise, when
+// SCHEME_DEFAULT_FALLBACK is enabled, the single active isDefault scheme prices
+// them globally (edit it once → applies to every default user). With the flag
+// off, users with NO active scheme are blocked from financial transactions
+// (src/lib/scheme/gate.ts) and isDefault is admin bookkeeping only.
 
 /// Whether a slab value is a flat rupee amount or a percentage fraction
 /// (e.g. 0.0050 = 0.5%). Mirrors the CommissionSlab flat/percent convention.
@@ -1708,22 +1715,25 @@ enum SliderKind {
 }
 
 model Slider {
-  id            String     @id @default(cuid())
-  title         String
-  imagePublicId String // Cloudinary public_id (for delivery + delete)
-  imageUrl      String // secure_url
-  linkUrl       String? // optional click-through target
-  kind          SliderKind @default(SLIDE)
+  id               String     @id @default(cuid())
+  title            String
+  imagePublicId    String // Cloudinary public_id (for delivery + delete)
+  imageUrl         String // secure_url
+  linkUrl          String? // optional click-through target
+  kind             SliderKind @default(SLIDE)
   // Target DB Role values (e.g. ["RETAILER","DISTRIBUTOR"]). Empty = all roles.
-  audienceRoles String[]   @default([])
-  active        Boolean    @default(true)
-  sortOrder     Int        @default(0)
-  startAt       DateTime? // null = live immediately
-  endAt         DateTime? // null = no expiry
-  createdById   String?
-  createdBy     User?      @relation("SliderCreator", fields: [createdById], references: [id])
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  audienceRoles    String[]   @default([])
+  active           Boolean    @default(true)
+  // POPUP only: when true, the pop-up re-appears on every page load/refresh
+  // instead of being remembered as dismissed (shown once per user).
+  repeatEveryVisit Boolean    @default(false)
+  sortOrder        Int        @default(0)
+  startAt          DateTime? // null = live immediately
+  endAt            DateTime? // null = no expiry
+  createdById      String?
+  createdBy        User?      @relation("SliderCreator", fields: [createdById], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
   @@index([kind, active])
 }
@@ -3068,6 +3078,15 @@ enum IncentiveVolumeBasis {
   NET // net-of-MDR settled amount
 }
 
+/// Which settlement leg a reward belongs to. Rewards are computed, credited and
+/// recorded INDEPENDENTLY per leg: INSTANT (T+0) business and T1 (next-day)
+/// business each get their own rate, wallet credit and IncentivePayout row, so
+/// reports can be filtered to one leg or shown together.
+enum IncentiveLeg {
+  INSTANT
+  T1
+}
+
 model IncentiveScheme {
   id          String               @id @default(cuid())
   name        String               @unique
@@ -3092,17 +3111,23 @@ model IncentiveScheme {
 /// tier's rate applies to the whole-month base. rewardValue is a fraction for
 /// PERCENT (0.0010 = 0.10%) or a flat ₹ for FLAT reward schemes.
 model IncentiveTier {
-  id          String          @id @default(cuid())
-  schemeId    String
-  scheme      IncentiveScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
-  label       String? // "Silver", "Gold" — for the retailer UI
-  minAmount   Decimal         @db.Decimal(14, 2)
-  maxAmount   Decimal         @db.Decimal(14, 2)
-  rewardType  RateType        @default(PERCENT) // PERCENT (fraction) | FLAT (₹)
-  rewardValue Decimal         @db.Decimal(14, 6)
-  active      Boolean         @default(true)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id            String          @id @default(cuid())
+  schemeId      String
+  scheme        IncentiveScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  label         String? // "Silver", "Gold" — for the retailer UI
+  minAmount     Decimal         @db.Decimal(14, 2)
+  maxAmount     Decimal         @db.Decimal(14, 2)
+  rewardType    RateType        @default(PERCENT) // PERCENT (fraction) | FLAT (₹)
+  // T+1 (standard) reward rate — applied to the T+1-settled leg's base.
+  rewardValue   Decimal         @db.Decimal(14, 6)
+  // T+0 (instant) reward rate — applied to the instant-settled leg's base. 0 =
+  // fall back to rewardValue (mirrors MDR-slab T0 semantics), so an existing
+  // single-rate tier rewards both legs at the same rate until a distinct instant
+  // rate is set. Set explicitly to reward instant business differently.
+  rewardValueT0 Decimal         @default(0) @db.Decimal(14, 6)
+  active        Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   @@index([schemeId, active])
 }
@@ -3113,23 +3138,26 @@ model IncentiveTier {
 /// rewardValue optionally overrides the rate for this user. Null = fall back to
 /// the scheme's tier template.
 model UserIncentiveConfig {
-  id          String          @id @default(cuid())
-  userId      String
-  user        User            @relation("UserIncentiveConfig", fields: [userId], references: [id], onDelete: Cascade)
-  schemeId    String
-  scheme      IncentiveScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
-  minAmount   Decimal?        @db.Decimal(14, 2) // per-user unlock threshold override
-  rewardValue Decimal?        @db.Decimal(14, 6) // per-user rate override (fraction or ₹)
-  active      Boolean         @default(true)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id            String          @id @default(cuid())
+  userId        String
+  user          User            @relation("UserIncentiveConfig", fields: [userId], references: [id], onDelete: Cascade)
+  schemeId      String
+  scheme        IncentiveScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  minAmount     Decimal?        @db.Decimal(14, 2) // per-user unlock threshold override
+  rewardValue   Decimal?        @db.Decimal(14, 6) // per-user T+1 rate override (fraction or ₹)
+  rewardValueT0 Decimal?        @db.Decimal(14, 6) // per-user T+0 (instant) rate override
+  active        Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   @@unique([userId, schemeId])
   @@index([schemeId, active])
 }
 
-/// Audit + idempotency ledger for a computed monthly reward. Exactly one row per
-/// (user, scheme, period); the wallet credit shares the same idempotency key.
+/// Audit + idempotency ledger for a computed monthly reward. Rewards are recorded
+/// INDEPENDENTLY per settlement leg, so there is exactly one row per (user,
+/// scheme, period, leg) — an INSTANT row and a T1 row — each with its own wallet
+/// credit. Reports can filter by `leg` (one at a time) or aggregate both.
 model IncentivePayout {
   id             String          @id @default(cuid())
   userId         String
@@ -3138,16 +3166,18 @@ model IncentivePayout {
   scheme         IncentiveScheme @relation(fields: [schemeId], references: [id])
   tierId         String?
   periodKey      String // "2026-09" (IST calendar month)
+  leg            IncentiveLeg // INSTANT (T+0) | T1 — this reward's settlement leg
   rail           IncentiveRail
-  measuredVolume Decimal         @db.Decimal(14, 2)
-  mdrPaid        Decimal         @default(0) @db.Decimal(14, 2)
+  measuredVolume Decimal         @db.Decimal(14, 2) // this leg's volume
+  mdrPaid        Decimal         @default(0) @db.Decimal(14, 2) // this leg's MDR paid
   rewardAmount   Decimal         @default(0) @db.Decimal(14, 2)
   status         String          @default("PAID") // PAID | SKIPPED | FAILED
   walletTxnId    String?
   detail         String?
   createdAt      DateTime        @default(now())
 
-  @@unique([userId, schemeId, periodKey])
+  @@unique([userId, schemeId, periodKey, leg])
   @@index([schemeId, periodKey])
   @@index([userId, createdAt])
+  @@index([leg, periodKey])
 }

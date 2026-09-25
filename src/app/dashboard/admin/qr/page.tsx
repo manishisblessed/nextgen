@@ -21,6 +21,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { Input, Label } from "@/components/ui/Input";
 import { useStepUp } from "@/components/security/StepUpProvider";
+import { TxnPinDialog } from "@/components/security/TxnPinDialog";
 import { QR_REJECTION_REASONS } from "@/lib/qr/rejectionReasons";
 import { formatINR } from "@/lib/utils";
 
@@ -99,7 +100,6 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
   const { fetchWithStepUp } = useStepUp();
   const [claims, setClaims] = useState<ClaimRow[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [threshold, setThreshold] = useState(10000);
   const [statusFilter, setStatusFilter] = useState<"REVIEWABLE" | "ALL">("REVIEWABLE");
   const [loading, setLoading] = useState(true);
 
@@ -109,6 +109,9 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
   const [note, setNote] = useState("");
   const [reasons, setReasons] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // Approval requires the admin's transaction PIN (single-approval model — the
+  // PIN, not a second admin, authorizes the money movement).
+  const [pinOpen, setPinOpen] = useState(false);
 
   const toggleReason = (value: string) =>
     setReasons((prev) => (prev.includes(value) ? prev.filter((r) => r !== value) : [...prev, value]));
@@ -121,7 +124,6 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
         const d = await res.json();
         setClaims(d.claims ?? []);
         setOverview(d.overview ?? null);
-        if (d.secondApprovalThreshold) setThreshold(d.secondApprovalThreshold);
       }
     } catch {
       toast.error("Could not load the review queue.");
@@ -139,51 +141,83 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
     setPortalVerified(false);
     setNote("");
     setReasons([]);
+    setPinOpen(false);
   }
 
-  async function act(action: "approve" | "reject") {
+  /** Open the transaction-PIN sheet to authorize a single-admin approval. */
+  function startApprove() {
+    if (!selected || !portalVerified) return;
+    setPinOpen(true);
+  }
+
+  /**
+   * Finalize approval with the admin's transaction PIN (sent via `x-txn-pin`).
+   * Returns an error string to keep the PIN dialog open (wrong/locked/unset
+   * PIN), or null to let the parent close it.
+   */
+  async function approveWithPin(pin: string): Promise<string | null> {
+    if (!selected) return null;
+    setBusy(true);
+    try {
+      const res = await fetchWithStepUp(`/api/admin/qr/claims/${selected.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-txn-pin": pin },
+        body: JSON.stringify({ portalVerified, note: note.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        // Wrong/locked/not-set PIN → keep the sheet open with an inline message.
+        if (d.txnPin) return typeof d.error === "string" ? d.error : "PIN verification failed";
+        // Any other failure (step-up cancelled, state race) → close and toast.
+        toast.error(typeof d.error === "string" ? d.error : "Approval failed");
+        setPinOpen(false);
+        return null;
+      }
+      if (d.status === "SETTLED") {
+        toast.success(
+          `Approved & instantly settled — ${formatINR(selected.amount)} (net of MDR) was credited to ${selected.retailer.name}'s wallet now.`
+        );
+      } else {
+        toast.success(
+          `Approved — ${formatINR(selected.amount)} is now settleable to ${selected.retailer.name}. They receive it (net of MDR) on T+1.`
+        );
+      }
+      setPinOpen(false);
+      setSelected(null);
+      refresh();
+      return null;
+    } catch {
+      toast.error("Network error — refresh the queue before retrying.");
+      setPinOpen(false);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reject() {
     if (!selected) return;
-    if (action === "reject") {
-      if (reasons.length === 0 && note.trim().length < 3) {
-        toast.error("Select at least one reason, or add a note (shown to the retailer).");
-        return;
-      }
-      if (reasons.length === 1 && reasons[0] === "OTHER" && note.trim().length < 3) {
-        toast.error("Add a note when the only reason is 'Other'.");
-        return;
-      }
+    if (reasons.length === 0 && note.trim().length < 3) {
+      toast.error("Select at least one reason, or add a note (shown to the retailer).");
+      return;
+    }
+    if (reasons.length === 1 && reasons[0] === "OTHER" && note.trim().length < 3) {
+      toast.error("Add a note when the only reason is 'Other'.");
+      return;
     }
     setBusy(true);
     try {
-      const res = await fetchWithStepUp(`/api/admin/qr/claims/${selected.id}/${action}`, {
+      const res = await fetchWithStepUp(`/api/admin/qr/claims/${selected.id}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          action === "approve"
-            ? { portalVerified, note: note.trim() || undefined }
-            : { reasons, note: note.trim() || undefined }
-        ),
+        body: JSON.stringify({ reasons, note: note.trim() || undefined }),
       });
       const d = await res.json();
       if (!res.ok) {
         toast.error(typeof d.error === "string" ? d.error : "Action failed");
         return;
       }
-      if (d.status === "SETTLED") {
-        toast.success(
-          `Approved & instantly settled — ${formatINR(selected.amount)} (net of MDR) was credited to ${selected.retailer.name}'s wallet now.`
-        );
-      } else if (d.status === "SETTLEABLE") {
-        toast.success(
-          `Approved — ${formatINR(selected.amount)} is now settleable to ${selected.retailer.name}. They receive it (net of MDR) on T+1.`
-        );
-      } else if (d.status === "AWAITING_SECOND_APPROVAL") {
-        toast.warning(
-          `First approval recorded — a DIFFERENT admin must approve this ${formatINR(selected.amount)} claim before money moves.`
-        );
-      } else {
-        toast.success("Claim rejected.");
-      }
+      toast.success("Claim rejected.");
       setSelected(null);
       refresh();
     } catch {
@@ -212,14 +246,7 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
       key: "amount",
       header: "Amount",
       align: "right",
-      render: (r) => (
-        <div>
-          <span className="font-semibold">{formatINR(r.amount)}</span>
-          {r.amount > threshold && (
-            <div className="text-[10px] font-semibold uppercase text-violet-600">2-admin</div>
-          )}
-        </div>
-      ),
+      render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span>,
     },
     {
       key: "paidAt",
@@ -236,14 +263,12 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
             ? "success"
             : r.status === "SETTLEABLE"
               ? "accent"
-              : r.status === "PENDING"
+              : r.status === "PENDING" || r.status === "AWAITING_SECOND_APPROVAL"
                 ? "warning"
-                : r.status === "AWAITING_SECOND_APPROVAL"
-                  ? "brand"
-                  : "danger";
+                : "danger";
         const label =
-          r.status === "AWAITING_SECOND_APPROVAL"
-            ? "NEEDS 2ND APPROVAL"
+          r.status === "PENDING" || r.status === "AWAITING_SECOND_APPROVAL"
+            ? "UNDER REVIEW"
             : r.status === "SETTLEABLE"
               ? "READY TO SETTLE"
               : r.status;
@@ -258,34 +283,15 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
       key: "reviewedById",
       header: "Approved by",
       render: (r) => {
-        const hasChecker = Boolean(r.reviewedBy || r.reviewedById);
-        const hasMaker = Boolean(r.firstApprovedBy || r.firstApprovedById);
-        if (!hasChecker && !hasMaker) return <span className="text-xs text-ink-400">—</span>;
+        if (!r.reviewedBy && !r.reviewedById) return <span className="text-xs text-ink-400">—</span>;
         return (
-          <div className="space-y-1 text-xs">
-            {hasMaker && (
-              <div>
-                <span className="text-ink-400">1st: </span>
-                <span className="font-medium text-ink-700">{r.firstApprovedBy ?? "—"}</span>
-                {r.firstApprovedByCode && <span className="ml-1 font-mono text-ink-500">({r.firstApprovedByCode})</span>}
-                {r.firstApprovedAt && (
-                  <span className="ml-1 text-ink-400">
-                    {new Date(r.firstApprovedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
-                  </span>
-                )}
-              </div>
-            )}
-            {hasChecker && (
-              <div>
-                {hasMaker && <span className="text-ink-400">2nd: </span>}
-                <span className="font-medium text-ink-700">{r.reviewedBy ?? "—"}</span>
-                {r.reviewedByCode && <span className="ml-1 font-mono text-ink-500">({r.reviewedByCode})</span>}
-                {r.reviewedAt && (
-                  <span className="ml-1 text-ink-400">
-                    {new Date(r.reviewedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
-                  </span>
-                )}
-              </div>
+          <div className="text-xs">
+            <span className="font-medium text-ink-700">{r.reviewedBy ?? "—"}</span>
+            {r.reviewedByCode && <span className="ml-1 font-mono text-ink-500">({r.reviewedByCode})</span>}
+            {r.reviewedAt && (
+              <span className="ml-1 text-ink-400">
+                {new Date(r.reviewedAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+              </span>
             )}
           </div>
         );
@@ -332,8 +338,8 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
             accent="accent"
           />
           <StatCard
-            label="Needs 2nd approval"
-            value={`${overview.awaitingSecondCount} · ${formatINR(overview.awaitingSecondAmount)}`}
+            label="Ready to settle"
+            value={`${overview.settleableCount} · ${formatINR(overview.settleableAmount)}`}
             icon={ShieldCheck}
             accent="violet"
           />
@@ -379,15 +385,9 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
                   {selected.utr ? <span className="ml-2 text-ink-400">UTR {selected.utr}</span> : null}
                 </p>
               )}
-              {selected.status === "AWAITING_SECOND_APPROVAL" && (
-                <p className="mt-2 rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">
-                  Second approval — must be a different admin than the first approver
-                  {selected.firstApprovedBy
-                    ? ` (${selected.firstApprovedBy}${selected.firstApprovedByCode ? ` · ${selected.firstApprovedByCode}` : ""})`
-                    : ""}
-                  .
-                </p>
-              )}
+              <p className="mt-2 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700">
+                One approval is enough — you&apos;ll confirm your transaction PIN to authorize it.
+              </p>
             </div>
             <a
               href={`/api/admin/qr/claims/${selected.id}/screenshot`}
@@ -465,17 +465,13 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
                 : "QR-T+1 claim — approving marks it settleable; it credits on the next-day (T+1) sweep."}
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => act("approve")} disabled={busy || !portalVerified}>
+              <Button onClick={startApprove} disabled={busy || !portalVerified}>
                 <CheckCircle2 className="mr-1 h-4 w-4" />
-                {busy
-                  ? "Working…"
-                  : selected.amount > threshold && selected.status === "PENDING"
-                    ? "Approve (stage for 2nd admin)"
-                    : selected.settlementKind === "INSTANT"
-                      ? `Approve & settle ${formatINR(selected.amount)}`
-                      : `Approve ${formatINR(selected.amount)}`}
+                {selected.settlementKind === "INSTANT"
+                  ? `Approve & settle ${formatINR(selected.amount)}`
+                  : `Approve ${formatINR(selected.amount)}`}
               </Button>
-              <Button variant="outline" onClick={() => act("reject")} disabled={busy}>
+              <Button variant="outline" onClick={reject} disabled={busy}>
                 <XCircle className="mr-1 h-4 w-4" />
                 Reject
               </Button>
@@ -486,6 +482,22 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
           </div>
         </div>
       )}
+
+      <TxnPinDialog
+        open={pinOpen}
+        title="Confirm approval"
+        detail={
+          selected
+            ? `Approve ${selected.utr ? `UTR ${selected.utr}` : `card •••• ${selected.cardLast4 ?? ""}`} for ${selected.retailer.name}${
+                selected.settlementKind === "INSTANT" ? " — credits their wallet now (net of MDR)." : " — settles on T+1 (net of MDR)."
+              }`
+            : undefined
+        }
+        amount={selected?.amount}
+        busy={busy}
+        onConfirm={approveWithPin}
+        onCancel={() => setPinOpen(false)}
+      />
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">

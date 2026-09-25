@@ -4,18 +4,31 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { RefreshCw, SlidersHorizontal, Save } from "lucide-react";
+import { RefreshCw, Gauge, Save } from "lucide-react";
 import { isLimitSettingKey } from "@/lib/limit-keys";
 
 /**
- * Platform Controls — generic editor over the PlatformSetting store.
- * Each setting is a small JSON object; we render boolean and numeric fields
- * automatically so newly-added settings appear here with zero UI changes.
+ * Limits — the ONE place any user-transaction cap is raised or lowered.
+ *
+ * A focused view over the same PlatformSetting store as Platform Controls, but
+ * filtered to the user-transaction limit keys (see `src/lib/limit-keys.ts`).
+ * Platform Controls hides these keys, so a given limit is edited in exactly one
+ * tab. Changes apply instantly — no deploy — and are enforced at the source
+ * (QR claim precheck, wallet caps, settlement defaults). Master Admin only.
  */
 
 type SettingsMap = Record<string, Record<string, unknown>>;
 
 const LABELS: Record<string, { title: string; description: string }> = {
+  "limits.qr_claim": {
+    title: "QR claim limits",
+    description:
+      "Per-claim and per-day caps for retailer QR settlement claims, plus the claim window. The maker-checker 'second approval above ₹X' fraud threshold is intentionally NOT here — it stays in Platform Controls / env so raising a ceiling never disarms dual approval.",
+  },
+  "limits.settlement_defaults": {
+    title: "Default settlement limits",
+    description: "Daily / per-transfer settlement caps for users who have no custom per-user limit.",
+  },
   "wallet.global_cap": {
     title: "Wallet cap",
     description: "Maximum primary-wallet balance any network user may hold.",
@@ -25,54 +38,25 @@ const LABELS: Record<string, { title: string; description: string }> = {
     description:
       "Maximum amount for a single admin push/pull, network parent→child transfer, or lien. Applies instantly; hard-capped at ₹100 crore.",
   },
-  "onboarding.invite_expiry": {
-    title: "Onboarding link validity",
-    description:
-      "How many days a shared onboarding link (and document re-upload link) stays valid. Only affects links generated after this is changed.",
-  },
-  "wallet.ops_approval_threshold": {
-    title: "Wallet ops approval threshold (inactive)",
-    description: "No longer enforced — admin push/pull executes immediately for any authorized admin, regardless of amount.",
-  },
-  "reversal.approval_threshold": {
-    title: "Reversal approval threshold (inactive)",
-    description: "No longer enforced — reversals execute immediately for any authorized admin, regardless of amount.",
-  },
-  "settlement.t1": {
-    title: "T+1 settlement engine",
-    description: "Daily AEPS → primary wallet sweep. Also controllable from Settlement Ops.",
-  },
-  "pos.rental_billing": {
-    title: "POS rental billing",
-    description: "Monthly rent auto-debit for POS subscriptions.",
-  },
-  "limits.settlement_defaults": {
-    title: "Default settlement limits",
-    description: "Daily / per-transfer settlement caps for users without a custom limit.",
-  },
-  "pos.card_classification": {
-    title: "Card classification (tier)",
-    description:
-      "When OFF, MDR is priced on Card Category (Credit/Debit/Prepaid) instead of the card tier — the tier dimension is ignored in scheme/brand rates, tier-pinned slabs go dormant, and the BIN checker stops running. 'Show in UI' controls whether the Classification column appears in POS transactions.",
-  },
 };
 
 const FIELD_LABELS: Record<string, string> = {
   enabled: "Enabled",
-  showInUi: "Show in UI",
-  paused: "Paused",
   amount: "Amount (₹)",
-  hour: "Run hour (IST, 0–23)",
-  minAmount: "Minimum amount (₹)",
   dailyCap: "Daily cap (₹)",
   perTxnCap: "Per-transfer cap (₹)",
-  days: "Valid for (days)",
+  // limits.qr_claim
+  maxAmount: "Per-claim max (₹)",
+  dailyAmount: "Daily amount cap (₹)",
+  dailyCount: "Daily claim count",
+  switchGraceMinutes: "Switch grace (minutes)",
+  maxAgeDays: "Max payment age (days)",
 };
 
 const inputCls =
   "rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 
-export default function PlatformControlsPage() {
+export default function LimitsPage() {
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [drafts, setDrafts] = useState<SettingsMap>({});
   const [loading, setLoading] = useState(true);
@@ -88,15 +72,15 @@ export default function PlatformControlsPage() {
       const res = await fetch("/api/admin/platform-settings");
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error ?? "Failed to load settings");
-      // User-transaction LIMITS are edited exclusively in the dedicated "Limits"
-      // tab — hide them here so each limit lives in exactly one place.
+      // Keep only the user-transaction limit keys — everything else lives in
+      // Platform Controls.
       const all = (d.settings ?? {}) as SettingsMap;
-      const nonLimits: SettingsMap = {};
+      const limitsOnly: SettingsMap = {};
       for (const key of Object.keys(all)) {
-        if (!isLimitSettingKey(key)) nonLimits[key] = all[key];
+        if (isLimitSettingKey(key)) limitsOnly[key] = all[key];
       }
-      setSettings(nonLimits);
-      setDrafts(JSON.parse(JSON.stringify(nonLimits)));
+      setSettings(limitsOnly);
+      setDrafts(JSON.parse(JSON.stringify(limitsOnly)));
     } catch (e) {
       notify(e instanceof Error ? e.message : "Load failed", false);
     } finally {
@@ -136,8 +120,8 @@ export default function PlatformControlsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Platform Controls"
-        description="Runtime-changeable operational knobs — caps, thresholds, and engine switches. Changes apply instantly, no deploy needed. Master Admin only."
+        title="Limits"
+        description="The single place to raise or lower any user-transaction limit — QR claim caps, wallet caps, and settlement defaults. Changes apply instantly, no deploy needed. Master Admin only."
         actions={
           <Button variant="outline" onClick={load}>
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh
@@ -145,7 +129,7 @@ export default function PlatformControlsPage() {
         }
       />
 
-      {loading && !settings && <p className="text-sm text-ink-400">Loading settings…</p>}
+      {loading && !settings && <p className="text-sm text-ink-400">Loading limits…</p>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {settings &&
@@ -155,7 +139,7 @@ export default function PlatformControlsPage() {
             return (
               <div key={key} className="rounded-2xl border border-ink-100 bg-white p-5">
                 <div className="mb-1 flex items-center gap-2">
-                  <SlidersHorizontal className="h-4 w-4 text-brand-600" />
+                  <Gauge className="h-4 w-4 text-brand-600" />
                   <h3 className="text-sm font-bold text-ink-900">{meta.title}</h3>
                 </div>
                 <p className="mb-4 text-xs text-ink-400">{meta.description}</p>

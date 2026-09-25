@@ -120,6 +120,12 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (existing.isDefault && body.active === false)
     return NextResponse.json({ error: "Cannot deactivate the default scheme. Set another scheme as default first." }, { status: 400 });
 
+  // The platform must always have exactly one default (the global fallback
+  // relies on it). You can only MOVE the default by promoting another scheme
+  // (isDefault: true elsewhere), never clear it to leave zero defaults.
+  if (existing.isDefault && body.isDefault === false)
+    return NextResponse.json({ error: "Cannot unset the default scheme. Set another scheme as default instead." }, { status: 400 });
+
   const updated = await prisma.$transaction(async (tx) => {
     if (body.isDefault === true) {
       await tx.scheme.updateMany({ where: { isDefault: true, id: { not: params.id } }, data: { isDefault: false } });

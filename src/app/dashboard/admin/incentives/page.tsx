@@ -60,6 +60,8 @@ type Tier = {
   maxAmount: number;
   rewardType: RateType;
   rewardValue: number;
+  /** Instant (T+0) rate; 0 = same as rewardValue (T+1). */
+  rewardValueT0: number;
   active: boolean;
 };
 
@@ -71,6 +73,7 @@ type AssignedUser = {
   configId: string;
   minAmount: number | null;
   rewardValue: number | null;
+  rewardValueT0: number | null;
   active: boolean;
 };
 
@@ -403,7 +406,8 @@ function IncentiveCard({
                         <tr>
                           <th className="px-4 py-2 font-semibold">Tier</th>
                           <th className="px-4 py-2 font-semibold">Monthly volume band</th>
-                          <th className="px-4 py-2 text-right font-semibold">Reward ({baseLabel})</th>
+                          <th className="px-4 py-2 text-right font-semibold">T+1 reward ({baseLabel})</th>
+                          <th className="px-4 py-2 text-right font-semibold">Instant reward</th>
                           <th className="px-4 py-2 text-center font-semibold">Status</th>
                           <th className="px-4 py-2" />
                         </tr>
@@ -415,6 +419,18 @@ function IncentiveCard({
                             <td className="px-4 py-2.5">{fmtBand(t.minAmount, t.maxAmount)}</td>
                             <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">
                               {fmtReward(t.rewardType, t.rewardValue)}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-sky-700">
+                              {t.rewardType === "FLAT" ? (
+                                <span className="text-ink-400">—</span>
+                              ) : t.rewardValueT0 > 0 ? (
+                                fmtReward(t.rewardType, t.rewardValueT0)
+                              ) : (
+                                <span className="text-ink-400" title="Instant rewarded at the same rate as T+1">
+                                  {fmtReward(t.rewardType, t.rewardValue)}
+                                  <span className="ml-1 text-[10px]">(=T+1)</span>
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-2.5 text-center">
                               <Badge variant={t.active ? "success" : "danger"}>{t.active ? "On" : "Off"}</Badge>
@@ -463,7 +479,8 @@ function IncentiveCard({
                           <th className="px-4 py-2 font-semibold">Name</th>
                           <th className="px-4 py-2 font-semibold">Role</th>
                           <th className="px-4 py-2 text-right font-semibold">Threshold override</th>
-                          <th className="px-4 py-2 text-right font-semibold">Rate override</th>
+                          <th className="px-4 py-2 text-right font-semibold">T+1 rate override</th>
+                          <th className="px-4 py-2 text-right font-semibold">Instant rate override</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-ink-100 text-ink-800">
@@ -486,6 +503,13 @@ function IncentiveCard({
                             <td className="px-4 py-2.5 text-right">
                               {u.rewardValue != null ? (
                                 <span className="font-semibold text-ink-900">{(u.rewardValue * 100).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%</span>
+                              ) : (
+                                <span className="text-ink-400">default</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-right">
+                              {u.rewardValueT0 != null ? (
+                                <span className="font-semibold text-sky-700">{(u.rewardValueT0 * 100).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%</span>
                               ) : (
                                 <span className="text-ink-400">default</span>
                               )}
@@ -685,6 +709,12 @@ function TierModal({
   const [rewardValue, setRewardValue] = useState(
     String(editing ? (editing.rewardType === "PERCENT" ? editing.rewardValue * 100 : editing.rewardValue) : 0.1)
   );
+  // Instant (T+0) rate — blank/0 means "same as T+1". Percent schemes only.
+  const [rewardValueT0, setRewardValueT0] = useState(
+    editing && editing.rewardValueT0 > 0
+      ? String(editing.rewardType === "PERCENT" ? editing.rewardValueT0 * 100 : editing.rewardValueT0)
+      : ""
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -707,8 +737,20 @@ function TierModal({
       setError("Enter a reward value greater than 0.");
       return;
     }
+    // Instant rate: blank ⇒ 0 (falls back to T+1). FLAT tiers ignore it.
+    const rvT0 =
+      rewardType === "FLAT" || rewardValueT0.trim() === ""
+        ? 0
+        : toStored(rewardType, rewardValueT0);
     setSaving(true);
-    const body = { label: label.trim() || null, minAmount: min, maxAmount: max, rewardType, rewardValue: rv };
+    const body = {
+      label: label.trim() || null,
+      minAmount: min,
+      maxAmount: max,
+      rewardType,
+      rewardValue: rv,
+      rewardValueT0: rvT0,
+    };
     try {
       const res = await fetchWithStepUp(`/api/admin/incentives/${schemeId}/tiers`, {
         method: isEdit ? "PATCH" : "POST",
@@ -774,13 +816,30 @@ function TierModal({
                 </Select>
               </div>
               <div>
-                <Label>{rewardType === "PERCENT" ? "Rate (%)" : "Amount (₹)"}</Label>
+                <Label>{rewardType === "PERCENT" ? "T+1 rate (%)" : "Amount (₹)"}</Label>
                 <Input type="number" min={0} step="0.0001" value={rewardValue} onChange={(e) => setRewardValue(e.target.value)} />
               </div>
             </div>
+            {rewardType === "PERCENT" && (
+              <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50/50 p-3">
+                <Label>Instant (T+0) rate (%) — leave blank to match the T+1 rate</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.0001"
+                  value={rewardValueT0}
+                  onChange={(e) => setRewardValueT0(e.target.value)}
+                  placeholder={`Same as T+1 (${Number(rewardValue) || 0}%)`}
+                />
+                <p className="mt-1 text-[11px] text-sky-700">
+                  Instant-settled volume is rewarded INDEPENDENTLY at this rate — its own wallet credit and its own
+                  report line. Blank ⇒ instant earns the same rate as T+1.
+                </p>
+              </div>
+            )}
             <p className="mt-2 text-xs text-ink-500">
               {rewardType === "PERCENT"
-                ? `Once a user's monthly ${RAIL_LABEL[scheme.rail]} volume falls in this band, they earn ${Number(rewardValue) || 0}% ${baseHint}.`
+                ? `Once a user's monthly ${RAIL_LABEL[scheme.rail]} volume falls in this band, T+1 business earns ${Number(rewardValue) || 0}% and instant business earns ${rewardValueT0.trim() === "" ? Number(rewardValue) || 0 : Number(rewardValueT0) || 0}% ${baseHint}.`
                 : `Once the band is reached, the user earns a flat ${fmtINR(Number(rewardValue) || 0)}.`}{" "}
               Enter percentages as human values (0.10 = 0.10%).
             </p>
@@ -942,7 +1001,8 @@ function AssignModal({
                       </span>
                       <span className="block truncate text-xs text-ink-400">
                         {u.minAmount != null ? `Unlock ${fmtINR(u.minAmount)}` : "Default threshold"}
-                        {u.rewardValue != null ? ` · ${(u.rewardValue * 100).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%` : ""}
+                        {u.rewardValue != null ? ` · T+1 ${(u.rewardValue * 100).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%` : ""}
+                        {u.rewardValueT0 != null ? ` · T+0 ${(u.rewardValueT0 * 100).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%` : ""}
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
@@ -1001,12 +1061,16 @@ function OverrideModal({
   const { fetchWithStepUp } = useStepUp();
   const [minAmount, setMinAmount] = useState(user.minAmount != null ? String(user.minAmount) : "");
   const [rewardPct, setRewardPct] = useState(user.rewardValue != null ? String(user.rewardValue * 100) : "");
+  const [rewardPctT0, setRewardPctT0] = useState(
+    user.rewardValueT0 != null ? String(user.rewardValueT0 * 100) : ""
+  );
   const [saving, setSaving] = useState(false);
 
   async function submit() {
     setSaving(true);
     const minVal = minAmount.trim() === "" ? null : Number(minAmount);
     const rateVal = rewardPct.trim() === "" ? null : Number(rewardPct) / 100;
+    const rateValT0 = rewardPctT0.trim() === "" ? null : Number(rewardPctT0) / 100;
     if (minVal != null && (!isFinite(minVal) || minVal < 0)) {
       onError("Enter a valid threshold.");
       setSaving(false);
@@ -1022,6 +1086,7 @@ function OverrideModal({
           userId: user.id,
           minAmount: minVal,
           rewardValue: rateVal,
+          rewardValueT0: rateValT0,
         }),
       });
       const data = await res.json();
@@ -1057,7 +1122,7 @@ function OverrideModal({
             />
           </div>
           <div>
-            <Label>Reward rate (%) — leave blank for tier default</Label>
+            <Label>T+1 reward rate (%) — leave blank for tier default</Label>
             <Input
               type="number"
               min={0}
@@ -1067,9 +1132,21 @@ function OverrideModal({
               placeholder="e.g. 0.10 for 0.10%"
             />
           </div>
+          <div>
+            <Label>Instant (T+0) reward rate (%) — leave blank for tier default</Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.0001"
+              value={rewardPctT0}
+              onChange={(e) => setRewardPctT0(e.target.value)}
+              placeholder="e.g. 0.05 for 0.05%"
+            />
+          </div>
           <p className="text-xs text-ink-400">
             These override the {scheme.name} tier for this user only. The threshold changes when they unlock the
-            lowest reward tier; the rate replaces the tier rate for every tier they reach.
+            lowest reward tier; each rate replaces the tier rate for its own settlement leg (instant vs T+1), which are
+            rewarded and reported independently.
           </p>
         </div>
         <div className="flex justify-end gap-2 border-t border-ink-100 px-5 py-4">
@@ -1089,6 +1166,8 @@ function OverrideModal({
 // Run / preview modal
 // ---------------------------------------------------------------------------
 
+type LegTally = { paid: number; skipped: number; failed: number; rewarded: number };
+
 type RunResult = {
   periodKey: string;
   schemes: number;
@@ -1097,7 +1176,10 @@ type RunResult = {
   skipped: number;
   failed: number;
   totalRewarded: number;
+  legs: { instant: LegTally; t1: LegTally };
 };
+
+type LegView = "BOTH" | "INSTANT" | "T1";
 
 function RunModal({
   scheme,
@@ -1117,6 +1199,7 @@ function RunModal({
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<RunResult | null>(null);
   const [confirmExecute, setConfirmExecute] = useState(false);
+  const [legView, setLegView] = useState<LegView>("BOTH");
 
   async function run(dryRun: boolean) {
     setBusy(true);
@@ -1162,18 +1245,58 @@ function RunModal({
             <Input value={periodKey} onChange={(e) => setPeriodKey(e.target.value)} placeholder="2026-09" />
           </div>
 
-          {preview && (
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-ink-100 bg-ink-50/40 p-3 text-sm">
-              <div>Rewarded users</div>
-              <div className="text-right font-semibold text-emerald-700">{preview.paid}</div>
-              <div>Skipped (no tier / below min)</div>
-              <div className="text-right font-semibold">{preview.skipped}</div>
-              <div>Failed</div>
-              <div className="text-right font-semibold text-rose-600">{preview.failed}</div>
-              <div>Total reward</div>
-              <div className="text-right font-bold text-brand-700">₹{preview.totalRewarded.toLocaleString("en-IN")}</div>
-            </div>
-          )}
+          {preview &&
+            (() => {
+              const tally: LegTally =
+                legView === "INSTANT"
+                  ? preview.legs.instant
+                  : legView === "T1"
+                  ? preview.legs.t1
+                  : {
+                      paid: preview.paid,
+                      skipped: preview.skipped,
+                      failed: preview.failed,
+                      rewarded: preview.totalRewarded,
+                    };
+              const TABS: { id: LegView; label: string }[] = [
+                { id: "BOTH", label: "Both" },
+                { id: "INSTANT", label: "Instant (T+0)" },
+                { id: "T1", label: "T+1" },
+              ];
+              return (
+                <div className="space-y-2">
+                  <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 text-xs">
+                    {TABS.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setLegView(t.id)}
+                        className={`rounded-md px-2.5 py-1 font-semibold transition ${
+                          legView === t.id ? "bg-brand-600 text-white" : "text-ink-500 hover:bg-ink-50"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-ink-100 bg-ink-50/40 p-3 text-sm">
+                    <div>Rewarded payouts</div>
+                    <div className="text-right font-semibold text-emerald-700">{tally.paid}</div>
+                    <div>Skipped (no tier / below min)</div>
+                    <div className="text-right font-semibold">{tally.skipped}</div>
+                    <div>Failed</div>
+                    <div className="text-right font-semibold text-rose-600">{tally.failed}</div>
+                    <div>Total reward</div>
+                    <div className="text-right font-bold text-brand-700">
+                      ₹{tally.rewarded.toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-ink-400">
+                    Instant (T+0) and T+1 rewards are credited and recorded independently — {preview.users} user(s)
+                    across {preview.schemes} active incentive(s).
+                  </p>
+                </div>
+              );
+            })()}
         </div>
         <div className="flex justify-end gap-2 border-t border-ink-100 px-5 py-4">
           <Button variant="outline" onClick={() => run(true)} disabled={busy}>

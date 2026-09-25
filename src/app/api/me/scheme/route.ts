@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { serializeSchemeForRole } from "@/lib/scheme/serialize";
+import { resolveUserScheme } from "@/lib/scheme/resolve-scheme";
 import { isSelfOrDirectChild } from "@/lib/security/ownership";
 
 export const fetchCache = "force-no-store";
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
 
   const target = await prisma.user.findFirst({
     where: { id: targetUserId, deletedAt: null },
-    select: { id: true, name: true, role: true, schemeId: true },
+    select: { id: true, name: true, role: true },
   });
 
   if (!target)
@@ -53,11 +54,14 @@ export async function GET(req: Request) {
       ? null
       : { id: target.id, name: target.name, role: target.role };
 
-  if (!target.schemeId)
-    return NextResponse.json({ scheme: null, role: target.role, forUser });
+  // Resolve the scheme that actually prices this user: their explicit
+  // assignment, else the platform default (when SCHEME_DEFAULT_FALLBACK is on).
+  const resolved = await resolveUserScheme(target.id);
+  if (resolved.source === "NONE" || !resolved.schemeId)
+    return NextResponse.json({ scheme: null, source: resolved.source, role: target.role, forUser });
 
   const scheme = await prisma.scheme.findFirst({
-    where: { id: target.schemeId, active: true },
+    where: { id: resolved.schemeId, active: true },
     include: {
       slabs: { where: { active: true }, orderBy: [{ service: "asc" }, { minAmount: "asc" }] },
       mdrSlabs: { where: { active: true }, orderBy: [{ serviceKind: "asc" }, { minAmount: "asc" }] },
@@ -67,6 +71,9 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     scheme: scheme ? serializeSchemeForRole(scheme, target.role) : null,
+    // "DEFAULT_SCHEME" tells the UI this is the platform default, not an
+    // individually-assigned scheme.
+    source: resolved.source,
     role: target.role,
     forUser,
   });

@@ -15,6 +15,8 @@ export function serializeTier(t: IncentiveTier) {
     maxAmount: Number(t.maxAmount),
     rewardType: t.rewardType,
     rewardValue: Number(t.rewardValue),
+    // Instant (T+0) rate; 0 means "same as rewardValue" (T+1) at reward time.
+    rewardValueT0: Number(t.rewardValueT0),
     active: t.active,
   };
 }
@@ -49,6 +51,7 @@ export function serializePayout(p: IncentivePayout) {
     schemeId: p.schemeId,
     tierId: p.tierId,
     periodKey: p.periodKey,
+    leg: p.leg,
     rail: p.rail,
     measuredVolume: Number(p.measuredVolume),
     mdrPaid: Number(p.mdrPaid),

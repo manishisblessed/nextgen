@@ -35,6 +35,7 @@ type Slider = {
   kind: SliderKind;
   audienceRoles: string[];
   active: boolean;
+  repeatEveryVisit: boolean;
   sortOrder: number;
   startAt: string | null;
   endAt: string | null;
@@ -114,6 +115,7 @@ type FormState = {
   linkUrl: string;
   audienceRoles: string[];
   active: boolean;
+  repeatEveryVisit: boolean;
   sortOrder: number;
   startAt: string;
   endAt: string;
@@ -128,6 +130,7 @@ const emptyForm = (kind: SliderKind, sortOrder: number): FormState => ({
   linkUrl: "",
   audienceRoles: [],
   active: true,
+  repeatEveryVisit: false,
   sortOrder,
   startAt: "",
   endAt: "",
@@ -189,6 +192,7 @@ export default function AdminSliderPage() {
       linkUrl: s.linkUrl ?? "",
       audienceRoles: s.audienceRoles,
       active: s.active,
+      repeatEveryVisit: s.repeatEveryVisit,
       sortOrder: s.sortOrder,
       startAt: isoToLocalInput(s.startAt),
       endAt: isoToLocalInput(s.endAt),
@@ -430,6 +434,11 @@ function SliderCard({
         <img src={s.imageUrl} alt={s.title} className="h-full w-full object-contain" />
         <div className="absolute right-2 top-2 flex gap-1">
           <span className="rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-ink-700 shadow">#{s.sortOrder}</span>
+          {s.kind === "POPUP" && s.repeatEveryVisit && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-600/90 px-2 py-0.5 text-[10px] font-bold text-white shadow">
+              <RefreshCw className="h-3 w-3" /> Every visit
+            </span>
+          )}
           <Badge variant={s.active ? "success" : "danger"}>{s.active ? "LIVE" : "OFF"}</Badge>
         </div>
       </div>
@@ -606,6 +615,7 @@ function SliderForm({
       linkUrl: form.linkUrl.trim() ? form.linkUrl.trim() : null,
       audienceRoles: form.audienceRoles,
       active: form.active,
+      repeatEveryVisit: form.repeatEveryVisit,
       sortOrder: form.sortOrder,
       startAt: localInputToIso(form.startAt),
       endAt: localInputToIso(form.endAt),
@@ -799,6 +809,23 @@ function SliderForm({
               })}
             </div>
           </div>
+
+          {form.kind === "POPUP" && (
+            <label className="flex items-center justify-between gap-3 rounded-xl border border-ink-200 px-4 py-3">
+              <span>
+                <span className="block text-sm font-medium text-ink-800">Show on every refresh</span>
+                <span className="mt-0.5 block text-xs text-ink-500">
+                  Re-appears on each page load instead of once per user.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={form.repeatEveryVisit}
+                onChange={(e) => set("repeatEveryVisit", e.target.checked)}
+                className="h-5 w-5 shrink-0 accent-brand-600"
+              />
+            </label>
+          )}
 
           <label className="flex items-center justify-between rounded-xl border border-ink-200 px-4 py-3">
             <span className="text-sm font-medium text-ink-800">Active</span>

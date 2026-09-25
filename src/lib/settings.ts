@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "./db";
+import { LIMIT_SETTING_KEYS } from "./limit-keys";
 
 /**
  * Platform settings — typed accessors over the PlatformSetting key-value
@@ -102,6 +103,29 @@ const SETTING_SCHEMAS = {
   "limits.settlement_defaults": z.object({
     dailyCap: z.number().positive().default(200_000),
     perTxnCap: z.number().positive().default(100_000),
+  }),
+
+  /**
+   * QR collection claim caps — per-retailer velocity + the claim window. The
+   * single source of truth for these lives here (edited from the admin "Limits"
+   * tab, no deploy needed); they were previously QR_CLAIM_* env vars.
+   *
+   * NOTE: the maker-checker "second approval above ₹X" threshold is DELIBERATELY
+   * NOT here — it stays a fraud control (QR_CLAIM_SECOND_APPROVAL_THRESHOLD env),
+   * outside the user-transaction Limits tab, so raising a user's ceiling can
+   * never silently disarm dual-approval on large claims.
+   */
+  "limits.qr_claim": z.object({
+    /** Max amount for a SINGLE claim (₹). */
+    maxAmount: z.number().positive().default(100_000),
+    /** Max total amount a retailer may claim per calendar day (₹). */
+    dailyAmount: z.number().positive().default(200_000),
+    /** Max claims a retailer may file per calendar day (any status — attempts count). */
+    dailyCount: z.number().int().positive().default(10),
+    /** Grace window (minutes) to still claim a payment made on a just-switched QR. */
+    switchGraceMinutes: z.number().int().nonnegative().default(10),
+    /** How many days back a payment may be dated and still be claimable. */
+    maxAgeDays: z.number().int().positive().default(7),
   }),
 
   /** POS acquirer settlement — instant mode (admin-toggled per user, per brand, or global). */
@@ -258,6 +282,22 @@ export type SettingKey = keyof typeof SETTING_SCHEMAS;
 
 export function isSettingKey(key: string): key is SettingKey {
   return Object.prototype.hasOwnProperty.call(SETTING_SCHEMAS, key);
+}
+
+/**
+ * Setting keys that represent USER-TRANSACTION LIMITS. These are surfaced —
+ * and editable — ONLY in the admin "Limits" tab, which is the single place any
+ * transaction cap can be raised or lowered. Platform Controls explicitly HIDES
+ * these keys (see the controls page) so a given limit lives in exactly one tab.
+ * Every other setting (engine switches, cron hours, etc.) stays in Controls.
+ */
+export const LIMIT_KEYS = LIMIT_SETTING_KEYS satisfies readonly SettingKey[];
+
+export type LimitKey = (typeof LIMIT_KEYS)[number];
+
+/** True when `key` is a user-transaction limit owned by the Limits tab. */
+export function isLimitKey(key: string): key is LimitKey {
+  return (LIMIT_KEYS as readonly string[]).includes(key);
 }
 
 export type SettingValue<K extends SettingKey> = z.infer<(typeof SETTING_SCHEMAS)[K]>;

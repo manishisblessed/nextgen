@@ -5,12 +5,59 @@ import { toErrorResponse } from "@/lib/security/apiErrors";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { prisma } from "@/lib/db";
+import { getSetting } from "@/lib/settings";
+import { resolveUserScheme } from "@/lib/scheme/resolve-scheme";
 import {
   resolveLiveQr,
   collectedToday,
   peekOverflowQr,
   toRetailerQrPayload,
 } from "@/lib/qr/rotation";
+
+/**
+ * QR settlement stream is RuPay/UPI (NPCI). We show the retailer the exact
+ * scheme MDR that applies to this stream: T+0 (`mdrValueT0`, fallback T+1) for
+ * QR-Instant, T+1 (`mdrValue`) for QR-T+1 — mirroring the "My Scheme" rate card.
+ */
+const QR_BRAND_TYPE = "RUPAY";
+
+type QrRate = { type: "PERCENT" | "FLAT"; value: number };
+
+/**
+ * The QR MDR rate the caller's scheme applies for a settlement stream, plus —
+ * for T1 — the daily settlement hour (IST). Reads the scheme's QR MDR slab
+ * directly (same source as /api/me/scheme) so the % shown on the tab is exactly
+ * what settlement deducts. Returns nulls when no QR rate is configured.
+ */
+async function qrRateInfo(
+  userId: string,
+  kind: QrSettlementKind
+): Promise<{ rate: QrRate | null; settlementHour: number | null }> {
+  let settlementHour: number | null = null;
+  if (kind === "T1") {
+    const cfg = await getSetting("settlement.qr_t1");
+    settlementHour = cfg.enabled ? cfg.hour : null;
+  }
+
+  const resolved = await resolveUserScheme(userId);
+  if (resolved.source === "NONE" || !resolved.schemeId) return { rate: null, settlementHour };
+
+  const slabs = await prisma.mdrSlab.findMany({
+    where: { schemeId: resolved.schemeId, serviceKind: "QR", active: true },
+    orderBy: { minAmount: "asc" },
+  });
+  // Prefer a RuPay-pinned slab, else a wildcard-brand slab; take the lowest band
+  // as the headline rate (bands rarely differ in % for QR).
+  const slab =
+    slabs.find((s) => s.brandType && s.brandType.toUpperCase() === QR_BRAND_TYPE) ??
+    slabs.find((s) => !s.brandType) ??
+    slabs[0];
+  if (!slab) return { rate: null, settlementHour };
+
+  const t0 = Number(slab.mdrValueT0) > 0 ? slab.mdrValueT0 : slab.mdrValue;
+  const value = Number(kind === "INSTANT" ? t0 : slab.mdrValue);
+  return { rate: { type: slab.mdrType, value }, settlementHour };
+}
 
 /**
  * The live static QR every retailer collects payments on for the requested
@@ -31,16 +78,17 @@ function parseKind(req: Request): QrSettlementKind {
 }
 
 export async function GET(req: Request) {
+  let user;
   try {
     // Only retailers collect on the shop QR — DT/MD/SD/admins have no collect surface.
-    const user = await requireRole("RETAILER");
+    user = await requireRole("RETAILER");
     await assertServiceEnabled(SERVICE_KEYS.QR, { name: "QR Payments", userId: user.id, role: user.role });
   } catch (e) {
     return toErrorResponse(e);
   }
 
   const kind = parseKind(req);
-  const qr = await resolveLiveQr(kind);
+  const [qr, rateInfo] = await Promise.all([resolveLiveQr(kind), qrRateInfo(user.id, kind)]);
 
   if (!qr) {
     // Is this kind's pool merely exhausted for today, or has nothing been set up?
@@ -49,6 +97,8 @@ export async function GET(req: Request) {
       qr: null,
       overflowQr: null,
       kind,
+      rate: rateInfo.rate,
+      settlementHour: rateInfo.settlementHour,
       reason: anyEnabled > 0 ? "LIMIT_REACHED" : "NOT_CONFIGURED",
     });
   }
@@ -67,5 +117,11 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ qr: payload, overflowQr, kind });
+  return NextResponse.json({
+    qr: payload,
+    overflowQr,
+    kind,
+    rate: rateInfo.rate,
+    settlementHour: rateInfo.settlementHour,
+  });
 }

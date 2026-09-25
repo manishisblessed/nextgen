@@ -38,6 +38,7 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
       configId: c.id,
       minAmount: c.minAmount != null ? Number(c.minAmount) : null,
       rewardValue: c.rewardValue != null ? Number(c.rewardValue) : null,
+      rewardValueT0: c.rewardValueT0 != null ? Number(c.rewardValueT0) : null,
       active: c.active,
     }));
 

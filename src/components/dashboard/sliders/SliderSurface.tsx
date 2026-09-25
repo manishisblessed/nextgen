@@ -11,6 +11,7 @@ type PublicSlider = {
   imageUrl: string;
   linkUrl: string | null;
   kind: "SLIDE" | "POPUP";
+  repeatEveryVisit: boolean;
   sortOrder: number;
 };
 
@@ -160,6 +161,9 @@ function PopupModal({ popups, userId }: { popups: PublicSlider[]; userId: string
   useEffect(() => {
     if (typeof window === "undefined") return;
     const next = ordered.find((p) => {
+      // `repeatEveryVisit` pop-ups always show — we never remember the dismissal,
+      // so they re-appear on every page load / refresh.
+      if (p.repeatEveryVisit) return true;
       try {
         return window.localStorage.getItem(dismissedKey(userId, p.id)) !== "1";
       } catch {
@@ -171,10 +175,14 @@ function PopupModal({ popups, userId }: { popups: PublicSlider[]; userId: string
 
   const dismiss = useCallback(() => {
     if (!active) return;
-    try {
-      window.localStorage.setItem(dismissedKey(userId, active.id), "1");
-    } catch {
-      /* ignore storage failures */
+    // Only persist the dismissal for "show once" pop-ups. Repeat pop-ups are
+    // dismissed for this view only and come back on the next refresh.
+    if (!active.repeatEveryVisit) {
+      try {
+        window.localStorage.setItem(dismissedKey(userId, active.id), "1");
+      } catch {
+        /* ignore storage failures */
+      }
     }
     setActive(null);
   }, [active, userId]);

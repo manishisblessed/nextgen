@@ -184,7 +184,17 @@ const schema = z.object({
   // KYC-video retention purger — deletes raw biometric video from S3 after the
   // window (row metadata + baseline retained). DESTRUCTIVE: explicit opt-in.
   KYC_VIDEO_RETENTION_ENABLED: z.string().default("false"),
-  KYC_VIDEO_RETENTION_DAYS: z.string().default("180")
+  KYC_VIDEO_RETENTION_DAYS: z.string().default("180"),
+
+  // ---------- Global default scheme fallback (Scheme Manager) ----------
+  // When "true", any user WITHOUT an explicit active scheme (User.schemeId null
+  // or its scheme inactive) is priced off the single platform default scheme
+  // (Scheme.isDefault = true, active = true). Editing that default scheme then
+  // applies to every such user instantly (resolvers read slabs live). When the
+  // flag is off, only an explicitly-assigned active scheme resolves (legacy
+  // behaviour) and unassigned network users stay gate-blocked. Fail-safe: if no
+  // active default exists, resolution returns NONE (never charges ₹0 silently).
+  SCHEME_DEFAULT_FALLBACK: z.string().default("false")
 });
 
 /**
@@ -267,7 +277,10 @@ export const flags = {
   // Security toggles
   captcha: env.SECURITY_CAPTCHA_ENABLED === "true",
   hibp: env.SECURITY_HIBP_ENABLED !== "false",
-  stepUp: env.SECURITY_STEPUP_ENABLED === "true"
+  stepUp: env.SECURITY_STEPUP_ENABLED === "true",
+
+  // Scheme Manager — global default scheme fallback (see SCHEME_DEFAULT_FALLBACK).
+  schemeDefaultFallback: env.SCHEME_DEFAULT_FALLBACK === "true"
 } as const;
 
 export const isProd = env.NODE_ENV === "production";

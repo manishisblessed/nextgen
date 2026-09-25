@@ -24,6 +24,7 @@ export type SliderRow = {
   kind: string;
   audienceRoles: string[];
   active: boolean;
+  repeatEveryVisit: boolean;
   sortOrder: number;
   startAt: Date | null;
   endAt: Date | null;
@@ -43,6 +44,7 @@ export function serializeSlider(s: SliderRow) {
     kind: s.kind,
     audienceRoles: s.audienceRoles,
     active: s.active,
+    repeatEveryVisit: s.repeatEveryVisit,
     sortOrder: s.sortOrder,
     startAt: s.startAt ? s.startAt.toISOString() : null,
     endAt: s.endAt ? s.endAt.toISOString() : null,
@@ -60,6 +62,7 @@ export function serializePublicSlider(s: SliderRow) {
     imageUrl: s.imageUrl,
     linkUrl: s.linkUrl,
     kind: s.kind,
+    repeatEveryVisit: s.repeatEveryVisit,
     sortOrder: s.sortOrder,
   };
 }

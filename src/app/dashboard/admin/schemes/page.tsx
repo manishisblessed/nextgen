@@ -2136,6 +2136,7 @@ function AssignModal({
 function CreateSchemeModal({ onClose, onSaved }: { onClose: () => void; onSaved: (msg: string) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -2150,11 +2151,15 @@ function CreateSchemeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
       const res = await fetch("/api/admin/schemes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, isDefault }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "Create failed");
-      onSaved("Scheme created — add BBPS / Payout charges and POS MDR via the icons.");
+      onSaved(
+        isDefault
+          ? "Scheme created and set as the platform default — add BBPS / Payout charges and POS MDR via the icons."
+          : "Scheme created — add BBPS / Payout charges and POS MDR via the icons."
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create failed");
     } finally {
@@ -2181,6 +2186,23 @@ function CreateSchemeModal({ onClose, onSaved }: { onClose: () => void; onSaved:
             <Label>Description (optional)</Label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short note" />
           </div>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ink-100 bg-ink-50/50 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={isDefault}
+              onChange={(e) => setIsDefault(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span className="text-sm">
+              <span className="flex items-center gap-1.5 font-medium text-ink-900">
+                <Star className="h-3.5 w-3.5 text-amber-500" /> Set as platform default
+              </span>
+              <span className="mt-0.5 block text-xs text-ink-500">
+                Every user without an explicitly-assigned scheme is priced off the default. Enabling this
+                demotes the current default (only one default at a time).
+              </span>
+            </span>
+          </label>
         </div>
         <div className="flex justify-end gap-2 border-t border-ink-100 px-5 py-4">
           <Button variant="outline" onClick={onClose} disabled={saving}>

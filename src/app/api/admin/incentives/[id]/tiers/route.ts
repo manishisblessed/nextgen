@@ -14,8 +14,12 @@ const TierBody = z.object({
   minAmount: z.number().nonnegative().max(1_000_000_000),
   maxAmount: z.number().positive().max(1_000_000_000),
   rewardType: z.enum(["FLAT", "PERCENT"]).default("PERCENT"),
-  // Fraction for PERCENT (0.0010 = 0.10%) or ₹ for FLAT.
+  // Fraction for PERCENT (0.0010 = 0.10%) or ₹ for FLAT. This is the T+1
+  // (standard) reward rate, applied to the T+1-settled leg.
   rewardValue: z.number().nonnegative().max(1_000_000),
+  // Instant (T+0) reward rate for the instant-settled leg. 0 (default) = reward
+  // instant business at the same rate as T+1 (rewardValue).
+  rewardValueT0: z.number().nonnegative().max(1_000_000).default(0),
   active: z.boolean().default(true),
 });
 
@@ -56,6 +60,7 @@ export async function POST(req: Request, props: { params: Promise<{ id: string }
       maxAmount: b.maxAmount,
       rewardType: b.rewardType,
       rewardValue: b.rewardValue,
+      rewardValueT0: b.rewardValueT0,
       active: b.active,
     },
   });
@@ -81,6 +86,7 @@ const UpdateBody = z.object({
   maxAmount: z.number().positive().max(1_000_000_000).optional(),
   rewardType: z.enum(["FLAT", "PERCENT"]).optional(),
   rewardValue: z.number().nonnegative().max(1_000_000).optional(),
+  rewardValueT0: z.number().nonnegative().max(1_000_000).optional(),
   active: z.boolean().optional(),
 });
 
@@ -125,6 +131,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
       ...(b.maxAmount !== undefined ? { maxAmount: b.maxAmount } : {}),
       ...(b.rewardType !== undefined ? { rewardType: b.rewardType } : {}),
       ...(b.rewardValue !== undefined ? { rewardValue: b.rewardValue } : {}),
+      ...(b.rewardValueT0 !== undefined ? { rewardValueT0: b.rewardValueT0 } : {}),
       ...(b.active !== undefined ? { active: b.active } : {}),
     },
   });
