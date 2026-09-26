@@ -158,10 +158,20 @@ export async function settlePgCollect(refId: string): Promise<{ refId: string; s
         },
       });
       if (held.count > 0) {
+        await prisma.auditLog.create({
+          data: {
+            userId: txn.userId,
+            action: "wallet.pg_collect_amount_mismatch",
+            entity: "Transaction",
+            entityId: txn.id,
+            meta: { refId, initiated: txn.amount.toString(), verified, utr: r.data.reference ?? null },
+          },
+        });
         await sendOpsAlert({
           title: "PG collection amount mismatch — HELD (not settled)",
           severity: "critical",
           details: { refId, initiated: txn.amount.toString(), verified, provider: txn.partner ?? "" },
+          href: "/dashboard/admin/audit",
         });
       }
       return { refId, status: "HOLD" };

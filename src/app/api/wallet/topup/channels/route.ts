@@ -3,7 +3,8 @@ import { requireAuth } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { getPartner } from "@/lib/partners";
-import { viableChannelHealth } from "@/lib/partners/viable-pg";
+import { viableChannelHealth, hydrateHealthCache } from "@/lib/partners/viable-pg";
+import { readGatewayHealth } from "@/lib/ops/telemetry";
 
 /**
  * PG gateway channels + live health for the wallet "add money" selector.
@@ -35,9 +36,10 @@ export async function GET() {
 
   try {
     // No user-triggered force re-probe: an on-demand `force` would let any user
-    // mint ₹1 probe orders at will. The short in-process cache (warmed by real
-    // traffic + the pg.health worker sweep) is authoritative; a cold cache
-    // probes once and caches, which is enough to render accurate availability.
+    // mint ₹1 probe orders at will. Seed from the worker's shared snapshot first
+    // (so a cold web instance shows the worker's health without probing), then
+    // fall back to a single cold probe only if nothing is cached at all.
+    hydrateHealthCache(await readGatewayHealth());
     const channels = await viableChannelHealth(false);
     return NextResponse.json({ provider: "VIABLE_PG", channels });
   } catch (e) {

@@ -192,6 +192,7 @@ export async function settleTopup(refId: string): Promise<{ refId: string; statu
           title: "Wallet top-up amount mismatch — HELD (not credited)",
           severity: "critical",
           details: { refId, initiated: txn.amount.toString(), verified, provider: txn.partner ?? "" },
+          href: "/dashboard/admin/audit",
         });
       }
       return { refId, status: "HOLD" };

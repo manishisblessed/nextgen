@@ -123,10 +123,12 @@ export default function WalletPage() {
     }
   }, []);
 
-  const fetchChannels = useCallback(async (force = false) => {
+  const fetchChannels = useCallback(async () => {
     try {
       setChannelsLoading(true);
-      const res = await fetch(`/api/wallet/topup/channels${force ? "?force=1" : ""}`);
+      // Health is served from the shared worker snapshot + short server cache;
+      // the refresh button simply re-reads it (no user-triggered probe orders).
+      const res = await fetch(`/api/wallet/topup/channels`);
       if (!res.ok) return;
       const d = (await res.json()) as { channels?: PgChannel[] };
       const list = d.channels ?? [];
@@ -421,7 +423,7 @@ export default function WalletPage() {
                     <Label>Payment gateway</Label>
                     <button
                       type="button"
-                      onClick={() => fetchChannels(true)}
+                      onClick={() => fetchChannels()}
                       disabled={channelsLoading}
                       className="flex items-center gap-1 text-[11px] font-medium text-ink-500 hover:text-brand-600 disabled:opacity-60"
                       title="Refresh gateway status"

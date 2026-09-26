@@ -36,6 +36,7 @@ import { runBbpsReconciliation } from "@/lib/recon/bbps";
 import { runTopupReconciliation, runTopupIntegrityCheck } from "@/lib/recon/topups";
 import { getPartner } from "@/lib/partners";
 import { viableChannelHealth, viableConfigured } from "@/lib/partners/viable-pg";
+import { recordWorkerHeartbeat, persistGatewayHealth } from "@/lib/ops/telemetry";
 import { sweepDisputeSlas } from "@/lib/disputes/service";
 import { runSettlementAutosweep } from "@/lib/settlement/autosweep";
 import { runT1SettlementSweep } from "@/lib/settlement/t1";
@@ -144,6 +145,10 @@ async function main() {
     } catch (e) {
       await captureError(e, { where: "topup.reconcile" });
     }
+    // Liveness beat (every 2 min). /api/healthz reads this to prove the worker
+    // is alive — a dead worker silently stops settling "paid but closed browser"
+    // payins, so this is the canary. Best-effort; never throws.
+    await recordWorkerHeartbeat("topup.reconcile");
   });
   await boss.schedule(QUEUES.TOPUP_RECONCILE, "*/2 * * * *");
 
@@ -160,6 +165,20 @@ async function main() {
       const active = getPartner("upi");
       if (active.name !== "VIABLE_PG") return;
       const channels = await viableChannelHealth(true);
+      // Share the probe result with the web process (admin dashboard + user
+      // gateway picker) so it doesn't have to mint its own probe orders.
+      await persistGatewayHealth({
+        at: new Date().toISOString(),
+        gateways: channels.map((c) => ({
+          id: c.id,
+          label: c.label,
+          route: c.route,
+          primary: c.primary,
+          healthy: c.healthy,
+          detail: c.detail,
+          checkedAt: c.checkedAt,
+        })),
+      });
       const usable = channels.filter((c) => c.healthy);
       if (channels.length > 0 && usable.length === 0) {
         await sendOpsAlert({
@@ -169,6 +188,7 @@ async function main() {
             gateways: channels.length,
             down: channels.map((c) => c.route).join(", "),
           },
+          href: "/dashboard/admin",
         });
       }
       log(`pg.health: ${usable.length}/${channels.length} gateway(s) healthy`);

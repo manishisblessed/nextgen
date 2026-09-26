@@ -2,10 +2,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { partnerStatus, moneyRailsOnMock } from "@/lib/partners";
 import { isProd } from "@/lib/env";
+import { readWorkerHeartbeat } from "@/lib/ops/telemetry";
+import { sendOpsAlert } from "@/lib/monitoring/alerts";
 
 export const fetchCache = "force-no-store";
 
 export const dynamic = "force-dynamic";
+
+// A worker that hasn't beaten in this long is considered DEAD. The worker beats
+// every 2 min (topup.reconcile), so 10 min = ~5 missed beats.
+const WORKER_STALE_SECONDS = Number(process.env.WORKER_STALE_SECONDS ?? 600);
+// In-process throttle so a persistently-dead worker pages at most once per
+// window even though uptime monitors hit /healthz constantly.
+const WORKER_ALERT_THROTTLE_MS = 30 * 60_000;
+let lastWorkerAlertAt = 0;
 
 export async function GET() {
   let db = "down";
@@ -22,6 +32,23 @@ export async function GET() {
   const railsOnMock = moneyRailsOnMock();
   const moneyRailsMisconfigured = isProd && railsOnMock.length > 0;
 
+  // Background worker liveness. A dead worker silently stops settling
+  // "paid but browser closed" payins, so we both surface it here (for uptime
+  // monitors) and self-alert to the admin bell (the always-up web cluster is
+  // the only process that can detect the worker being down).
+  const hb = await readWorkerHeartbeat();
+  const workerSeen = hb.at !== null;
+  const workerStale = workerSeen && hb.ageSeconds !== null && hb.ageSeconds > WORKER_STALE_SECONDS;
+  if (isProd && workerStale && Date.now() - lastWorkerAlertAt > WORKER_ALERT_THROTTLE_MS) {
+    lastWorkerAlertAt = Date.now();
+    void sendOpsAlert({
+      title: "Background worker appears DOWN — payin settlement/recon stalled",
+      severity: "critical",
+      details: { lastBeatAt: hb.at ?? "never", ageSeconds: hb.ageSeconds ?? "n/a", lastJob: hb.job ?? "n/a" },
+      href: "/dashboard/admin",
+    });
+  }
+
   return NextResponse.json({
     ok: db === "up" && !moneyRailsMisconfigured,
     db,
@@ -35,6 +62,13 @@ export async function GET() {
     },
     partners: partnerStatus(),
     moneyRailsOnMock: railsOnMock,
+    worker: {
+      seen: workerSeen,
+      stale: workerStale,
+      lastBeatAt: hb.at,
+      ageSeconds: hb.ageSeconds,
+      lastJob: hb.job,
+    },
     time: new Date().toISOString()
   });
 }

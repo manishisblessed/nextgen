@@ -400,6 +400,28 @@ export function recordHealth(route: string, healthy: boolean, detail: string): v
   healthCache.set(route, { healthy, detail, checkedAt: Date.now() });
 }
 
+/**
+ * Seed the in-process health cache from a persisted cross-process snapshot (the
+ * worker's periodic probe). Only fills a route when we have NO local sample or
+ * the snapshot is strictly fresher — so live local traffic always wins. Lets the
+ * web process show the worker's health view without minting its own probe orders
+ * on a cold start. Accepts the shape returned by ops/telemetry readGatewayHealth.
+ */
+export function hydrateHealthCache(
+  snapshot: { gateways: Array<{ route: string; healthy: boolean | null; detail: string; checkedAt: string | null }> } | null
+): void {
+  if (!snapshot?.gateways) return;
+  for (const g of snapshot.gateways) {
+    if (g.healthy === null || !g.checkedAt) continue;
+    const checkedAt = new Date(g.checkedAt).getTime();
+    if (Number.isNaN(checkedAt)) continue;
+    const existing = healthCache.get(g.route);
+    if (!existing || checkedAt > existing.checkedAt) {
+      healthCache.set(g.route, { healthy: g.healthy, detail: g.detail, checkedAt });
+    }
+  }
+}
+
 async function probeRoute(route: string): Promise<{ healthy: boolean; detail: string }> {
   const r = await viablePost<ViableCreateData>(
     `/v3/pg/v1/${route}`,

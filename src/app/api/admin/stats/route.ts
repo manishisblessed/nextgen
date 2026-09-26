@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { getPartner, partnerStatus } from "@/lib/partners";
-import { viableChannelHealthCached } from "@/lib/partners/viable-pg";
+import { viableChannelHealthCached, hydrateHealthCache } from "@/lib/partners/viable-pg";
+import { readGatewayHealth } from "@/lib/ops/telemetry";
 import { flags } from "@/lib/env";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { add, dec, toNumber } from "@/lib/money";
@@ -214,8 +215,10 @@ export async function GET() {
     }));
 
     // Per-gateway PG payin health (Viable) — cache-only read so polling the admin
-    // dashboard never mints probe orders. Empty unless Viable PG is the live UPI
-    // provider. `healthy: null` = no sample yet.
+    // dashboard never mints probe orders. Seeded from the worker's shared snapshot
+    // so the dashboard reflects the worker's probes cross-process. Empty unless
+    // Viable PG is the live UPI provider. `healthy: null` = no sample yet.
+    if (partners.upi?.provider === "VIABLE_PG") hydrateHealthCache(await readGatewayHealth());
     const pgGateways = partners.upi?.provider === "VIABLE_PG" ? viableChannelHealthCached() : [];
 
     const severityMap = (action: string) => {

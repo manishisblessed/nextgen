@@ -115,6 +115,7 @@ export async function runTopupReconciliation(): Promise<TopupReconResult> {
           failed: result.failed,
           expired: result.expired,
         },
+        href: "/dashboard/admin",
       },
       10 * 60_000
     );
@@ -193,6 +194,7 @@ export async function runTopupIntegrityCheck(): Promise<TopupIntegrityResult> {
         title: "CRITICAL: top-ups marked SUCCESS without a wallet credit",
         severity: "critical",
         details: { missingCredits: offenders.length, sample: result.offenders.join(", ") },
+        href: "/dashboard/admin/audit",
       },
       30 * 60_000
     );
