@@ -103,6 +103,15 @@ export interface UpiProvider {
   name: string;
   collect(input: UpiCollectInput): Promise<PartnerResult<UpiCollectOutput>>;
   status(orderId: string): Promise<PartnerResult<UpiStatusOutput>>;
+  /**
+   * When true, this provider offers NO status/polling API — settlement is
+   * webhook-authoritative only (e.g. Chagans PG). The settle layer must NOT
+   * attempt a pull via status() for such a provider on the client-poll / recon
+   * path; it may only credit from a trusted (IP-authenticated) webhook that
+   * supplies the verified status + amount. status() on these providers returns
+   * a NO_STATUS_API error so an accidental pull can never be read as success.
+   */
+  webhookOnly?: boolean;
 }
 
 // ---------- Payouts ----------

@@ -18,13 +18,18 @@
 import { prisma } from "../db";
 import { settleTopup } from "../wallet/topup";
 import { settlePgCollect } from "../wallet/pgCollect";
-import { getPartner, isMockProvider } from "../partners";
+import { getPartner, isMockProvider, isWebhookOnlyPartner } from "../partners";
 import { sendOpsAlert } from "../monitoring/alerts";
 import { logger } from "../logger";
 
 const GRACE_MS = 30_000; // don't touch a payin younger than this (client owns it)
 const LOOKBACK_MS = 24 * 60 * 60_000; // ignore ancient rows
 const EXPIRE_MS = Number(process.env.TOPUP_EXPIRE_MIN ?? 30) * 60_000;
+// Webhook-only rails (Chagans) can't be polled, so a payin only settles when
+// the webhook lands. Give it a longer window so a slightly-late webhook still
+// credits before we expire the row; expiries are surfaced to ops for manual
+// reconciliation against the provider (customer-paid-but-webhook-lost is rare).
+const WEBHOOK_EXPIRE_MS = Number(process.env.CHAGAN_EXPIRE_MIN ?? 60) * 60_000;
 
 export type TopupReconResult = {
   skipped: boolean;
@@ -52,12 +57,13 @@ export async function runTopupReconciliation(): Promise<TopupReconResult> {
       status: { in: ["INITIATED", "PROCESSING"] },
       createdAt: { gte: new Date(now - LOOKBACK_MS), lte: new Date(now - GRACE_MS) },
     },
-    select: { id: true, refId: true, service: true, createdAt: true },
+    select: { id: true, refId: true, service: true, partner: true, createdAt: true },
     orderBy: { createdAt: "asc" },
     take: 500,
   });
 
   const result: TopupReconResult = { ...empty, scanned: rows.length };
+  const expiredWebhookRefs: string[] = []; // webhook-only payins we auto-expired
 
   for (const row of rows) {
     try {
@@ -77,13 +83,19 @@ export async function runTopupReconciliation(): Promise<TopupReconResult> {
       } else {
         // Still pending. If it's past expiry, the checkout link is long dead —
         // mark FAILED so it stops being swept. Only flips rows still in-flight.
-        if (now - row.createdAt.getTime() > EXPIRE_MS) {
+        // Webhook-only rails get a longer window (a late webhook should still
+        // win) and expiries are surfaced for manual provider reconciliation.
+        const webhookOnly = isWebhookOnlyPartner(row.partner);
+        const expireMs = webhookOnly ? WEBHOOK_EXPIRE_MS : EXPIRE_MS;
+        if (now - row.createdAt.getTime() > expireMs) {
           const upd = await prisma.transaction.updateMany({
             where: { id: row.id, status: { in: ["INITIATED", "PROCESSING"] } },
             data: { status: "FAILED", errorCode: "EXPIRED", errorMessage: "Payment not completed in time" },
           });
-          if (upd.count > 0) result.expired += 1;
-          else result.stillPending += 1;
+          if (upd.count > 0) {
+            result.expired += 1;
+            if (webhookOnly) expiredWebhookRefs.push(row.refId);
+          } else result.stillPending += 1;
         } else {
           result.stillPending += 1;
         }
@@ -118,6 +130,27 @@ export async function runTopupReconciliation(): Promise<TopupReconResult> {
         href: "/dashboard/admin",
       },
       10 * 60_000
+    );
+  }
+
+  // Webhook-only payins we auto-expired could (rarely) be customer-paid with a
+  // lost webhook. We never auto-credit without the webhook (no financial loss),
+  // but we surface a throttled note so ops can spot-check the provider dashboard
+  // and, if genuinely paid, credit via an audited admin ledger adjustment.
+  if (expiredWebhookRefs.length > 0) {
+    await maybeAlert(
+      "topup-webhook-expired",
+      {
+        title: "Webhook-only payins expired without a webhook — verify at provider",
+        severity: "warning",
+        details: {
+          expired: expiredWebhookRefs.length,
+          sample: expiredWebhookRefs.slice(0, 10).join(", "),
+          hint: "Check the PG dashboard; if actually paid, credit via admin Wallet Operations.",
+        },
+        href: "/dashboard/admin/audit",
+      },
+      30 * 60_000
     );
   }
 

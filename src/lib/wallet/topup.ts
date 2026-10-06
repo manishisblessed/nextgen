@@ -11,11 +11,12 @@
  *                     idempotencyKey `topup:<txnId>` so webhook + poll + admin
  *                     retry can all race safely.
  */
-import { nanoid } from "nanoid";
+import { customAlphabet } from "nanoid";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { creditWallet } from "../ledger";
-import { getPartner, assertRealMoneyProvider } from "../partners";
+import { assertRealMoneyProvider, getUpiProviderByName, resolveUpiSelection } from "../partners";
+import type { UpiStatusOutput } from "../partners/types";
 import { round } from "../money";
 import { emitWebhookEvent } from "../platform/webhooks";
 import { sendOpsAlert } from "../monitoring/alerts";
@@ -24,6 +25,22 @@ import { isAmountMismatch } from "./guards";
 import { assertPushWithinCap, WalletOpError } from "./operations";
 
 export type TopupState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED" | "HOLD";
+
+/**
+ * refId token alphabet — UPPERCASE A–Z + 0–9 ONLY. This is deliberately NOT the
+ * default nanoid alphabet (which includes `_` and `-`): Chagans PG REJECTS
+ * txnIds containing underscores / hyphens / special characters (verified live),
+ * and we send the refId verbatim as the provider txnId. An alphanumeric-only
+ * refId is safe across every PG rail.
+ */
+const refToken = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 12);
+
+/** Verified payin outcome supplied by a trusted (IP-authenticated) webhook. */
+export type VerifiedPayin = {
+  status: UpiStatusOutput["status"];
+  amount?: number;
+  reference?: string;
+};
 
 export class TopupError extends Error {
   public statusCode: number;
@@ -42,20 +59,16 @@ export async function initiateTopup(input: {
   customerName?: string;
   customerPhone: string;
   customerEmail?: string;
-  /** Optional PG gateway channel (Viable multi-gateway); defaults to primary. */
+  /** Optional PG gateway channel (`<provider>:<gateway>`); defaults to primary. */
   channel?: string;
   ip?: string;
-}): Promise<{ refId: string; orderId: string; paymentUrl?: string; upiIntent?: string; provider: string }> {
-  // Wallet cap gate — refuse the collect up front rather than bouncing money
-  // back after the customer has already paid.
-  try {
-    await assertPushWithinCap(input.userId, "PRIMARY", input.amount);
-  } catch (e) {
-    if (e instanceof WalletOpError) throw new TopupError(e.message, 400, e.code);
-    throw e;
-  }
+}): Promise<{ refId: string; orderId: string; paymentUrl?: string; upiIntent?: string; provider: string; amount: number }> {
+  // Resolve the user-selected gateway to a concrete provider + collect params.
+  // Chagans needs a unique-to-paise amount (prepareAmount) and enforces a
+  // per-gateway cap; Viable passes the amount through unchanged.
+  const selection = resolveUpiSelection(input.channel);
+  const upi = selection.provider;
 
-  const upi = getPartner("upi");
   // Never open a collect through a mock provider in production — the mock
   // auto-"pays" every request, which would mint wallet balance with no real
   // money behind it. Block the top-up up front until a live PG is configured.
@@ -69,22 +82,48 @@ export async function initiateTopup(input: {
       )
   );
 
-  const refId = `TOPUP${nanoid(10).toUpperCase()}`;
+  // Gateway cap guard (e.g. Chagans Comet ₹1,00,000 / Star ₹40,000) — reject
+  // locally with a clear message rather than after a provider HTTP 400.
+  if (selection.maxAmount && input.amount > selection.maxAmount) {
+    throw new TopupError(
+      `This gateway supports up to ₹${selection.maxAmount.toLocaleString("en-IN")} per transaction. Choose a lower amount or another gateway.`,
+      400,
+      "AMOUNT_OVER_LIMIT"
+    );
+  }
+
+  // The amount actually charged (and later credited). For Chagans this carries
+  // random paise so the order is unique; the customer pays — and is credited —
+  // this exact value, so there is no financial loss.
+  const chargeAmount = Number(round(selection.prepareAmount(input.amount)));
+
+  // Wallet cap gate — refuse the collect up front rather than bouncing money
+  // back after the customer has already paid.
+  try {
+    await assertPushWithinCap(input.userId, "PRIMARY", chargeAmount);
+  } catch (e) {
+    if (e instanceof WalletOpError) throw new TopupError(e.message, 400, e.code);
+    throw e;
+  }
+
+  const refId = `TOPUP${refToken()}`;
 
   const txn = await prisma.transaction.create({
     data: {
       refId,
       userId: input.userId,
       service: "WALLET_TOPUP",
-      amount: new Prisma.Decimal(round(input.amount)),
+      amount: new Prisma.Decimal(chargeAmount),
       status: "INITIATED",
       customer: input.customerPhone,
       partner: upi.name,
       request: {
-        amount: input.amount,
+        amount: chargeAmount,
+        requestedAmount: input.amount,
         vpa: input.vpa ?? null,
         note: input.note ?? null,
         channel: input.channel ?? null,
+        gateway: selection.channel ?? null,
       } as Prisma.InputJsonValue,
       ipAddress: input.ip,
     },
@@ -93,13 +132,13 @@ export async function initiateTopup(input: {
   const r = await upi.collect({
     userId: input.userId,
     idempotencyKey: refId,
-    amount: input.amount,
+    amount: chargeAmount,
     vpa: input.vpa,
     note: input.note ?? "Wallet top-up",
     customerName: input.customerName,
     customerPhone: input.customerPhone,
     customerEmail: input.customerEmail,
-    channel: input.channel,
+    channel: selection.channel,
     callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/wallet?topup=${refId}`,
   });
 
@@ -129,15 +168,29 @@ export async function initiateTopup(input: {
     paymentUrl: r.data.paymentUrl,
     upiIntent: r.data.upiIntent,
     provider: upi.name,
+    amount: chargeAmount,
   };
 }
 
 /**
- * Poll the provider for the collect's state and settle our side. Safe to call
- * from the status endpoint, the PG webhook, and recon — all paths converge on
- * the same idempotent credit.
+ * Settle a wallet top-up. Safe to call from the status poll, the PG webhook,
+ * and recon — all paths converge on the same idempotent credit.
+ *
+ * Provider routing: we re-verify through the provider that ORIGINATED the
+ * transaction (`txn.partner`), never the default — so a Chagans payin is never
+ * checked against Viable.
+ *
+ * `verified` is supplied ONLY by a trusted, IP-authenticated webhook (e.g.
+ * Chagans, which has no status API): it carries the provider-confirmed status +
+ * amount and is used in place of a status() pull. When omitted:
+ *   - a pull-capable provider (Viable) is polled via status();
+ *   - a webhook-only provider (Chagans) cannot be polled, so we simply reflect
+ *     the current DB state (the webhook is what credits) — never a status pull.
  */
-export async function settleTopup(refId: string): Promise<{ refId: string; status: TopupState }> {
+export async function settleTopup(
+  refId: string,
+  webhookVerified?: VerifiedPayin
+): Promise<{ refId: string; status: TopupState }> {
   const txn = await prisma.transaction.findUnique({ where: { refId } });
   if (!txn || txn.service !== "WALLET_TOPUP") {
     throw new TopupError("Top-up not found", 404, "NOT_FOUND");
@@ -145,7 +198,8 @@ export async function settleTopup(refId: string): Promise<{ refId: string; statu
   if (txn.status === "SUCCESS") return { refId, status: "SUCCESS" };
   if (txn.status === "FAILED") return { refId, status: "FAILED" };
 
-  const upi = getPartner("upi");
+  // Route through the EXACT provider that created this top-up.
+  const upi = getUpiProviderByName(txn.partner);
   // Defence-in-depth: even if a stale INITIATED/PROCESSING top-up exists, never
   // settle (credit the wallet) through a mock provider in production. The mock's
   // status() always reports PAID, so crediting on it would create phantom money.
@@ -159,7 +213,17 @@ export async function settleTopup(refId: string): Promise<{ refId: string; statu
       )
   );
 
-  const r = await upi.status(txn.partnerTxnId || refId);
+  let r: { ok: true; data: UpiStatusOutput } | { ok: false; code: string; message: string };
+  if (webhookVerified) {
+    // Trusted webhook supplied the provider-verified outcome — use it verbatim.
+    r = { ok: true, data: { status: webhookVerified.status, amount: webhookVerified.amount, reference: webhookVerified.reference } };
+  } else if (upi.webhookOnly) {
+    // No status API to pull — the webhook is the only crediting path. Reflect
+    // current DB state so the client poll / recon can see progress + expire.
+    return { refId, status: txn.status === "HOLD" ? "HOLD" : "PROCESSING" };
+  } else {
+    r = await upi.status(txn.partnerTxnId || refId);
+  }
   if (!r.ok) throw new TopupError(r.message, 502, r.code);
 
   if (r.data.status === "PAID") {

@@ -6,6 +6,14 @@ import { mapSettlementStatus, type SettlementAccount, type VerificationStatus } 
 import { mapSettlementToPayoutStatus } from "@/lib/partners/sameday-payout";
 import { mapPgStatus } from "@/lib/partners/bulkpe";
 import { mapViableStatus, resolveChannelRoute, viableChannels } from "@/lib/partners/viable-pg";
+import {
+  mapChagansStatus,
+  parseChagansWebhook,
+  isChagansWebhookIp,
+  randomizeChagansAmount,
+  resolveChagansGateway,
+  chagansGateways,
+} from "@/lib/partners/chagans-pg";
 import { isAmountMismatch } from "@/lib/wallet/guards";
 import {
   buildCustParams,
@@ -336,6 +344,101 @@ describe("Viable PG channels", () => {
     const primary = viableChannels().find((c) => c.primary)!;
     expect(resolveChannelRoute(undefined)).toBe(primary.route);
     expect(resolveChannelRoute("does-not-exist")).toBe(primary.route);
+  });
+});
+
+describe("Chagans PG — gateways & amount", () => {
+  it("exposes Comet (chagans3/t1) and Star (chagans2/t0) with caps", () => {
+    const gws = chagansGateways();
+    const comet = gws.find((g) => g.id === "comet")!;
+    const star = gws.find((g) => g.id === "star")!;
+    expect(comet.pgType).toBe("chagans3");
+    expect(comet.mode).toBe("t1");
+    expect(star.pgType).toBe("chagans2");
+    expect(star.mode).toBe("t0");
+    expect(comet.maxAmount).toBeGreaterThan(0);
+    expect(star.maxAmount).toBeGreaterThan(0);
+  });
+
+  it("resolves a requested gateway, defaulting to the primary (Comet)", () => {
+    expect(resolveChagansGateway("star").id).toBe("star");
+    expect(resolveChagansGateway("chagans2").id).toBe("star");
+    expect(resolveChagansGateway(undefined).id).toBe("comet");
+    expect(resolveChagansGateway("nope").id).toBe("comet");
+  });
+
+  it("randomizes to a unique-to-paise amount that is never below the request", () => {
+    for (let i = 0; i < 200; i++) {
+      const out = randomizeChagansAmount(100);
+      // whole rupee + 1..99 paise → strictly within (100, 101)
+      expect(out).toBeGreaterThanOrEqual(100.01);
+      expect(out).toBeLessThanOrEqual(100.99);
+      // exactly 2 decimals
+      expect(Math.round(out * 100)).toBe(out * 100);
+    }
+  });
+});
+
+describe("Chagans PG — webhook status mapping (conservative)", () => {
+  it("credits ONLY on an explicit success signal", () => {
+    expect(mapChagansStatus("success")).toBe("PAID");
+    expect(mapChagansStatus("PAID")).toBe("PAID");
+    expect(mapChagansStatus("captured")).toBe("PAID");
+    expect(mapChagansStatus(undefined, true)).toBe("PAID");
+    expect(mapChagansStatus(undefined, undefined, 200)).toBe("PAID");
+  });
+
+  it("maps clear failures + expiry", () => {
+    expect(mapChagansStatus("failed")).toBe("FAILED");
+    expect(mapChagansStatus("declined")).toBe("FAILED");
+    expect(mapChagansStatus("cancelled")).toBe("FAILED");
+    expect(mapChagansStatus(undefined, false)).toBe("FAILED");
+    expect(mapChagansStatus("expired")).toBe("EXPIRED");
+  });
+
+  it("never treats an unknown/pending token as PAID", () => {
+    expect(mapChagansStatus("pending")).toBe("UNKNOWN");
+    expect(mapChagansStatus("initiated")).toBe("UNKNOWN");
+    expect(mapChagansStatus("weird-new-state")).toBe("UNKNOWN");
+    expect(mapChagansStatus(undefined)).toBe("UNKNOWN");
+  });
+});
+
+describe("Chagans PG — defensive webhook parse", () => {
+  it("extracts txnId/amount/status from a nested data envelope", () => {
+    const p = parseChagansWebhook({
+      success: true,
+      data: { txnId: "TOPUPABC123", orderId: "CPG_1", amount: 100.57, status: "success", utr: "UTR9" },
+    });
+    expect(p.txnId).toBe("TOPUPABC123");
+    expect(p.orderId).toBe("CPG_1");
+    expect(p.amount).toBe(100.57);
+    expect(p.reference).toBe("UTR9");
+    expect(p.status).toBe("PAID");
+  });
+
+  it("extracts from a flat payload + alt field names", () => {
+    const p = parseChagansWebhook({ txn_id: "TOPUPX", amt: "250.33", paymentStatus: "FAILED" });
+    expect(p.txnId).toBe("TOPUPX");
+    expect(p.amount).toBe(250.33);
+    expect(p.status).toBe("FAILED");
+  });
+
+  it("never throws on junk and never over-credits", () => {
+    expect(parseChagansWebhook(null).status).toBe("UNKNOWN");
+    expect(parseChagansWebhook("nope").status).toBe("UNKNOWN");
+    expect(parseChagansWebhook({ foo: "bar" }).txnId).toBeUndefined();
+  });
+});
+
+describe("Chagans PG — webhook IP allow-list", () => {
+  it("accepts only the whitelisted source IPs", () => {
+    expect(isChagansWebhookIp("103.160.160.129")).toBe(true); // Star
+    expect(isChagansWebhookIp("34.126.212.125")).toBe(true); // Comet
+    expect(isChagansWebhookIp("1.2.3.4")).toBe(false);
+    expect(isChagansWebhookIp("")).toBe(false);
+    expect(isChagansWebhookIp(null)).toBe(false);
+    expect(isChagansWebhookIp(undefined)).toBe(false);
   });
 });
 

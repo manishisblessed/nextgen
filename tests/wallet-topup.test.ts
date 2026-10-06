@@ -20,16 +20,22 @@ vi.mock("@/lib/db", () => ({
   ),
 }));
 
-vi.mock("@/lib/partners", () => ({
-  getPartner: () => ({
+vi.mock("@/lib/partners", () => {
+  const fake = {
     name: "FAKE_PG",
     collect: async () => holder.collectResult,
     status: async () => holder.statusResult,
-  }),
-  // FAKE_PG is a real (non-mock) provider double, so the money-provider guard
-  // is a no-op here; provide it so the mocked module mirrors the real exports.
-  assertRealMoneyProvider: () => {},
-}));
+  };
+  return {
+    getPartner: () => fake,
+    // Route-by-name + selection both resolve to the same real-ish double.
+    getUpiProviderByName: () => fake,
+    resolveUpiSelection: () => ({ provider: fake, channel: undefined, prepareAmount: (a: number) => a }),
+    // FAKE_PG is a real (non-mock) provider double, so the money-provider guard
+    // is a no-op here; provide it so the mocked module mirrors the real exports.
+    assertRealMoneyProvider: () => {},
+  };
+});
 
 import { initiateTopup, settleTopup, TopupError } from "@/lib/wallet/topup";
 
@@ -46,7 +52,9 @@ beforeEach(() => {
 describe("initiateTopup", () => {
   it("creates a PROCESSING transaction and returns the payment handle", async () => {
     const r = await initiateTopup({ userId: "u1", amount: 250, customerPhone: "9999999999" });
-    expect(r.refId).toMatch(/^TOPUP/);
+    // refId must be ALPHANUMERIC-ONLY (no _/- ) — Chagans PG rejects special
+    // chars in the txnId, and we send refId verbatim as the provider txnId.
+    expect(r.refId).toMatch(/^TOPUP[A-Z0-9]+$/);
     expect(r.paymentUrl).toBe("https://pay.example/x");
     expect(r.provider).toBe("FAKE_PG");
     const txn = holder.db.transactions[0];
@@ -107,5 +115,22 @@ describe("settleTopup", () => {
 
   it("404s on unknown references", async () => {
     await expect(settleTopup("TOPUPUNKNOWN")).rejects.toThrow("Top-up not found");
+  });
+
+  it("credits via a trusted webhook-verified override without polling status", async () => {
+    // A pull would NOT credit (provider still CREATED) — proving the webhook
+    // path (used by webhook-only rails like Chagans) is what credits.
+    holder.statusResult = { ok: true, data: { status: "CREATED" } };
+    const { refId } = await initiateTopup({ userId: "u1", amount: 250, customerPhone: "9999999999" });
+    const r = await settleTopup(refId, { status: "PAID", amount: 250 });
+    expect(r.status).toBe("SUCCESS");
+    expect(holder.db.balanceOf("u1")).toBe("750.00");
+  });
+
+  it("HOLDs (never credits) when the webhook amount mismatches the initiated amount", async () => {
+    const { refId } = await initiateTopup({ userId: "u1", amount: 250, customerPhone: "9999999999" });
+    const r = await settleTopup(refId, { status: "PAID", amount: 999 });
+    expect(r.status).toBe("HOLD");
+    expect(holder.db.balanceOf("u1")).toBe("500.00");
   });
 });

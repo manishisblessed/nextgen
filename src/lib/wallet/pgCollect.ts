@@ -15,7 +15,7 @@
  * This is what makes live PG payins flow: the BulkPe PG webhook (and the status
  * poll) resolve a `PGC…` reference to its Transaction and settle it here.
  */
-import { nanoid } from "nanoid";
+import { customAlphabet } from "nanoid";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { getPartner, assertRealMoneyProvider } from "../partners";
@@ -40,6 +40,9 @@ export function isPgCollectRef(referenceId: string | undefined | null): boolean 
   return !!referenceId && referenceId.startsWith("PGC");
 }
 
+/** Alphanumeric-only ref token (no `_`/`-`) — safe across every PG rail. */
+const pgcToken = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 12);
+
 export async function initiatePgCollect(input: {
   userId: string;
   amount: number;
@@ -57,7 +60,7 @@ export async function initiatePgCollect(input: {
     () => new PgCollectError("PG collections are temporarily unavailable.", 503, "PG_NOT_LIVE")
   );
 
-  const refId = `PGC${nanoid(10).toUpperCase()}`;
+  const refId = `PGC${pgcToken()}`;
 
   const txn = await prisma.transaction.create({
     data: {

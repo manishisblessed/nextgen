@@ -72,10 +72,17 @@ type PgChannel = {
   id: string;
   label: string;
   route: string;
+  provider: string;
   primary: boolean;
   healthy: boolean;
   detail: string;
   checkedAt: string;
+  maxAmount?: number;
+};
+
+const PROVIDER_LABELS: Record<string, string> = {
+  VIABLE_PG: "Viable",
+  CHAGANS_PG: "Chagans",
 };
 
 export default function WalletPage() {
@@ -246,7 +253,9 @@ export default function WalletPage() {
       }
       const topup: PendingTopup = {
         refId: d.refId,
-        amount: amt,
+        // The server may add random paise (Chagans needs a unique amount); the
+        // customer pays — and is credited — this exact charged amount.
+        amount: typeof d.amount === "number" ? d.amount : amt,
         paymentUrl: d.paymentUrl,
         upiIntent: d.upiIntent,
       };
@@ -463,7 +472,13 @@ export default function WalletPage() {
                             )}
                           </span>
                           <span className={`text-[11px] ${c.healthy ? "text-emerald-600" : "text-rose-500"}`}>
-                            {c.healthy ? "Available" : c.detail || "Unavailable"}
+                            {PROVIDER_LABELS[c.provider] ?? c.provider}
+                            {" · "}
+                            {c.healthy
+                              ? c.maxAmount
+                                ? `up to ${formatINR(c.maxAmount)}`
+                                : "Available"
+                              : c.detail || "Unavailable"}
                           </span>
                         </button>
                       );
@@ -472,6 +487,15 @@ export default function WalletPage() {
                   {channels.every((c) => !c.healthy) && (
                     <p className="mt-1.5 text-[11px] text-rose-600">
                       All payment gateways are currently unavailable. Please try again shortly.
+                    </p>
+                  )}
+                  {(() => {
+                    const sel = channels.find((c) => c.id === channel);
+                    return sel?.provider === "CHAGANS_PG" && sel.route === "comet";
+                  })() && (
+                    <p className="mt-1.5 text-[11px] text-ink-400">
+                      A few random paise may be added so the bank can match your
+                      payment — the full amount you pay is credited to your wallet.
                     </p>
                   )}
                 </div>

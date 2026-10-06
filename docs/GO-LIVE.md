@@ -39,6 +39,8 @@ Each rail is dark until its flag is on AND its credentials are set:
 |---|---|---|
 | Payouts (BulkPe) | `BULKPE_TOKEN`, `BULKPE_WEBHOOK_SECRET`, `PARTNER_PAYOUT_ENABLED=true` | Whitelist your server's static IP with BulkPe; register webhook URL `https://<domain>/api/payout/webhook` |
 | Wallet top-up / UPI (BulkPe Simple PG) | same token, `PARTNER_UPI_ENABLED=true` | Register PG webhook `https://<domain>/api/webhooks/bulkpe-pg` |
+| Wallet top-up / UPI (Viable DigiSeva PG) | `VIABLE_PG_API_KEY`, `VIABLE_PG_USERCODE`, `PARTNER_UPI_ENABLED=true` | Whitelist your server's static egress IP with Viable (no webhook — poll + recon) |
+| Wallet top-up / UPI (Chagans PG) | `CHAGAN_CLIENT_ID`, `CHAGAN_CLIENT_SECRET`, `CHAGAN_API_TOKEN`, `PARTNER_UPI_ENABLED=true` | Whitelist egress IP with Chagan for API calls. **Webhook-authoritative** (no status API): give Chagan `https://<domain>/api/webhooks/chagans-pg` and have nginx/SG allow inbound POSTs to it ONLY from Chagan's webhook IPs (`CHAGAN_WEBHOOK_IPS`, default `103.160.160.129,34.126.212.125`). Gateways: Comet (`chagans3`/t1, ₹1L) & Star (`chagans2`/t0, ₹40k) |
 | BBPS credit-card bills (Same Day Pay2New) | `SAMEDAY_BBPS_API_KEY`, `SAMEDAY_BBPS_API_SECRET`, `PARTNER_BBPS_ENABLED=true` | IP whitelist with Same Day |
 | Settlement (Same Day) | `SAMEDAY_SETTLEMENT_API_KEY`, `SAMEDAY_SETTLEMENT_API_SECRET`, `PARTNER_SETTLEMENT_ENABLED=true` | Add + penny-verify a bank account in Dashboard → Settlements → Bank transfers |
 | eSign agreements (Leegality) | `LEEGALITY_AUTH_TOKEN`, `LEEGALITY_PROFILE_ID`, `LEEGALITY_BASE_URL=https://app1.leegality.com/api`, `PARTNER_ESIGN_ENABLED=true` | Register webhook `https://<domain>/api/webhooks/leegality` |
