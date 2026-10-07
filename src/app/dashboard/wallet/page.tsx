@@ -44,6 +44,9 @@ type WalletData = {
   monthlyIn: number;
   monthlyOut: number;
   recentTxns: WalletTxn[];
+  /** True only for retailers with the admin-enabled Payment Gateway service —
+   *  controls whether the "Add money" (top-up) tab is shown. */
+  canTopup?: boolean;
 };
 
 const REASON_LABELS: Record<string, string> = {
@@ -228,6 +231,15 @@ export default function WalletPage() {
   }, []);
 
   const balance = data?.balance ?? session?.walletBalance ?? 0;
+  // "Add money" is retailer-only + gated by the admin-controlled Payment
+  // Gateway service. Until the wallet payload confirms eligibility we keep the
+  // top-up UI hidden. The server (channels + top-up API) enforces this too.
+  const canTopup = data?.canTopup ?? false;
+
+  // If the user can't top up, never leave the UI parked on the "add" tab.
+  useEffect(() => {
+    if (data && !canTopup && mode === "add") setMode("withdraw");
+  }, [data, canTopup, mode]);
 
   async function submitTopup(e: React.FormEvent) {
     e.preventDefault();
@@ -274,8 +286,12 @@ export default function WalletPage() {
     <div>
       <ServicePageHeader
         icon={Wallet}
-        title="NextGenPay Wallet"
-        description="Top-up your wallet instantly via UPI, or view your balance history."
+        title="Payment Gateway"
+        description={
+          canTopup
+            ? "Add money to your wallet instantly via UPI, or view your balance history."
+            : "View your wallet balance and transaction history."
+        }
       />
 
       <div className="mb-8 grid gap-6 lg:grid-cols-3">
@@ -314,10 +330,12 @@ export default function WalletPage() {
         </div>
 
         <div className="lg:col-span-2 rounded-2xl border border-ink-100 bg-white p-6">
-          <div className="grid grid-cols-2 gap-2">
+          <div className={`grid gap-2 ${canTopup ? "grid-cols-2" : "grid-cols-1"}`}>
             {(
               [
-                { id: "add", label: "Add money", icon: ArrowDownToLine },
+                ...(canTopup
+                  ? ([{ id: "add", label: "Add money", icon: ArrowDownToLine }] as const)
+                  : ([] as const)),
                 {
                   id: "withdraw",
                   label: "Withdraw to bank",

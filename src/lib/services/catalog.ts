@@ -104,6 +104,10 @@ export const SERVICE_KEY_TO_HREF: Record<string, string> = {
  */
 const SERVICE_HREF_PREFIXES: Array<[prefix: string, key: string]> = [
   ["/dashboard/pg", SERVICE_KEYS.PG],
+  // The user-facing "Payment Gateway" tab is the wallet top-up surface. Gate it
+  // behind the same pg_razorpay service so it only appears for users the admin
+  // has enabled (retailer-only via nav structure in roles.ts).
+  ["/dashboard/wallet", SERVICE_KEYS.PG],
   ["/dashboard/pos", SERVICE_KEYS.POS],
   ["/dashboard/qr", SERVICE_KEYS.QR],
   ["/dashboard/payout", SERVICE_KEYS.PAYOUT],

@@ -3,6 +3,8 @@ import { requireAuth } from "@/lib/auth-server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { flags } from "@/lib/env";
+import { isServiceEnabledForUser } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { viableConfigured, viableChannelHealth, hydrateHealthCache } from "@/lib/partners/viable-pg";
 import { chagansConfigured, chagansChannelHealth } from "@/lib/partners/chagans-pg";
 import { readGatewayHealth } from "@/lib/ops/telemetry";
@@ -41,6 +43,16 @@ export async function GET() {
   }
 
   if (!flags.upi) return NextResponse.json({ provider: "NONE", channels: [] });
+
+  // Payment Gateway top-up is retailer-only AND admin-gated (pg_razorpay). When
+  // the caller is not an eligible retailer, return no channels so the "Add
+  // money" selector stays hidden. The POST route enforces the same rules.
+  if (
+    user.role !== "RETAILER" ||
+    !(await isServiceEnabledForUser(SERVICE_KEYS.PG, user.id, user.role))
+  ) {
+    return NextResponse.json({ provider: "NONE", channels: [] });
+  }
 
   try {
     const channels: UnifiedChannel[] = [];

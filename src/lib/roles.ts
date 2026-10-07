@@ -69,10 +69,13 @@ export type NavGroup = {
 };
 
 const baseServices: NavItem[] = [
-  { href: "/dashboard/pg", label: "Payment Gateway", icon: CreditCard, badge: "New" },
+  // The old merchant PG page (/dashboard/pg) is intentionally hidden from the
+  // user-facing nav. The "Payment Gateway" tab below is the wallet top-up
+  // (Add money via Chagans/Viable), retailer-only and gated by the pg_razorpay
+  // service (see hrefToServiceKey mapping for /dashboard/wallet).
   { href: "/dashboard/pos", label: "POS Terminals", icon: Monitor, badge: "New" },
   { href: "/dashboard/qr", label: "QR Payments", icon: QrCode, badge: "New" },
-  { href: "/dashboard/wallet", label: "Wallet", icon: Wallet },
+  { href: "/dashboard/wallet", label: "Payment Gateway", icon: CreditCard, badge: "New" },
   { href: "/dashboard/money-transfer", label: "Money Transfer", icon: Send },
   { href: "/dashboard/payout", label: "Payout", icon: Landmark, badge: "New" },
   { href: "/dashboard/aadhaar-pay", label: "AePS / Aadhaar Pay", icon: Fingerprint },

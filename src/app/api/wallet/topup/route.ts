@@ -40,6 +40,16 @@ export async function POST(req: Request) {
     return toErrorResponse(e);
   }
 
+  // Payment Gateway top-up is a retailer-only rail. Other roles (distributors,
+  // staff, etc.) must not create top-up intents even if the pg_razorpay service
+  // happens to be enabled for them.
+  if (user.role !== "RETAILER") {
+    return NextResponse.json(
+      { error: "Payment Gateway top-up is available to retailers only." },
+      { status: 403 }
+    );
+  }
+
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 

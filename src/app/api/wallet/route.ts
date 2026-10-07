@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth-server";
 import { prisma } from "@/lib/db";
 import { buildPayoutLedgerMemos } from "@/lib/payout/ledgerMemos";
+import { isServiceEnabledForUser } from "@/lib/services/guard";
+import { SERVICE_KEYS } from "@/lib/services/catalog";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -49,6 +51,13 @@ export async function GET(req: Request) {
   // Opt-in: clients that can render payout reservation memos (e.g. the mobile app)
   // request them; every other consumer gets the real activity unchanged.
   const includeMemos = searchParams.get("memos") === "1";
+
+  // "Add money" (Payment Gateway top-up) is retailer-only AND gated by the
+  // admin-controlled pg_razorpay service. The page uses this to show/hide the
+  // Add-money tab; the top-up API enforces the same rules server-side.
+  const canTopup =
+    user.role === "RETAILER" &&
+    (await isServiceEnabledForUser(SERVICE_KEYS.PG, user.id, user.role));
 
   const [monthlyAgg, recent, memos] = await Promise.all([
     prisma.walletTxn.groupBy({
@@ -110,5 +119,6 @@ export async function GET(req: Request) {
     monthlyIn,
     monthlyOut,
     recentTxns,
+    canTopup,
   });
 }
