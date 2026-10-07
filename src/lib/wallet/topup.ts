@@ -39,6 +39,13 @@ export type TopupState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED" | "HO
  */
 const PG_MDR_PROVIDERS: ReadonlySet<string> = new Set(["CHAGANS_PG"]);
 
+/** True when a provider's top-ups are priced + settled through the PG MDR
+ *  pipeline (net-of-MDR + commission), so the retailer sees an up-front gateway
+ *  charge and must have a priceable PG scheme slab. */
+export function isPgMdrProvider(name: string | null | undefined): boolean {
+  return !!name && PG_MDR_PROVIDERS.has(name);
+}
+
 /**
  * refId token alphabet — UPPERCASE A–Z + 0–9 ONLY. This is deliberately NOT the
  * default nanoid alphabet (which includes `_` and `-`): Chagans PG REJECTS
