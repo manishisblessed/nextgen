@@ -13,6 +13,7 @@ import {
   randomizeChagansAmount,
   resolveChagansGateway,
   chagansGateways,
+  mobile10,
 } from "@/lib/partners/chagans-pg";
 import { isAmountMismatch } from "@/lib/wallet/guards";
 import {
@@ -388,10 +389,16 @@ describe("Chagans PG — webhook status mapping (conservative)", () => {
     expect(mapChagansStatus(undefined, undefined, 200)).toBe("PAID");
   });
 
+  it("recognises Chagans' real tokens: result=SUCCESS, event='Transaction Success'", () => {
+    expect(mapChagansStatus("SUCCESS")).toBe("PAID");
+    expect(mapChagansStatus("Transaction Success")).toBe("PAID");
+  });
+
   it("maps clear failures + expiry", () => {
     expect(mapChagansStatus("failed")).toBe("FAILED");
     expect(mapChagansStatus("declined")).toBe("FAILED");
     expect(mapChagansStatus("cancelled")).toBe("FAILED");
+    expect(mapChagansStatus("Transaction Failed")).toBe("FAILED");
     expect(mapChagansStatus(undefined, false)).toBe("FAILED");
     expect(mapChagansStatus("expired")).toBe("EXPIRED");
   });
@@ -424,10 +431,51 @@ describe("Chagans PG — defensive webhook parse", () => {
     expect(p.status).toBe("FAILED");
   });
 
+  it("parses the REAL Chagans success webhook (result/event, no echoed ref)", () => {
+    // Exact shape captured live (card success via Comet).
+    const p = parseChagansWebhook({
+      amount: 100.31,
+      userData: '{"name":"Manish RT","paymentType":""}',
+      orderId: "CPG_9E2ECB4157DD74E3",
+      transactionId: "6683346000",
+      responseCode: "",
+      rrn: "628016031809",
+      result: "SUCCESS",
+      originalAmount: 100.31,
+      maskedCard: "XXXXXXXXXXXX1645",
+      paymentMethod: "credit_card",
+      event: "Transaction Success",
+    });
+    expect(p.status).toBe("PAID");
+    expect(p.amount).toBe(100.31);
+    expect(p.orderId).toBe("CPG_9E2ECB4157DD74E3");
+    // Chagans' own id must NOT be mistaken for our merchant ref.
+    expect(p.transactionId).toBe("6683346000");
+    expect(p.txnId).toBeUndefined();
+    // rrn is the bank reference.
+    expect(p.reference).toBe("628016031809");
+  });
+
+  it("falls back to transactionId as reference when no rrn/utr present", () => {
+    const p = parseChagansWebhook({ orderId: "CPG_2", transactionId: "999", result: "SUCCESS", amount: 5 });
+    expect(p.reference).toBe("999");
+  });
+
   it("never throws on junk and never over-credits", () => {
     expect(parseChagansWebhook(null).status).toBe("UNKNOWN");
     expect(parseChagansWebhook("nope").status).toBe("UNKNOWN");
     expect(parseChagansWebhook({ foo: "bar" }).txnId).toBeUndefined();
+  });
+});
+
+describe("Chagans PG — mobile normalisation", () => {
+  it("strips +91/country code to a bare 10-digit number", () => {
+    expect(mobile10("+919000000204")).toBe("9000000204");
+    expect(mobile10("919000000204")).toBe("9000000204");
+    expect(mobile10("9000000204")).toBe("9000000204");
+    expect(mobile10("+91 90000 00204")).toBe("9000000204");
+    expect(mobile10("")).toBe("");
+    expect(mobile10(null)).toBe("");
   });
 });
 

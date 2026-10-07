@@ -57,9 +57,14 @@ export async function GET() {
   try {
     const channels: UnifiedChannel[] = [];
 
+    // Payment Gateway now runs on Chagans (Comet + Star). Viable is kept in the
+    // codebase only as a fallback for when Chagans is not configured — when
+    // Chagans is live we surface ONLY its gateways (hide the Viable rails).
+    const chagansOn = chagansConfigured();
+
     // Viable — actively probed; seed from the worker's shared snapshot first so
     // a cold web instance shows health without minting its own probe orders.
-    if (viableConfigured()) {
+    if (viableConfigured() && !chagansOn) {
       hydrateHealthCache(await readGatewayHealth());
       const viable = await viableChannelHealth(false);
       for (const c of viable) {
@@ -79,8 +84,8 @@ export async function GET() {
     // Chagans — no health endpoint; "available" when configured, downgraded by a
     // recent real failure. Demote its primary when Viable is present so exactly
     // one overall primary remains.
-    if (chagansConfigured()) {
-      const viablePresent = viableConfigured();
+    if (chagansOn) {
+      const viablePresent = channels.length > 0;
       for (const c of chagansChannelHealth()) {
         channels.push({
           id: `chagans:${c.id}`,

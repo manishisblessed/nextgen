@@ -14,6 +14,7 @@ import {
   FileDown,
   CheckCircle2,
   Ban,
+  ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
@@ -85,7 +86,7 @@ type PgChannel = {
 
 const PROVIDER_LABELS: Record<string, string> = {
   VIABLE_PG: "Viable",
-  CHAGANS_PG: "Chagans",
+  CHAGANS_PG: "Chagan",
 };
 
 export default function WalletPage() {
@@ -94,8 +95,6 @@ export default function WalletPage() {
   const [fetching, setFetching] = useState(true);
   const [mode, setMode] = useState<"add" | "withdraw">("add");
   const [amount, setAmount] = useState("");
-  const [payVia, setPayVia] = useState<"page" | "vpa">("page");
-  const [vpa, setVpa] = useState("");
   const [channels, setChannels] = useState<PgChannel[]>([]);
   const [channel, setChannel] = useState<string>("");
   const [channelsLoading, setChannelsLoading] = useState(false);
@@ -253,7 +252,6 @@ export default function WalletPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: amt,
-          ...(payVia === "vpa" && vpa ? { vpa } : {}),
           ...(channel ? { channel } : {}),
           idempotencyKey: generateRefId("TOPREQ"),
         }),
@@ -519,47 +517,14 @@ export default function WalletPage() {
                 </div>
               )}
 
-              <div className="sm:col-span-2">
-                <Label>Payment method</Label>
-                <div className="mt-1 grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      { id: "page", label: "Payment page (UPI / cards)" },
-                      { id: "vpa", label: "UPI collect to my VPA" },
-                    ] as const
-                  ).map((m) => (
-                    <button
-                      type="button"
-                      key={m.id}
-                      onClick={() => setPayVia(m.id)}
-                      className={`rounded-xl border-2 px-3 py-2 text-xs font-semibold transition ${
-                        payVia === m.id
-                          ? "border-brand-500 bg-brand-50 text-brand-700"
-                          : "border-ink-100 bg-white text-ink-700 hover:border-ink-200"
-                      }`}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-ink-100 bg-ink-50/60 px-3 py-2.5 text-[11px] text-ink-500">
+                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-500" />
+                <span>
+                  You&apos;ll be taken to the secure payment page to pay via UPI,
+                  cards or net banking. Your wallet is credited automatically
+                  once the payment is confirmed.
+                </span>
               </div>
-
-              {payVia === "vpa" && (
-                <div className="sm:col-span-2">
-                  <Label htmlFor="vpa">Your UPI ID</Label>
-                  <Input
-                    id="vpa"
-                    required
-                    placeholder="name@bank"
-                    value={vpa}
-                    onChange={(e) => setVpa(e.target.value.trim())}
-                  />
-                  <p className="mt-1 text-[11px] text-ink-400">
-                    A collect request will be sent to this UPI ID — approve it
-                    in your UPI app.
-                  </p>
-                </div>
-              )}
 
               {error && (
                 <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">

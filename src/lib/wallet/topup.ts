@@ -139,7 +139,10 @@ export async function initiateTopup(input: {
     customerPhone: input.customerPhone,
     customerEmail: input.customerEmail,
     channel: selection.channel,
-    callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/wallet?topup=${refId}`,
+    // Public return page (no auth): payment gateways redirect back cross-site
+    // (often via POST), which would bounce /dashboard/wallet to the login wall.
+    // Crediting is webhook-driven, so the redirect only needs to land friendly.
+    callbackUrl: `${process.env.NEXT_PUBLIC_APP_URL}/pay/return?ref=${refId}`,
   });
 
   if (!r.ok) {

@@ -57,6 +57,13 @@ function chagansHeaders(): Record<string, string> {
   };
 }
 
+/** Normalise a phone to the bare 10-digit form Chagans' hosted page expects
+ *  (strips "+91"/country code and any non-digits; keeps the last 10). */
+export function mobile10(phone?: string | null): string {
+  const digits = (phone || "").replace(/\D/g, "");
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
 /** True when all three Chagans credentials are present. */
 export function chagansConfigured(): boolean {
   return Boolean(
@@ -247,7 +254,10 @@ export const chagansUpi: UpiProvider = {
       mode: gw.mode,
       webhook: webhookUrl,
       name: input.customerName || "NextGenPay Customer",
-      mobile: input.customerPhone,
+      // Chagans' hosted page validates a BARE 10-digit mobile — a "+91"/country
+      // prefix trips "Please enter a valid 10-digit mobile number". Send the
+      // last 10 digits only.
+      mobile: mobile10(input.customerPhone),
       email: input.customerEmail || "noreply@nextgenpay.space",
     };
 
@@ -290,8 +300,14 @@ export const chagansUpi: UpiProvider = {
 // ---------------------------------------------------------------------------
 
 export type ChagansWebhookParse = {
+  /** OUR merchant txnId (= refId), only if Chagans echoes it (it currently does
+   *  NOT — match on `orderId` instead). */
   txnId?: string;
+  /** Chagans' order id (CPG_…) — echoed from create; we stored it as
+   *  `partnerTxnId`, so this is the reliable key to our Transaction. */
   orderId?: string;
+  /** Chagans' own numeric transaction id (e.g. "6683346000") — NOT our ref. */
+  transactionId?: string;
   status: "PAID" | "FAILED" | "EXPIRED" | "PENDING" | "UNKNOWN";
   amount?: number;
   reference?: string;
@@ -322,18 +338,8 @@ function firstNumber(obj: Record<string, unknown>, keys: string[]): number | und
  */
 export function mapChagansStatus(raw: string | undefined, success?: boolean, code?: number): ChagansWebhookParse["status"] {
   const s = (raw || "").trim().toLowerCase();
-  if (
-    s === "success" ||
-    s === "paid" ||
-    s === "captured" ||
-    s === "completed" ||
-    s === "complete" ||
-    s === "settled" ||
-    s === "approved" ||
-    s === "successful"
-  ) {
-    return "PAID";
-  }
+  // Failure/expiry FIRST so an ambiguous phrase (e.g. "transaction failed")
+  // can never be misread as success by the substring check below.
   if (s.includes("expire") || s.includes("timeout")) return "EXPIRED";
   if (
     s === "failed" ||
@@ -346,6 +352,21 @@ export function mapChagansStatus(raw: string | undefined, success?: boolean, cod
     s.includes("declin")
   ) {
     return "FAILED";
+  }
+  // Explicit success tokens AND phrases like "Transaction Success" (the real
+  // Chagans `event` value). `result:"SUCCESS"` lands here too.
+  if (
+    s === "success" ||
+    s === "paid" ||
+    s === "captured" ||
+    s === "completed" ||
+    s === "complete" ||
+    s === "settled" ||
+    s === "approved" ||
+    s === "successful" ||
+    s.includes("success")
+  ) {
+    return "PAID";
   }
   // No usable textual status — fall back to explicit success flag + code, but
   // ONLY credit on an unambiguous success:true (or code 200 with no failure text).
@@ -362,22 +383,30 @@ export function parseChagansWebhook(payload: unknown): ChagansWebhookParse {
   const root = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const data = (root.data && typeof root.data === "object" ? (root.data as Record<string, unknown>) : root) as Record<string, unknown>;
 
-  const txnId = firstString(data, ["txnId", "txn_id", "transactionId", "merchantTxnId", "refId", "reference_id"]) ||
-    firstString(root, ["txnId", "txn_id", "transactionId", "merchantTxnId", "refId", "reference_id"]);
+  // OUR merchant ref — ONLY if Chagans echoes it. Note: `transactionId` is
+  // Chagans' OWN id and must NOT be treated as our ref (it broke matching).
+  const txnId = firstString(data, ["txnId", "txn_id", "merchantTxnId", "merchant_txn_id", "refId", "reference_id"]) ||
+    firstString(root, ["txnId", "txn_id", "merchantTxnId", "merchant_txn_id", "refId", "reference_id"]);
   const orderId = firstString(data, ["orderId", "order_id", "pgOrderId", "chagansOrderId"]) ||
     firstString(root, ["orderId", "order_id"]);
-  const rawStatus = firstString(data, ["status", "paymentStatus", "txnStatus", "state", "paymentState"]) ||
-    firstString(root, ["status", "paymentStatus", "txnStatus", "state"]);
-  const amount = firstNumber(data, ["amount", "amt", "paidAmount", "txnAmount"]) ??
-    firstNumber(root, ["amount", "amt"]);
+  const transactionId = firstString(data, ["transactionId", "transaction_id", "pgTxnId"]) ||
+    firstString(root, ["transactionId", "transaction_id"]);
+  // Chagans carries the outcome in `result` ("SUCCESS") and/or `event`
+  // ("Transaction Success") — NOT `status`. Check those first.
+  const rawStatus = firstString(data, ["result", "status", "paymentStatus", "txnStatus", "state", "paymentState", "event"]) ||
+    firstString(root, ["result", "status", "paymentStatus", "txnStatus", "state", "paymentState", "event"]);
+  const amount = firstNumber(data, ["amount", "amt", "paidAmount", "txnAmount", "originalAmount"]) ??
+    firstNumber(root, ["amount", "amt", "paidAmount", "txnAmount", "originalAmount"]);
   const reference = firstString(data, ["utr", "rrn", "bankRef", "bankRRN", "referenceNumber", "upiTxnId"]) ||
-    firstString(root, ["utr", "rrn"]);
+    firstString(root, ["utr", "rrn"]) ||
+    transactionId;
   const success = typeof root.success === "boolean" ? (root.success as boolean) : typeof data.success === "boolean" ? (data.success as boolean) : undefined;
   const code = firstNumber(root, ["code"]) ?? firstNumber(data, ["code"]);
 
   return {
     txnId,
     orderId,
+    transactionId,
     status: mapChagansStatus(rawStatus, success, code),
     amount,
     reference,

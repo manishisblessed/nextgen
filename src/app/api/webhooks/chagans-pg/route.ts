@@ -48,25 +48,37 @@ export async function POST(req: Request) {
   }
 
   const parsed = parseChagansWebhook(payload);
-  const referenceId = parsed.txnId;
 
-  // Log the FULL raw payload once so the exact (undocumented) schema can be
-  // confirmed/finalised after the first live webhook. Truncated to stay sane.
+  // Resolve OUR Transaction. Chagans does NOT echo our merchant txnId in the
+  // webhook — it returns its own `orderId` (CPG_…), which we stored as
+  // `partnerTxnId` at create time. So the reliable key is partnerTxnId ===
+  // orderId. (If a future payload ever echoes our TOPUP… ref, honour it.)
+  let referenceId: string | null =
+    parsed.txnId && parsed.txnId.startsWith("TOPUP") ? parsed.txnId : null;
+  if (!referenceId && parsed.orderId) {
+    const match = await prisma.transaction.findFirst({
+      where: { partnerTxnId: parsed.orderId, service: "WALLET_TOPUP" },
+      select: { refId: true },
+    });
+    referenceId = match?.refId ?? null;
+  }
+
+  // Log the FULL raw payload so the exact (undocumented) schema stays auditable.
   logger.info({
     action: "webhook.chagans_pg_received",
     ip,
     refId: referenceId ?? null,
     orderId: parsed.orderId ?? null,
+    transactionId: parsed.transactionId ?? null,
     status: parsed.status,
     rawStatus: parsed.rawStatus ?? null,
     amount: parsed.amount ?? null,
     raw: rawBody.slice(0, 2000),
   });
 
-  // Chagans is wired for wallet top-ups (TOPUP…). Acknowledge anything else so
-  // Chagan stops retrying payloads we cannot act on.
-  const isTopup = !!referenceId && referenceId.startsWith("TOPUP");
-  if (!isTopup) {
+  // Not one of our top-ups (or an init/no-order ping) — acknowledge so Chagan
+  // stops retrying a payload we cannot act on.
+  if (!referenceId) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
