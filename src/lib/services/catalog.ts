@@ -163,6 +163,23 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     sortOrder: 20,
   },
   {
+    // Pricing/scope ANCHOR for Chagans PG wallet top-ups (not a user-assignable
+    // service — CONFIG, like the BBPS legacy row). Its presence makes
+    // "CHAGANS_PG" selectable as a provider in the PG rate-card manager and the
+    // scheme MDR-slab Provider dropdown, so admin can configure the vendor rate
+    // + scheme slab a Chagans top-up is priced against. `provider` MUST equal the
+    // Chagans UpiProvider name ("CHAGANS_PG"), which is the MDR scopeKey. Higher
+    // sortOrder than BULKPE so BULKPE stays the default PG rail scope.
+    key: "pg_chagans",
+    name: "Chagan PG",
+    type: "CONFIG",
+    kind: "PG",
+    provider: "CHAGANS_PG",
+    enabled: true,
+    note: "Pricing/scope anchor for Chagan (Comet/Star) wallet top-ups. Configure its PG vendor rate here and a matching PG MDR slab (company = CHAGANS_PG) on each scheme — a retailer cannot fund via PG until both exist.",
+    sortOrder: 21,
+  },
+  {
     key: SERVICE_KEYS.POS,
     name: "POS Terminals",
     type: "SERVICE",
