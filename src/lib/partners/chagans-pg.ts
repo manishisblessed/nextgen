@@ -312,7 +312,31 @@ export type ChagansWebhookParse = {
   amount?: number;
   reference?: string;
   rawStatus?: string;
+  /**
+   * Normalised payment instrument (UPI | CARD | NETBANKING | WALLET), mapped
+   * from Chagans' `paymentMethod` (e.g. "credit_card" → CARD). Drives the MDR
+   * slab/rail-rate selection at settlement. `undefined` when Chagans sends no
+   * usable method — the settle layer then defaults to UPI.
+   */
+  paymentMode?: string;
 };
+
+/**
+ * Map Chagans' `paymentMethod` token to our canonical MDR payment mode. Returns
+ * `undefined` for an absent/unknown method so the settle layer can fall back to
+ * its default (UPI). Exported for tests.
+ */
+export function mapChagansPaymentMode(method?: string | null): string | undefined {
+  const m = (method || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!m) return undefined;
+  if (m.includes("upi")) return "UPI";
+  if (m.includes("netbank") || m.includes("net_bank")) return "NETBANKING";
+  if (m.includes("wallet")) return "WALLET";
+  // credit_card / debit_card / card → CARD (kept last so a more specific
+  // instrument above wins first).
+  if (m.includes("card")) return "CARD";
+  return undefined;
+}
 
 function firstString(obj: Record<string, unknown>, keys: string[]): string | undefined {
   for (const k of keys) {
@@ -402,6 +426,9 @@ export function parseChagansWebhook(payload: unknown): ChagansWebhookParse {
     transactionId;
   const success = typeof root.success === "boolean" ? (root.success as boolean) : typeof data.success === "boolean" ? (data.success as boolean) : undefined;
   const code = firstNumber(root, ["code"]) ?? firstNumber(data, ["code"]);
+  // Payment instrument — Chagans sends `paymentMethod` ("credit_card", "upi"…).
+  const rawMethod = firstString(data, ["paymentMethod", "payment_method", "paymentMode", "payment_mode", "method", "instrument"]) ||
+    firstString(root, ["paymentMethod", "payment_method", "paymentMode", "payment_mode", "method", "instrument"]);
 
   return {
     txnId,
@@ -411,6 +438,7 @@ export function parseChagansWebhook(payload: unknown): ChagansWebhookParse {
     amount,
     reference,
     rawStatus,
+    paymentMode: mapChagansPaymentMode(rawMethod),
   };
 }
 

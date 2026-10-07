@@ -106,6 +106,7 @@ export async function POST(req: Request) {
         status: "PAID",
         amount: parsed.amount,
         reference: parsed.reference,
+        paymentMode: parsed.paymentMode,
       });
       return NextResponse.json({ ok: true, matched: true, status: result.status });
     }

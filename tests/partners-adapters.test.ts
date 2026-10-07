@@ -14,6 +14,7 @@ import {
   resolveChagansGateway,
   chagansGateways,
   mobile10,
+  mapChagansPaymentMode,
 } from "@/lib/partners/chagans-pg";
 import { isAmountMismatch } from "@/lib/wallet/guards";
 import {
@@ -454,6 +455,8 @@ describe("Chagans PG — defensive webhook parse", () => {
     expect(p.txnId).toBeUndefined();
     // rrn is the bank reference.
     expect(p.reference).toBe("628016031809");
+    // paymentMethod "credit_card" → CARD (drives the MDR slab at settlement).
+    expect(p.paymentMode).toBe("CARD");
   });
 
   it("falls back to transactionId as reference when no rrn/utr present", () => {
@@ -465,6 +468,29 @@ describe("Chagans PG — defensive webhook parse", () => {
     expect(parseChagansWebhook(null).status).toBe("UNKNOWN");
     expect(parseChagansWebhook("nope").status).toBe("UNKNOWN");
     expect(parseChagansWebhook({ foo: "bar" }).txnId).toBeUndefined();
+  });
+});
+
+describe("Chagans PG — payment-method mapping", () => {
+  it("maps card tokens to CARD", () => {
+    expect(mapChagansPaymentMode("credit_card")).toBe("CARD");
+    expect(mapChagansPaymentMode("debit_card")).toBe("CARD");
+    expect(mapChagansPaymentMode("card")).toBe("CARD");
+    expect(mapChagansPaymentMode("Credit Card")).toBe("CARD");
+  });
+  it("maps upi / netbanking / wallet", () => {
+    expect(mapChagansPaymentMode("upi")).toBe("UPI");
+    expect(mapChagansPaymentMode("UPI")).toBe("UPI");
+    expect(mapChagansPaymentMode("netbanking")).toBe("NETBANKING");
+    expect(mapChagansPaymentMode("net_banking")).toBe("NETBANKING");
+    expect(mapChagansPaymentMode("net banking")).toBe("NETBANKING");
+    expect(mapChagansPaymentMode("wallet")).toBe("WALLET");
+  });
+  it("returns undefined for absent / unknown methods (settle defaults to UPI)", () => {
+    expect(mapChagansPaymentMode("")).toBeUndefined();
+    expect(mapChagansPaymentMode(null)).toBeUndefined();
+    expect(mapChagansPaymentMode(undefined)).toBeUndefined();
+    expect(mapChagansPaymentMode("crypto")).toBeUndefined();
   });
 });
 

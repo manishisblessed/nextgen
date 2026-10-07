@@ -23,8 +23,21 @@ import { sendOpsAlert } from "../monitoring/alerts";
 import { logger } from "../logger";
 import { isAmountMismatch } from "./guards";
 import { assertPushWithinCap, WalletOpError } from "./operations";
+import { getEffectiveMdr } from "../mdr/resolver";
+import { handleTopupCapture } from "../settlement/pg";
 
 export type TopupState = "INITIATED" | "PROCESSING" | "SUCCESS" | "FAILED" | "HOLD";
+
+/**
+ * Providers whose wallet top-ups are priced + settled through the scheme-driven
+ * PG acquiring pipeline (net-of-MDR credit + upline commission), exactly like a
+ * POS/PG settlement. For these, a top-up is BLOCKED at initiation when the
+ * retailer's scheme cannot price a PG slab, and settled net-of-MDR (never a full
+ * credit) at the webhook. The provider's `name` doubles as the MDR scopeKey
+ * (its PG MdrSlab `company` / RailMdrRate `scopeKey`). Non-listed providers keep
+ * the legacy full-credit top-up behaviour.
+ */
+const PG_MDR_PROVIDERS: ReadonlySet<string> = new Set(["CHAGANS_PG"]);
 
 /**
  * refId token alphabet — UPPERCASE A–Z + 0–9 ONLY. This is deliberately NOT the
@@ -40,6 +53,12 @@ export type VerifiedPayin = {
   status: UpiStatusOutput["status"];
   amount?: number;
   reference?: string;
+  /**
+   * Instrument the customer paid with (UPI | CARD | NETBANKING | WALLET), from
+   * the webhook. Threaded into the PG MDR pricing at settlement; defaults to UPI
+   * when the webhook sends no usable method.
+   */
+  paymentMode?: string;
 };
 
 export class TopupError extends Error {
@@ -104,6 +123,27 @@ export async function initiateTopup(input: {
   } catch (e) {
     if (e instanceof WalletOpError) throw new TopupError(e.message, 400, e.code);
     throw e;
+  }
+
+  // HARD RULE (money-safety): a PG-MDR top-up is priced exactly like a PG
+  // acquiring settlement. If the retailer's assigned scheme cannot price a PG
+  // slab for this provider (scopeKey = provider name), the top-up is NOT
+  // fundable via the gateway — block it HERE, before any order is created, so we
+  // never take money we cannot price. The exact payment mode is unknown at init
+  // (the customer picks UPI/card on the hosted page), so this is a mode-agnostic
+  // priceability probe; the precise mode is applied when the webhook settles.
+  if (PG_MDR_PROVIDERS.has(upi.name)) {
+    const priced = await getEffectiveMdr(input.userId, "PG", chargeAmount, {
+      company: upi.name,
+      settlementType: "T0",
+    });
+    if (priced.source === "NONE") {
+      throw new TopupError(
+        "Payment Gateway top-up isn't enabled for your account yet. Contact your admin.",
+        403,
+        "PG_NO_SCHEME"
+      );
+    }
   }
 
   const refId = `TOPUP${refToken()}`;
@@ -263,6 +303,110 @@ export async function settleTopup(
         });
       }
       return { refId, status: "HOLD" };
+    }
+
+    // ── PG-MDR providers (Chagans): settle NET-of-MDR, priced like a PG
+    // acquiring capture (company margin + upline commission), credited INSTANT.
+    // This REPLACES the legacy full-amount TOPUP credit for these providers — the
+    // single money movement is the net credit inside handleTopupCapture.
+    if (PG_MDR_PROVIDERS.has(txn.partner ?? "")) {
+      const capture = await handleTopupCapture({
+        transactionRef: txn.refId,
+        orderId: txn.partnerTxnId,
+        userId: txn.userId,
+        grossAmount: Number(txn.amount),
+        paymentMode: webhookVerified?.paymentMode,
+        scopeKey: txn.partner!,
+        capturedAt: new Date(),
+      });
+
+      if (capture.status === "NO_SCHEME") {
+        // HARD RULE: unpriced money is NEVER credited — HOLD + alert ops.
+        const held = await prisma.transaction.updateMany({
+          where: { id: txn.id, status: { in: ["INITIATED", "PROCESSING"] } },
+          data: {
+            status: "HOLD",
+            errorCode: "PG_NO_SCHEME",
+            errorMessage: `No PG scheme slab to price this top-up (₹${txn.amount})`,
+          },
+        });
+        if (held.count > 0) {
+          await prisma.auditLog.create({
+            data: {
+              userId: txn.userId,
+              action: "wallet.topup_held_no_scheme",
+              entity: "Transaction",
+              entityId: txn.id,
+              meta: { refId, amount: txn.amount.toString(), provider: txn.partner },
+            },
+          });
+          await sendOpsAlert({
+            title: "Wallet top-up not priceable — HELD (not credited)",
+            severity: "critical",
+            details: { refId, amount: txn.amount.toString(), provider: txn.partner ?? "" },
+            href: "/dashboard/admin/audit",
+          });
+        }
+        return { refId, status: "HOLD" };
+      }
+
+      if (capture.status === "SETTLED" || capture.status === "DUPLICATE") {
+        const utr = webhookVerified?.reference ?? null;
+        // The net credit already committed inside handleTopupCapture; now flip
+        // the initiating TOPUP record to SUCCESS (idempotent; no second credit).
+        await prisma.transaction.updateMany({
+          where: { id: txn.id, status: { in: ["INITIATED", "PROCESSING", "HOLD"] } },
+          data: {
+            status: "SUCCESS",
+            response: {
+              utr,
+              verifiedAmount: verified ?? null,
+              net: capture.netAmount ?? null,
+              mdr: capture.mdrAmount ?? null,
+              settledAt: new Date().toISOString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
+        await prisma.auditLog.create({
+          data: {
+            userId: txn.userId,
+            action: "wallet.topup_credited",
+            entity: "Transaction",
+            entityId: txn.id,
+            meta: {
+              refId,
+              gross: txn.amount.toString(),
+              net: capture.netAmount ?? null,
+              mdr: capture.mdrAmount ?? null,
+              provider: txn.partner,
+              utr,
+            },
+          },
+        });
+        logger.info({
+          action: "wallet.topup_settled",
+          refId,
+          topupId: txn.partnerTxnId,
+          amount: Number(txn.amount),
+          net: capture.netAmount ?? null,
+          mdr: capture.mdrAmount ?? null,
+          utr,
+          provider: txn.partner,
+        });
+        void emitWebhookEvent(txn.userId, "topup.credited", {
+          refId,
+          amount: capture.netAmount ?? Number(txn.amount),
+          gross: Number(txn.amount),
+          provider: txn.partner,
+          utr,
+        });
+        return { refId, status: "SUCCESS" };
+      }
+
+      // QUEUED (parked — credit failed transiently) / SKIPPED — leave the TOPUP
+      // PROCESSING; the instant safety-net cron finishes a parked credit and
+      // flips it to SUCCESS. Never credit the full amount here.
+      return { refId, status: "PROCESSING" };
     }
 
     const utr = r.data.reference ?? null;
