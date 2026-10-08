@@ -81,6 +81,15 @@ export type ChagansGateway = {
   /** Stable id used by the UI + persisted selection ("comet" | "star"). */
   id: "comet" | "star";
   label: string;
+  /**
+   * MDR scopeKey this gateway prices against — its OWN PG MdrSlab `company` +
+   * RailMdrRate `scopeKey`. Comet and Star settle on DIFFERENT acquiring legs
+   * (t1 next-day vs t0 same-day) at different vendor costs, so each carries a
+   * distinct scope and is priced + rate-carded separately in admin. The
+   * transaction `partner` stays "CHAGANS_PG" (webhook routing); only the
+   * PRICING scope differs per gateway.
+   */
+  scopeKey: "CHAGANS_COMET" | "CHAGANS_STAR";
   /** pgType sent to Chagans. */
   pgType: string;
   /** Settlement mode sent to Chagans. */
@@ -112,6 +121,7 @@ export function chagansGateways(): ChagansGateway[] {
     {
       id: "comet",
       label: "Comet PG",
+      scopeKey: "CHAGANS_COMET",
       pgType: "chagans3",
       mode: "t1",
       maxAmount: num(process.env.CHAGAN_COMET_MAX, 100000),
@@ -121,6 +131,7 @@ export function chagansGateways(): ChagansGateway[] {
     {
       id: "star",
       label: "Star PG",
+      scopeKey: "CHAGANS_STAR",
       pgType: "chagans2",
       mode: "t0",
       maxAmount: num(process.env.CHAGAN_STAR_MAX, 40000),
@@ -137,6 +148,19 @@ export function resolveChagansGateway(id?: string): ChagansGateway {
   const hit = id ? gws.find((g) => g.id === id || g.pgType === id) : undefined;
   return hit || gws.find((g) => g.primary) || gws[0];
 }
+
+/**
+ * The PG MDR scopeKey for a Chagans gateway selection ("comet" → CHAGANS_COMET,
+ * "star" → CHAGANS_STAR). This is the key a top-up is priced against (scheme PG
+ * slab `company` + vendor RailMdrRate `scopeKey`), so Comet and Star apply
+ * SEPARATE rates. Unknown/missing ids fall back to the primary gateway's scope.
+ */
+export function chagansScopeForGateway(id?: string): string {
+  return resolveChagansGateway(id).scopeKey;
+}
+
+/** The full set of Chagans PG pricing scopes (one per gateway). */
+export const CHAGANS_PG_SCOPES: readonly string[] = ["CHAGANS_COMET", "CHAGANS_STAR"];
 
 // ---------------------------------------------------------------------------
 // Unique/random amount — EVERY Chagan charge is made unique to the paise so two

@@ -163,21 +163,34 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     sortOrder: 20,
   },
   {
-    // Pricing/scope ANCHOR for Chagans PG wallet top-ups (not a user-assignable
-    // service — CONFIG, like the BBPS legacy row). Its presence makes
-    // "CHAGANS_PG" selectable as a provider in the PG rate-card manager and the
-    // scheme MDR-slab Provider dropdown, so admin can configure the vendor rate
-    // + scheme slab a Chagans top-up is priced against. `provider` MUST equal the
-    // Chagans UpiProvider name ("CHAGANS_PG"), which is the MDR scopeKey. Higher
-    // sortOrder than BULKPE so BULKPE stays the default PG rail scope.
+    // Pricing/scope ANCHOR for the Chagans COMET gateway (t1 next-day leg).
+    // CONFIG, not a user-assignable service. Its presence makes "CHAGANS_COMET"
+    // selectable as a provider in the PG rate-card manager + the scheme MDR-slab
+    // dropdown. `provider` is the MDR scopeKey Comet top-ups price against
+    // (distinct from Star, so each gateway carries its OWN vendor rate + scheme
+    // slab). NOTE: this row previously carried provider "CHAGANS_PG"; re-seeding
+    // repoints it to CHAGANS_COMET (one clean card, no orphan).
     key: "pg_chagans",
-    name: "Chagan PG",
+    name: "Chagan Comet",
     type: "CONFIG",
     kind: "PG",
-    provider: "CHAGANS_PG",
+    provider: "CHAGANS_COMET",
     enabled: true,
-    note: "Pricing/scope anchor for Chagan (Comet/Star) wallet top-ups. Configure its PG vendor rate here and a matching PG MDR slab (company = CHAGANS_PG) on each scheme — a retailer cannot fund via PG until both exist.",
+    note: "Pricing/scope anchor for the Chagan Comet gateway (next-day/t1). Configure its PG vendor rate here and a matching PG MDR slab (company = CHAGANS_COMET) on each scheme — a retailer cannot fund via Comet until both exist.",
     sortOrder: 21,
+  },
+  {
+    // Pricing/scope ANCHOR for the Chagans STAR gateway (t0 same-day leg).
+    // Separate scope from Comet so Star applies its OWN vendor rate + scheme
+    // slab. `provider` = the MDR scopeKey Star top-ups price against.
+    key: "pg_chagans_star",
+    name: "Chagan Star",
+    type: "CONFIG",
+    kind: "PG",
+    provider: "CHAGANS_STAR",
+    enabled: true,
+    note: "Pricing/scope anchor for the Chagan Star gateway (same-day/t0). Configure its PG vendor rate here and a matching PG MDR slab (company = CHAGANS_STAR) on each scheme — a retailer cannot fund via Star until both exist.",
+    sortOrder: 22,
   },
   {
     key: SERVICE_KEYS.POS,

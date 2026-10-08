@@ -7,7 +7,7 @@ import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { toErrorResponse } from "@/lib/security/apiErrors";
 import { resolveUpiSelection } from "@/lib/partners";
 import { priceSchemeSettlement } from "@/lib/settlement/engine";
-import { isPgMdrProvider } from "@/lib/wallet/topup";
+import { isPgMdrProvider, pgMdrScopeKey } from "@/lib/wallet/topup";
 import { round, toNumber } from "@/lib/money";
 
 /**
@@ -67,7 +67,8 @@ export async function GET(req: Request) {
       serviceKind: "PG",
       grossAmount: gross,
       settlementType: "T0",
-      scopeKey: selection.provider.name,
+      // Price the SELECTED gateway's scope (Comet/Star apply separate rates).
+      scopeKey: pgMdrScopeKey(selection.provider.name, selection.channel),
     });
 
     if (!price) {

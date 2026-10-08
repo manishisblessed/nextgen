@@ -16,6 +16,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { creditWallet } from "../ledger";
 import { assertRealMoneyProvider, getUpiProviderByName, resolveUpiSelection } from "../partners";
+// Imported from the submodule (not the partners barrel) so unit tests that mock
+// "@/lib/partners" still get the real gateway→scope map.
+import { chagansScopeForGateway } from "../partners/chagans-pg";
 import type { UpiStatusOutput } from "../partners/types";
 import { round } from "../money";
 import { emitWebhookEvent } from "../platform/webhooks";
@@ -44,6 +47,31 @@ const PG_MDR_PROVIDERS: ReadonlySet<string> = new Set(["CHAGANS_PG"]);
  *  charge and must have a priceable PG scheme slab. */
 export function isPgMdrProvider(name: string | null | undefined): boolean {
   return !!name && PG_MDR_PROVIDERS.has(name);
+}
+
+/**
+ * The MDR scopeKey a PG-MDR top-up is priced against. Chagans runs TWO gateways
+ * (Comet / Star) on one provider name but at different acquiring costs, so each
+ * gateway prices against its OWN scope — resolved from the selected gateway id.
+ * Non-Chagans PG-MDR providers price against the bare provider name.
+ */
+export function pgMdrScopeKey(providerName: string, gatewayId?: string | null): string {
+  if (providerName === "CHAGANS_PG") return chagansScopeForGateway(gatewayId ?? undefined);
+  return providerName;
+}
+
+/** Recover the pricing scope for a persisted top-up at settle time. Prefers the
+ *  `pgScope` we stored at initiation; falls back to the stored gateway id, then
+ *  the bare provider — so the settle scope always matches what init priced. */
+function pgScopeForTxn(txn: { partner: string | null; request: Prisma.JsonValue }): string {
+  const partner = txn.partner ?? "";
+  if (!PG_MDR_PROVIDERS.has(partner)) return partner;
+  const req =
+    txn.request && typeof txn.request === "object" && !Array.isArray(txn.request)
+      ? (txn.request as Record<string, unknown>)
+      : {};
+  if (typeof req.pgScope === "string" && req.pgScope) return req.pgScope;
+  return pgMdrScopeKey(partner, typeof req.gateway === "string" ? req.gateway : undefined);
 }
 
 /**
@@ -134,14 +162,17 @@ export async function initiateTopup(input: {
 
   // HARD RULE (money-safety): a PG-MDR top-up is priced exactly like a PG
   // acquiring settlement. If the retailer's assigned scheme cannot price a PG
-  // slab for this provider (scopeKey = provider name), the top-up is NOT
-  // fundable via the gateway — block it HERE, before any order is created, so we
-  // never take money we cannot price. The exact payment mode is unknown at init
-  // (the customer picks UPI/card on the hosted page), so this is a mode-agnostic
-  // priceability probe; the precise mode is applied when the webhook settles.
+  // slab for THIS gateway's scope, the top-up is NOT fundable via the gateway —
+  // block it HERE, before any order is created, so we never take money we
+  // cannot price. Comet and Star price against separate scopes, so a retailer
+  // priced on one gateway is correctly blocked on the other until its slab
+  // exists. The exact payment mode is unknown at init (the customer picks
+  // UPI/card on the hosted page), so this is a mode-agnostic priceability probe;
+  // the precise mode is applied when the webhook settles.
+  const pgScope = pgMdrScopeKey(upi.name, selection.channel);
   if (PG_MDR_PROVIDERS.has(upi.name)) {
     const priced = await getEffectiveMdr(input.userId, "PG", chargeAmount, {
-      company: upi.name,
+      company: pgScope,
       settlementType: "T0",
     });
     if (priced.source === "NONE") {
@@ -171,6 +202,9 @@ export async function initiateTopup(input: {
         note: input.note ?? null,
         channel: input.channel ?? null,
         gateway: selection.channel ?? null,
+        // The MDR pricing scope locked at initiation — the settle path reuses
+        // this EXACT scope so a Comet top-up never settles on Star's rate.
+        pgScope: PG_MDR_PROVIDERS.has(upi.name) ? pgScope : null,
       } as Prisma.InputJsonValue,
       ipAddress: input.ip,
     },
@@ -323,7 +357,8 @@ export async function settleTopup(
         userId: txn.userId,
         grossAmount: Number(txn.amount),
         paymentMode: webhookVerified?.paymentMode,
-        scopeKey: txn.partner!,
+        // Per-gateway scope locked at initiation (Comet vs Star price apart).
+        scopeKey: pgScopeForTxn(txn),
         capturedAt: new Date(),
       });
 

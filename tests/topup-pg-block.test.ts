@@ -82,6 +82,11 @@ describe("initiateTopup — PG-MDR block (HARD RULE)", () => {
     expect(r.orderId).toBe("CPG_TEST");
     expect(holder.collectCalls).toBe(1);
     expect(holder.db.transactions[0].status).toBe("PROCESSING");
+    // The per-gateway pricing scope is locked at initiation so settle reuses it
+    // (Comet → CHAGANS_COMET, kept distinct from Star).
+    expect(
+      (holder.db.transactions[0].request as { pgScope?: string }).pgScope
+    ).toBe("CHAGANS_COMET");
   });
 
   it("surfaces as a TopupError (so the API returns a clean 403)", async () => {

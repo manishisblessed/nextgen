@@ -12,6 +12,7 @@ import {
   isChagansWebhookIp,
   randomizeChagansAmount,
   resolveChagansGateway,
+  chagansScopeForGateway,
   chagansGateways,
   mobile10,
   mapChagansPaymentMode,
@@ -367,6 +368,17 @@ describe("Chagans PG — gateways & amount", () => {
     expect(resolveChagansGateway("chagans2").id).toBe("star");
     expect(resolveChagansGateway(undefined).id).toBe("comet");
     expect(resolveChagansGateway("nope").id).toBe("comet");
+  });
+
+  it("maps each gateway to its OWN MDR pricing scope (Comet vs Star apply separately)", () => {
+    expect(chagansScopeForGateway("comet")).toBe("CHAGANS_COMET");
+    expect(chagansScopeForGateway("star")).toBe("CHAGANS_STAR");
+    expect(chagansScopeForGateway("chagans2")).toBe("CHAGANS_STAR");
+    // Unknown/missing → primary gateway's scope (never an unpriced scope).
+    expect(chagansScopeForGateway(undefined)).toBe("CHAGANS_COMET");
+    expect(chagansScopeForGateway("nope")).toBe("CHAGANS_COMET");
+    // The two gateways never collide on scope.
+    expect(chagansScopeForGateway("comet")).not.toBe(chagansScopeForGateway("star"));
   });
 
   it("randomizes to a unique-to-paise amount that is never below the request", () => {
