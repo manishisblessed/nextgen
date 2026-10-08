@@ -17,7 +17,18 @@ const isDev = process.env.NODE_ENV !== "production";
  * Cloudflare Turnstile (CAPTCHA) is explicitly allowlisted for script/frame/
  * connect so it works when SECURITY_CAPTCHA_ENABLED is on.
  */
-function buildCsp(): string {
+/** The single public page a payment gateway may embed in its own iframe. */
+const FRAMEABLE_PATH = "/pay/return";
+
+function buildCsp(pathname: string): string {
+  // The public payment-return page is legitimately shown inside the Chagans
+  // payment gateway's iframe (Star renders it in-modal; Comet redirects top
+  // level). Allow ONLY that page to be framed by the gateway origin — every
+  // other document stays `frame-ancestors 'none'` (no clickjacking surface).
+  const frameAncestors =
+    pathname === FRAMEABLE_PATH
+      ? "frame-ancestors 'self' https://chagans.com https://*.chagans.com"
+      : "frame-ancestors 'none'";
   return [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com${isDev ? " 'unsafe-eval'" : ""}`,
@@ -26,7 +37,7 @@ function buildCsp(): string {
     "font-src 'self' data:",
     "connect-src 'self' https://challenges.cloudflare.com https://ip-api.com https://api.cloudinary.com https://*.amazonaws.com",
     "frame-src 'self' https://challenges.cloudflare.com",
-    "frame-ancestors 'none'",
+    frameAncestors,
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",
@@ -68,7 +79,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // ── 2. CSP header
-  const csp = buildCsp();
+  const csp = buildCsp(pathname);
 
   const requestHeaders = new Headers(req.headers);
 
@@ -125,6 +136,15 @@ export async function middleware(req: NextRequest) {
 
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.headers.set("content-security-policy", csp);
+
+  // X-Frame-Options mirrors the CSP `frame-ancestors` above (moved here from
+  // next.config so the per-path exception is possible). DENY every document
+  // except the public payment-return page, which the Chagans gateway frames —
+  // a stale blanket DENY in older browsers would otherwise show the gateway a
+  // "refused to connect" instead of the "Payment received" confirmation.
+  if (pathname !== FRAMEABLE_PATH) {
+    res.headers.set("X-Frame-Options", "DENY");
+  }
 
   // ── 4. Anti cache-deception / poisoning / replay.
   //       No cache (browser, nginx, CDN) may ever store authenticated HTML or

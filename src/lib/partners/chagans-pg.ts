@@ -39,7 +39,15 @@
 import type { PartnerResult, UpiCollectInput, UpiCollectOutput, UpiProvider, UpiStatusOutput } from "./types";
 
 const DEFAULT_BASE = "https://chagans.com";
-const DEFAULT_WEBHOOK_IPS = "103.160.160.129,34.126.212.125";
+// Chagans webhook source IPs (allow-list). Observed live:
+//   34.126.212.125  — Comet (chagans3) egress, delivers + credits fine.
+//   103.69.247.219  — a real Chagans webhook egress seen hitting our endpoint
+//                     (was 401-rejected because it wasn't listed). Added so a
+//                     Star (chagans2) webhook from this IP is accepted; confirm
+//                     the exact Star egress with Chagans and prune if needed.
+//   103.160.160.129 — Chagans-documented Star IP (kept for completeness).
+// Override per-env with CHAGAN_WEBHOOK_IPS when Chagans confirms the real set.
+const DEFAULT_WEBHOOK_IPS = "103.160.160.129,34.126.212.125,103.69.247.219";
 const DEFAULT_TIMEOUT_MS = Number(process.env.CHAGAN_TIMEOUT_MS ?? 15_000);
 
 function baseUrl(): string {

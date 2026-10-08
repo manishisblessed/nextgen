@@ -11,7 +11,10 @@ import { withSentryConfig } from "@sentry/nextjs";
 const isProd = process.env.NODE_ENV === "production";
 
 const securityHeaders = [
-  { key: "X-Frame-Options", value: "DENY" },
+  // X-Frame-Options is set PER-PATH in src/middleware.ts (DENY everywhere
+  // except the public /pay/return page, which the Chagans payment gateway
+  // legitimately embeds in an iframe). Keeping it here as a blanket DENY would
+  // override that per-path exception, so it lives in the middleware instead.
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // camera/microphone MUST be (self): KYC selfie + liveness video use getUserMedia.
