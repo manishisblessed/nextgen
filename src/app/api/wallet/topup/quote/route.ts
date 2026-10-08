@@ -69,6 +69,9 @@ export async function GET(req: Request) {
       settlementType: "T0",
       // Price the SELECTED gateway's scope (Comet/Star apply separate rates).
       scopeKey: pgMdrScopeKey(selection.provider.name, selection.channel),
+      // Instrument is unknown until the customer pays — price by scope so a
+      // mode-pinned slab still quotes (mirrors the enable check + settle).
+      anyPaymentMode: true,
     });
 
     if (!price) {

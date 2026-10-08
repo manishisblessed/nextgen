@@ -86,12 +86,19 @@ export async function priceSchemeSettlement(args: {
    * CompanyMdrFloor applies. Omit for a rail-wide floor check.
    */
   scopeKey?: string | null;
+  /**
+   * Price by scope, ignoring the payment instrument (PG wallet top-ups). The
+   * slab is matched on scope/amount alone so a mode-pinned slab still resolves
+   * regardless of how the customer funded the top-up.
+   */
+  anyPaymentMode?: boolean;
 }): Promise<SchemeSettlementPrice | null> {
   const gross = round(args.grossAmount);
   const paymentMode = args.paymentMode ?? "UPI";
 
   const mdr = await getEffectiveMdr(args.userId, args.serviceKind, gross, {
     paymentMode,
+    anyPaymentMode: args.anyPaymentMode === true,
     // Locked rails (PG/QR) pin the provider scope in the slab's `company`
     // dimension (see the MDR-slabs API — the modal's "Provider" value IS the
     // scopeKey). The resolver matches `company` exactly, so pass the active

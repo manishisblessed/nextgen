@@ -294,6 +294,9 @@ export async function handleTopupCapture(input: TopupCaptureInput): Promise<Topu
     paymentMode,
     settlementType: "T0",
     scopeKey: input.scopeKey,
+    // Top-ups price by scope (gateway), not by the funding instrument — so a
+    // mode-pinned scheme slab settles regardless of how the customer paid.
+    anyPaymentMode: true,
   });
   if (!price) return { status: "NO_SCHEME" };
 
@@ -439,6 +442,9 @@ async function settlePgEntry(
     paymentMode: entry.paymentMode ?? "UPI",
     settlementType,
     scopeKey: entry.provider,
+    // Top-up entries price by scope (gateway), not instrument — keep the
+    // reconcile/safety-net consistent with the webhook capture path.
+    anyPaymentMode: entry.transactionRef.startsWith("TOPUP"),
   });
   if (!price) return null; // no scheme rate / below floor / below acquirer cost — leave PENDING
 

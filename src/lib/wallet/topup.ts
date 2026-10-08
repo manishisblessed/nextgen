@@ -174,6 +174,9 @@ export async function initiateTopup(input: {
     const priced = await getEffectiveMdr(input.userId, "PG", chargeAmount, {
       company: pgScope,
       settlementType: "T0",
+      // Instrument is unknown at init (customer picks it on the hosted page), so
+      // price by scope — a mode-pinned PG slab must still count as "enabled".
+      anyPaymentMode: true,
     });
     if (priced.source === "NONE") {
       throw new TopupError(

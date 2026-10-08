@@ -690,12 +690,28 @@ function SchemeCard({
                 );
               })}
 
-              {/* POS MDR rates */}
-              {mdrSlabs && mdrSlabs.length > 0 && (
-                <div>
+              {/* MDR rates — grouped per rail so PG shows under its own
+                  "PG MDR" heading (not lumped under POS). */}
+              {mdrSlabs && mdrSlabs.length > 0 &&
+                (
+                  [
+                    ["POS", "POS"],
+                    ["PG", "PG"],
+                    ["QR", "QR"],
+                    ["UPI", "UPI"],
+                  ] as const
+                )
+                  .map(([kind, label]) => ({
+                    kind,
+                    label,
+                    slabs: mdrSlabs.filter((s) => s.serviceKind === kind),
+                  }))
+                  .filter((group) => group.slabs.length > 0)
+                  .map((group) => (
+                <div key={group.kind}>
                   <div className="mb-2 flex items-center gap-1.5">
                     <Store className="h-4 w-4 text-orange-600" />
-                    <h4 className="text-sm font-semibold text-orange-600">POS MDR ({mdrSlabs.length})</h4>
+                    <h4 className="text-sm font-semibold text-orange-600">{group.label} MDR ({group.slabs.length})</h4>
                   </div>
                   <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
                     <table className="w-full min-w-max text-sm">
@@ -719,7 +735,7 @@ function SchemeCard({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-ink-100 text-ink-800">
-                        {mdrSlabs.map((s) => {
+                        {group.slabs.map((s) => {
                           // Instant (T+0) settlement uses the dedicated T0 rate,
                           // falling back to the T+1 value when unset — mirroring
                           // the resolver (slabMdrValue / slabVendorValue) so the
@@ -789,7 +805,7 @@ function SchemeCard({
                     </table>
                   </div>
                 </div>
-              )}
+                  ))}
 
               {/* Assigned users */}
               {assignedUsers.length > 0 && (
