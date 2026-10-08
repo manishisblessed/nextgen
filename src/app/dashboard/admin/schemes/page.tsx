@@ -1419,6 +1419,13 @@ function MdrRateModal({
       setPaymentMode("UPI");
       setBrandType("RUPAY");
     }
+    // PG default: Any-mode. A PG wallet top-up's instrument is chosen by the
+    // customer on the hosted page (UPI/card/netbanking), so the enable check +
+    // quote probe mode-agnostically. A mode-pinned slab (e.g. CARD) would not
+    // match and the retailer would wrongly see "PG not enabled" — so pin Any.
+    if (serviceKind === "PG" && !isEdit) {
+      setPaymentMode("*");
+    }
   }, [serviceKind, isEdit]);
 
   // A locked rail can only be scoped to an entity that already has an approved
