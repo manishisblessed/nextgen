@@ -1518,10 +1518,13 @@ function MdrRateModal({
   const belowCost = (venT1Val > 0 || venT0Val > 0) && (belowCostT1 || belowCostT0);
   const rateUnit = (v: number) => (mdrType === "PERCENT" ? `${v.toFixed(2)}%` : `₹${v.toFixed(2)}`);
 
-  // POS/QR commission-pool model: the company keeps (Min MDR − Vendor) and the
-  // chain gets exactly (Service − Min MDR). Everything here is in human % units.
-  // QR mirrors POS end-to-end (Minimum MDR floor + commission pool + revenue).
-  const isPos = serviceKind === "POS" || serviceKind === "QR";
+  // Minimum-MDR commission-pool model (POS / QR / PG — every locked acquiring
+  // rail): the retailer's service charge floor is the brand/provider MINIMUM MDR
+  // (not the raw vendor cost). The company keeps (Min MDR − Vendor) and the
+  // chain earns out of the pool (Service − Min MDR). Everything here is human %.
+  // PG (Chagans Comet/Star) mirrors POS end-to-end, so the scheme modal shows
+  // the minimum cost — the same way POS does — instead of the acquirer vendor.
+  const isPos = serviceKind === "POS" || serviceKind === "QR" || serviceKind === "PG";
   const POOL_EPS = 1e-6;
   const minT1 = posLock.minMdr;
   const minT0 = posLock.minMdrT0 > 0 ? posLock.minMdrT0 : minT1;
@@ -1920,7 +1923,7 @@ function MdrRateModal({
               Commission paid up the chain per transaction — DIST → distributor, M.DIST → master distributor,
               S.DIST → super distributor. Paid out of the Revenue Wallet, net of 2% TDS.{" "}
               {isPos
-                ? "For POS, each leg may allocate UP TO its commission pool (Service − Minimum MDR); anything left unallocated is kept by the company on top of Minimum MDR − Vendor. Set T+0 values explicitly (they don't fall back to T+1)."
+                ? "Each leg may allocate UP TO its commission pool (Service − Minimum MDR); anything left unallocated is kept by the company on top of Minimum MDR − Vendor. Set T+0 values explicitly (they don't fall back to T+1)."
                 : "Total must not exceed the company margin (service − vendor). The T+0 row falls back to the matching T+1 value when left 0."}{" "}
               The transacting retailer earns no commission.
             </p>
