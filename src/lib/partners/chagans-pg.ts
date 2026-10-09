@@ -37,17 +37,17 @@
  * (the returned `link`); we only ever see an orderId, an amount and a status.
  */
 import type { PartnerResult, UpiCollectInput, UpiCollectOutput, UpiProvider, UpiStatusOutput } from "./types";
+import { logger } from "../logger";
 
 const DEFAULT_BASE = "https://chagans.com";
-// Chagans webhook source IPs (allow-list). Observed live:
-//   34.126.212.125  — Comet (chagans3) egress, delivers + credits fine.
-//   103.69.247.219  — a real Chagans webhook egress seen hitting our endpoint
-//                     (was 401-rejected because it wasn't listed). Added so a
-//                     Star (chagans2) webhook from this IP is accepted; confirm
-//                     the exact Star egress with Chagans and prune if needed.
-//   103.160.160.129 — Chagans-documented Star IP (kept for completeness).
-// Override per-env with CHAGAN_WEBHOOK_IPS when Chagans confirms the real set.
-const DEFAULT_WEBHOOK_IPS = "103.160.160.129,34.126.212.125,103.69.247.219";
+// Chagans webhook source IPs (allow-list) — CONFIRMED by Chagans (2026-10-08):
+//   103.160.160.129 — Star PG   (pgType chagans2)
+//   34.126.212.125  — Comet PG  (pgType chagans3) — observed delivering live
+// Chagans asked us to accept webhooks ONLY from these two. Override per-env with
+// CHAGAN_WEBHOOK_IPS if they ever change. (Both IPs are already allowed, so a
+// genuine Star webhook from 103.160.160.129 WOULD be accepted — meaning the
+// current Star non-delivery is upstream, not an IP-gate rejection on our side.)
+const DEFAULT_WEBHOOK_IPS = "103.160.160.129,34.126.212.125";
 const DEFAULT_TIMEOUT_MS = Number(process.env.CHAGAN_TIMEOUT_MS ?? 15_000);
 
 function baseUrl(): string {
@@ -294,6 +294,32 @@ export const chagansUpi: UpiProvider = {
     };
 
     const r = await chagansPost("/partnerPg/payRequest", body);
+    // Audit the EXACT create-order request + response per gateway so we can hand
+    // Chagans the "complete req and response" they ask for when a gateway
+    // misbehaves (e.g. Star not firing webhooks). The THREE credentials live in
+    // the request HEADERS only (see chagansHeaders) and are never logged here.
+    logger.info({
+      action: "chagans.payrequest",
+      gateway: gw.id,
+      pgType: gw.pgType,
+      mode: gw.mode,
+      request: body,
+      response: r.ok
+        ? {
+            ok: true,
+            httpStatus: r.httpStatus ?? null,
+            success: r.data?.success ?? null,
+            message: r.data?.message ?? null,
+            link: r.data?.link ?? null,
+            orderId: r.data?.data?.orderId ?? null,
+          }
+        : {
+            ok: false,
+            httpStatus: r.httpStatus ?? null,
+            code: r.code,
+            message: r.message,
+          },
+    });
     if (r.ok) {
       const d = r.data?.data ?? {};
       const orderId = d.orderId!;
