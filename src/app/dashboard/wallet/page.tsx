@@ -316,7 +316,14 @@ export default function WalletPage() {
       };
       setPending(topup);
       setAmount("");
-      if (d.paymentUrl) window.open(d.paymentUrl, "_blank", "noopener");
+      if (d.paymentUrl) {
+        // Navigate the SAME tab to the hosted payment page so the customer
+        // returns to where they started (payment page → /pay/return →
+        // /dashboard/wallet?topup=…, which auto-resumes polling) instead of
+        // being stranded on a separate browser tab.
+        window.location.assign(d.paymentUrl);
+        return;
+      }
       startPolling(topup);
     } catch {
       setError("Network error — check your connection and try again.");

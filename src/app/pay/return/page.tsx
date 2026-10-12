@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
+import { ReturnRedirect } from "./ReturnRedirect";
 
 /**
  * Public payment-return landing (NO auth).
@@ -25,6 +25,9 @@ export default async function PayReturnPage({
 }) {
   const sp = await searchParams;
   const ref = sp.ref || sp.topup || "";
+  const walletHref = ref
+    ? `/dashboard/wallet?topup=${encodeURIComponent(ref)}`
+    : "/dashboard/wallet";
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-ink-50 px-4 py-10">
@@ -48,11 +51,14 @@ export default async function PayReturnPage({
             Reference <span className="font-mono text-ink-600">{ref}</span>
           </p>
         )}
-        <Link href="/dashboard/wallet" className="mt-6 block">
+        {ref && <ReturnRedirect to={walletHref} />}
+        {/* target="_top" breaks out of Chagans' (Star) iframe so the wallet
+            loads top-level with the session cookie, not inside the frame. */}
+        <a href={walletHref} target="_top" className="mt-6 block">
           <Button size="lg" className="w-full">
             Go to my wallet
           </Button>
-        </Link>
+        </a>
         <p className="mt-3 text-[11px] text-ink-400">
           If the amount isn&apos;t reflected within a few minutes, contact
           support with the reference above — no amount is ever lost.
