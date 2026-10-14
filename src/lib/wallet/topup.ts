@@ -146,9 +146,9 @@ export async function initiateTopup(input: {
     );
   }
 
-  // The amount actually charged (and later credited). For Chagans this carries
-  // random paise so the order is unique; the customer pays — and is credited —
-  // this exact value, so there is no financial loss.
+  // The amount actually charged (and later credited). By default this is the
+  // EXACT amount the retailer entered (no paise nonce); prepareAmount only alters
+  // it if a gateway's random-amount flag is explicitly enabled via env.
   const chargeAmount = Number(round(selection.prepareAmount(input.amount)));
 
   // Wallet cap gate — refuse the collect up front rather than bouncing money
@@ -234,7 +234,9 @@ export async function initiateTopup(input: {
       where: { id: txn.id },
       data: { status: "FAILED", errorCode: r.code, errorMessage: r.message },
     });
-    throw new TopupError(r.message, 502, r.code);
+    // A duplicate-amount rejection is user-fixable (change the amount) → 409,
+    // not a scary 502 "gateway" error.
+    throw new TopupError(r.message, r.code === "DUPLICATE_AMOUNT" ? 409 : 502, r.code);
   }
 
   await prisma.transaction.update({

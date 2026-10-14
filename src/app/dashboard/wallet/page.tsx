@@ -557,15 +557,6 @@ export default function WalletPage() {
                       All payment gateways are currently unavailable. Please try again shortly.
                     </p>
                   )}
-                  {(() => {
-                    const sel = channels.find((c) => c.id === channel);
-                    return sel?.provider === "CHAGANS_PG" && sel.route === "comet";
-                  })() && (
-                    <p className="mt-1.5 text-[11px] text-ink-400">
-                      A few random paise may be added so the bank can match your
-                      payment — the full amount you pay is credited to your wallet.
-                    </p>
-                  )}
                 </div>
               )}
 

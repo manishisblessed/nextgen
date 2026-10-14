@@ -106,9 +106,11 @@ export type ChagansGateway = {
   /** Per-transaction rupee cap (account-specific; env-overridable). */
   maxAmount: number;
   /**
-   * When true, the charged amount MUST be made unique-to-paise (the gateway
-   * rejects duplicate amounts). Comet mandates this; Star was validated live
-   * with round amounts, so it stays round unless this is flipped on.
+   * When true, a random 1–99 paise nonce is added so the amount is unique (some
+   * gateways reject duplicate amounts). DEFAULT OFF for BOTH gateways: we charge
+   * the exact amount the retailer entered and, if the gateway rejects a
+   * duplicate, ask them to change it (see collect()). Opt back in per gateway via
+   * CHAGAN_COMET_RANDOM / CHAGAN_STAR_RANDOM only if ever required.
    */
   requiresRandom: boolean;
   primary?: boolean;
@@ -134,7 +136,11 @@ export function chagansGateways(): ChagansGateway[] {
       pgType: "chagans3",
       mode: "t1",
       maxAmount: num(process.env.CHAGAN_COMET_MAX, 100000),
-      requiresRandom: true, // Comet mandates a unique/random amount
+      // Charge the EXACT amount the retailer entered (product decision
+      // 2026-10-14): NO silent paise nonce. If Comet rejects a duplicate amount
+      // we ask the user to change it (see collect()). Re-enable the nonce only
+      // via CHAGAN_COMET_RANDOM=true if a gateway ever hard-requires it.
+      requiresRandom: process.env.CHAGAN_COMET_RANDOM === "true",
       primary: true,
     },
     {
@@ -280,7 +286,7 @@ export const chagansUpi: UpiProvider = {
     }
     const webhookUrl = process.env.CHAGAN_WEBHOOK_URL || `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api/webhooks/chagans-pg`;
     const body = {
-      amount: input.amount, // rupees; already made unique-to-paise by the caller
+      amount: input.amount, // rupees — the EXACT amount the retailer entered
       pgType: gw.pgType,
       txnId: input.idempotencyKey, // our alphanumeric refId — safe for Chagans
       callback: input.callbackUrl,
@@ -337,6 +343,25 @@ export const chagansUpi: UpiProvider = {
     const http = r.httpStatus ?? 0;
     const gatewayDown = r.code === "TIMEOUT" || r.code === "NETWORK" || http >= 500;
     recordChagansHealth(gw.id, !gatewayDown, gatewayDown ? "Gateway error" : "OK");
+    // Comet rejects a repeated amount. We no longer silently add paise — instead
+    // surface a clear, actionable message so the retailer can CHANGE the amount
+    // (product decision 2026-10-14).
+    if (!gatewayDown) {
+      const m = (r.message || "").toLowerCase();
+      const duplicate =
+        m.includes("duplicate") ||
+        m.includes("already") ||
+        (m.includes("amount") &&
+          (m.includes("exist") || m.includes("unique") || m.includes("same")));
+      if (duplicate) {
+        return {
+          ok: false,
+          code: "DUPLICATE_AMOUNT",
+          message:
+            "This amount was just used on this gateway. Please change the amount (even by ₹1) and try again.",
+        };
+      }
+    }
     return r;
   },
 
