@@ -40,14 +40,15 @@ import type { PartnerResult, UpiCollectInput, UpiCollectOutput, UpiProvider, Upi
 import { logger } from "../logger";
 
 const DEFAULT_BASE = "https://chagans.com";
-// Chagans webhook source IPs (allow-list) — CONFIRMED by Chagans (2026-10-08):
-//   103.160.160.129 — Star PG   (pgType chagans2)
-//   34.126.212.125  — Comet PG  (pgType chagans3) — observed delivering live
-// Chagans asked us to accept webhooks ONLY from these two. Override per-env with
-// CHAGAN_WEBHOOK_IPS if they ever change. (Both IPs are already allowed, so a
-// genuine Star webhook from 103.160.160.129 WOULD be accepted — meaning the
-// current Star non-delivery is upstream, not an IP-gate rejection on our side.)
-const DEFAULT_WEBHOOK_IPS = "103.160.160.129,34.126.212.125";
+// Chagans webhook source IPs (allow-list):
+//   103.160.106.129 — Star PG  (pgType chagans2) — CORRECTED 2026-10-14. Chagans
+//     originally gave 103.160.160.129 (a digit transposition), so every Star
+//     webhook was silently dropped — the real sender IP was never whitelisted.
+//     The stale 103.160.160.129 is retained as a harmless fallback until the
+//     corrected IP is confirmed delivering live, then it can be pruned.
+//   34.126.212.125  — Comet PG (pgType chagans3) — confirmed delivering live.
+// Override per-env with CHAGAN_WEBHOOK_IPS if they ever change.
+const DEFAULT_WEBHOOK_IPS = "103.160.106.129,103.160.160.129,34.126.212.125";
 const DEFAULT_TIMEOUT_MS = Number(process.env.CHAGAN_TIMEOUT_MS ?? 15_000);
 
 function baseUrl(): string {
