@@ -176,26 +176,48 @@ export default function WalletPage() {
     }
   }, []);
 
+  // Drop the ?topup=… param once a top-up reaches a terminal state so a re-render
+  // / back-navigation can't re-open the result modal or restart polling.
+  const clearTopupParam = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("topup")) {
+      url.searchParams.delete("topup");
+      window.history.replaceState({}, "", url.pathname + url.search);
+    }
+  }, []);
+
   const checkTopup = useCallback(
     async (topup: PendingTopup): Promise<boolean> => {
       try {
         const res = await fetch(`/api/wallet/topup?refId=${encodeURIComponent(topup.refId)}`);
         if (!res.ok) return false;
-        const d = (await res.json()) as { status: string };
+        const d = (await res.json()) as { status: string; amount?: number; net?: number };
         if (d.status === "SUCCESS") {
           stopPolling();
+          clearTopupParam();
           setPending(null);
+          // Headline = NET actually credited to the wallet (net-of-MDR). When the
+          // gross paid differs, show it as a clarifying "Amount paid" row so the
+          // retailer sees both figures. (Resume-from-redirect starts at 0, so the
+          // server-confirmed values are what prevent a ₹0 display.)
+          const credited = d.net ?? d.amount ?? topup.amount;
+          const paid = d.amount ?? topup.amount;
           setResult({
             refId: topup.refId,
             service: "Wallet top-up",
-            amount: topup.amount,
-            meta: { Status: "Credited to wallet" },
+            amount: credited,
+            meta: {
+              ...(paid && paid !== credited ? { "Amount paid": formatINR(paid) } : {}),
+              Status: "Credited to wallet",
+            },
           });
           fetchWallet();
           return true;
         }
         if (d.status === "FAILED") {
           stopPolling();
+          clearTopupParam();
           setPending(null);
           setError("Payment failed or expired. No amount was credited — try again.");
           return true;
@@ -205,7 +227,7 @@ export default function WalletPage() {
         return false;
       }
     },
-    [fetchWallet, stopPolling]
+    [fetchWallet, stopPolling, clearTopupParam]
   );
 
   const startPolling = useCallback(
@@ -782,7 +804,14 @@ export default function WalletPage() {
         </div>
       </div>
 
-      <TransactionResult result={result} onClose={() => setResult(null)} />
+      <TransactionResult
+        result={result}
+        onClose={() => {
+          stopPolling();
+          clearTopupParam();
+          setResult(null);
+        }}
+      />
     </div>
   );
 }

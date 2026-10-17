@@ -279,12 +279,20 @@ export async function initiateTopup(input: {
 export async function settleTopup(
   refId: string,
   webhookVerified?: VerifiedPayin
-): Promise<{ refId: string; status: TopupState }> {
+): Promise<{ refId: string; status: TopupState; amount?: number; net?: number }> {
   const txn = await prisma.transaction.findUnique({ where: { refId } });
   if (!txn || txn.service !== "WALLET_TOPUP") {
     throw new TopupError("Top-up not found", 404, "NOT_FOUND");
   }
-  if (txn.status === "SUCCESS") return { refId, status: "SUCCESS" };
+  // On success we return BOTH figures so the client can show the real numbers
+  // (the resume-from-redirect poll otherwise shows ₹0):
+  //   `amount` = gross the retailer paid, `net` = amount actually credited to
+  //   the wallet (net-of-MDR for Chagans; equal to gross for non-MDR rails).
+  if (txn.status === "SUCCESS") {
+    const resp = txn.response as { net?: unknown } | null;
+    const net = typeof resp?.net === "number" ? resp.net : Number(txn.amount);
+    return { refId, status: "SUCCESS", amount: Number(txn.amount), net };
+  }
   if (txn.status === "FAILED") return { refId, status: "FAILED" };
 
   // Route through the EXACT provider that created this top-up.
@@ -447,7 +455,12 @@ export async function settleTopup(
           provider: txn.partner,
           utr,
         });
-        return { refId, status: "SUCCESS" };
+        return {
+          refId,
+          status: "SUCCESS",
+          amount: Number(txn.amount),
+          net: capture.netAmount ?? Number(txn.amount),
+        };
       }
 
       // QUEUED (parked — credit failed transiently) / SKIPPED — leave the TOPUP
@@ -509,7 +522,8 @@ export async function settleTopup(
       provider: txn.partner,
       utr,
     });
-    return { refId, status: "SUCCESS" };
+    // Non-MDR rail: the full amount is credited, so net === gross.
+    return { refId, status: "SUCCESS", amount: Number(txn.amount), net: Number(txn.amount) };
   }
 
   if (r.data.status === "FAILED" || r.data.status === "EXPIRED") {
