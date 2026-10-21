@@ -743,11 +743,10 @@ function AssignmentPanel({
   const [targetList, setTargetList] = useState<TargetUser[]>([]);
   const [loadingTargets, setLoadingTargets] = useState(true);
 
-  // A platform scheme (no owner) can only go to super-distributors; a derived
-  // scheme can only go to its owner's direct children (any tier below them).
+  // Admins can assign any scheme to any user — no role restrictions.
   const isDerived = ownerId != null;
-  const targetLabel = isDerived ? "child user" : "super distributor";
-  const targetLabelPlural = isDerived ? "child users" : "super distributors";
+  const targetLabel = "user";
+  const targetLabelPlural = "users";
 
   const assignedIds = useMemo(() => new Set(assigned.map((u) => u.id)), [assigned]);
 
@@ -756,7 +755,7 @@ function AssignmentPanel({
     try {
       const url = isDerived
         ? `/api/admin/users?parentId=${encodeURIComponent(ownerId!)}&pageSize=200`
-        : "/api/admin/users?role=super-distributor&pageSize=200";
+        : "/api/admin/users?pageSize=200";
       const res = await fetch(url);
       const data = await res.json();
       if (res.ok)
@@ -847,9 +846,7 @@ function AssignmentPanel({
         <Users className="h-4 w-4 text-violet-600" />
         <h3 className="font-display text-sm font-semibold text-ink-900">Assignment</h3>
         <span className="ml-auto text-xs text-ink-400">
-          {isDerived
-            ? "Derived scheme — assignable only to the owner's direct children."
-            : "Cascade model — platform schemes go to super distributors only. Lower tiers receive derived schemes."}
+          Assign this scheme to any user — admins have full freedom.
         </span>
       </div>
 
@@ -858,7 +855,7 @@ function AssignmentPanel({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold uppercase tracking-widest text-ink-500">
-              {isDerived ? "Child users" : "Super distributors"} ({unassigned.length} available)
+              Available users ({unassigned.length})
             </p>
             {unassigned.length > 0 && (
               <Button size="sm" variant="outline" onClick={() => setAssignAllConfirmOpen(true)} disabled={assigningAll}>
@@ -871,10 +868,8 @@ function AssignmentPanel({
           ) : unassigned.length === 0 ? (
             <p className="rounded-xl border border-dashed border-ink-200 px-3 py-6 text-center text-sm text-ink-500">
               {targetList.length === 0
-                ? isDerived
-                  ? "This scheme's owner has no direct children yet."
-                  : "No super distributors exist yet."
-                : `All ${targetLabelPlural} are assigned to this scheme.`}
+                ? "No users found."
+                : `All ${targetLabelPlural} are already assigned to this scheme.`}
             </p>
           ) : (
             <ul className="max-h-72 divide-y divide-ink-100 overflow-y-auto rounded-xl border border-ink-100">

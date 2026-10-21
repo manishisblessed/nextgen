@@ -664,13 +664,8 @@ function UserDrawer({
       .catch(() => {});
   }, []);
 
-  // Only offer schemes the backend will actually accept for THIS user (mirrors
-  // the cascade rule in PATCH /api/admin/network/[id]): a platform scheme
-  // (ownerId null) is assignable only to a super-distributor; everyone else can
-  // only take a scheme derived from their own parent (ownerId === parent.id).
-  const assignableSchemes = schemes.filter(
-    (s) => s.active && (s.ownerId ? s.ownerId === user.parent?.id : user.role === "SUPER_DISTRIBUTOR")
-  );
+  // Admins can assign any active scheme to any user — no role restrictions.
+  const assignableSchemes = schemes.filter((s) => s.active);
 
   // Keep the user's currently-assigned scheme visible even if it's no longer in
   // the assignable set (e.g. it was deactivated), so the selection isn't blanked.
@@ -1038,9 +1033,7 @@ function UserDrawer({
           </div>
           {assignableSchemes.length === 0 && (
             <p className="mt-2 text-xs text-amber-600">
-              {user.role === "SUPER_DISTRIBUTOR"
-                ? "No active platform schemes available yet. Create one under Schemes first."
-                : `No scheme has been derived from this user's parent (${user.parent?.name ?? "—"}) yet. Assign a scheme to the parent first — schemes cascade down from there.`}
+              No active schemes available yet. Create one under Scheme Manager first.
             </p>
           )}
           <p className="mt-2 text-xs text-ink-400">

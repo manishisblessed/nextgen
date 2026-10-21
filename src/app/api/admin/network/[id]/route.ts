@@ -192,28 +192,13 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     switch (body.action) {
       case "assignScheme": {
         if (body.schemeId) {
-          // Cascade model: a user's scheme must come from their parent's
-          // derived schemes — or be a platform scheme for SUPER_DISTRIBUTORs
-          // (who sit directly under admin). Admin can act on the parent's
-          // behalf, but never cross-assign another branch's pricing.
+          // Admins can assign any active scheme to any network user.
           const scheme = await prisma.scheme.findFirst({
             where: { id: body.schemeId, active: true },
-            select: { id: true, ownerId: true },
+            select: { id: true },
           });
           if (!scheme)
             return NextResponse.json({ error: "Scheme not found or inactive" }, { status: 404 });
-          const allowed = scheme.ownerId
-            ? scheme.ownerId === target.parentId
-            : target.role === "SUPER_DISTRIBUTOR";
-          if (!allowed)
-            return NextResponse.json(
-              {
-                error: scheme.ownerId
-                  ? "Scheme belongs to a different parent — assign one of this user's parent's schemes"
-                  : "Platform schemes can only be assigned to super-distributors; lower tiers get schemes from their parent",
-              },
-              { status: 400 }
-            );
         }
         await prisma.user.update({
           where: { id: target.id },
