@@ -96,17 +96,24 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
       }
 
       if (r.data.status === "SUCCESS") {
-        await prisma.$transaction(async (tx) => {
-          await tx.transaction.update({
-            where: { id: txn.id },
-            data: {
-              status: "SUCCESS",
-              partnerTxnId: txn.partnerTxnId,
-              response: { reconSettled: true, providerStatus: r.data.status, operatorRef: r.data.operatorRef } as Prisma.InputJsonValue,
-            },
-          });
-          // BBPS does not earn commission (only PG/POS/QR do).
-          await tx.auditLog.create({
+        // Atomic guard: only settle if still PROCESSING (prevents double-settle
+        // with a concurrent status-poll that ran between our check and now).
+        const updated = await prisma.transaction.updateMany({
+          where: { id: txn.id, status: "PROCESSING" },
+          data: {
+            status: "SUCCESS",
+            partnerTxnId: txn.partnerTxnId,
+            response: {
+              reconSettled: true,
+              providerStatus: r.data.status,
+              operatorRef: r.data.operatorRef,
+              samedayCharge: (r.data as { charge?: number }).charge ?? null,
+              samedayAmount: (r.data as { amount?: number }).amount ?? null,
+            } as Prisma.InputJsonValue,
+          },
+        });
+        if (updated.count > 0) {
+          await prisma.auditLog.create({
             data: {
               userId: txn.userId,
               action: "recon.bbps_settled",
@@ -115,33 +122,44 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
               meta: { refId: txn.refId, providerStatus: r.data.status },
             },
           });
-        });
-        void emitWebhookEvent(txn.userId, "txn.success", {
-          refId: txn.refId,
-          service: txn.service,
-          amount: txn.amount.toNumber(),
-        });
-        settled++;
+          void emitWebhookEvent(txn.userId, "txn.success", {
+            refId: txn.refId,
+            service: txn.service,
+            amount: txn.amount.toNumber(),
+          });
+          settled++;
+        }
       } else {
         // FAILED or REFUNDED — reverse the held funds.
+        // Canonical key shared with status-poll so only one credit is issued.
         const reserveAmount = round(add(txn.amount.toNumber(), txn.fee.toNumber()));
-        await prisma.$transaction(async (tx) => {
-          await tx.transaction.update({
-            where: { id: txn.id },
+        const reversalKey = `txn:${txn.userId}:${txn.refId}:reversal:recon`;
+
+        // Atomic guard: only refund if still PROCESSING.
+        // Wrap updateMany + creditWallet in a single transaction so the wallet
+        // credit is never left undone if the status update committed.
+        const refundCount = await prisma.$transaction(async (tx) => {
+          const updated = await tx.transaction.updateMany({
+            where: { id: txn.id, status: "PROCESSING" },
             data: {
               status: r.data.status === "REFUNDED" ? "REFUNDED" : "FAILED",
               errorCode: "BBPS_PROVIDER_FAILED",
               errorMessage: `Provider reported ${r.data.status} during reconciliation`,
-              response: { reconSettled: true, providerStatus: r.data.status } as Prisma.InputJsonValue,
+              response: {
+                reconSettled: true,
+                providerStatus: r.data.status,
+                samedayCharge: (r.data as { charge?: number }).charge ?? null,
+              } as Prisma.InputJsonValue,
             },
           });
+          if (updated.count === 0) return 0;
           await creditWallet({
             userId: txn.userId,
             amount: reserveAmount,
             reason: "REVERSAL",
             refType: "Transaction",
             refId: txn.id,
-            idempotencyKey: `txn:${txn.userId}:${txn.refId}:reversal:recon`,
+            idempotencyKey: reversalKey,
           }, tx);
           await tx.auditLog.create({
             data: {
@@ -152,15 +170,18 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
               meta: { refId: txn.refId, providerStatus: r.data.status },
             },
           });
+          return updated.count;
         });
-        void emitWebhookEvent(txn.userId, "txn.failed", {
-          refId: txn.refId,
-          service: txn.service,
-          amount: txn.amount.toNumber(),
-          code: "BBPS_PROVIDER_FAILED",
-          message: `Bill payment ${r.data.status.toLowerCase()} by provider`,
-        });
-        refunded++;
+        if (refundCount > 0) {
+          void emitWebhookEvent(txn.userId, "txn.failed", {
+            refId: txn.refId,
+            service: txn.service,
+            amount: txn.amount.toNumber(),
+            code: "BBPS_PROVIDER_FAILED",
+            message: `Bill payment ${r.data.status.toLowerCase()} by provider`,
+          });
+          refunded++;
+        }
       }
       drained++;
     } catch (err) {
@@ -190,9 +211,18 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
     });
   }
 
-  // 3. VERIFY — re-check recent terminal BBPS rows against the provider.
+  // 3. VERIFY — re-check recent terminal BBBS rows against the provider.
   let verified = 0;
   let mismatches = 0;
+
+  // Track the two distinct mismatch directions for separate, actionable alerts:
+  //   lostAtSameday  = DB FAILED (we refunded the retailer) but SameDay SUCCESS
+  //                    → SameDay debited our wallet but we gave money back → LOSS
+  //   falseSuccess   = DB SUCCESS but SameDay FAILED/REFUNDED
+  //                    → retailer saw "success" but bill may not have been paid
+  const lostAtSameday: Array<{ refId: string; amount: number; userId: string; partnerTxnId: string }> = [];
+  const falseSuccess: Array<{ refId: string; amount: number; userId: string }> = [];
+
   const recentTerminal = await prisma.transaction.findMany({
     where: {
       status: { in: ["SUCCESS", "FAILED"] },
@@ -202,7 +232,7 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
     },
     orderBy: { updatedAt: "desc" },
     take: 200,
-    select: { id: true, refId: true, status: true, partnerTxnId: true, userId: true },
+    select: { id: true, refId: true, status: true, partnerTxnId: true, userId: true, amount: true },
   });
 
   for (const row of recentTerminal) {
@@ -225,20 +255,79 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
             action: "recon.bbps_mismatch",
             entity: "Transaction",
             entityId: row.id,
-            meta: { refId: row.refId, ourStatus: row.status, providerStatus: provStatus, ranAt },
+            meta: {
+              refId: row.refId,
+              ourStatus: row.status,
+              providerStatus: provStatus,
+              amount: row.amount.toNumber(),
+              ranAt,
+            },
           },
         });
+
+        // Classify mismatch direction for targeted ops action.
+        if (row.status === "FAILED" && provStatus === "SUCCESS") {
+          // LOSS: SameDay processed the payment (debited our wallet) but we
+          // marked FAILED and refunded the retailer. Net: we paid the bill but
+          // gave the retailer back their money. Manual ops recovery required.
+          lostAtSameday.push({
+            refId: row.refId,
+            amount: row.amount.toNumber(),
+            userId: row.userId,
+            partnerTxnId: row.partnerTxnId!,
+          });
+        } else if (row.status === "SUCCESS" && (provStatus === "FAILED" || provStatus === "REFUNDED")) {
+          // DB SUCCESS but SameDay FAILED: retailer was shown "success" but bill
+          // may not have been paid. SameDay should auto-refund our wallet.
+          falseSuccess.push({
+            refId: row.refId,
+            amount: row.amount.toNumber(),
+            userId: row.userId,
+          });
+        }
       }
     } catch (err) {
       logger.warn({ action: "recon.bbps_verify_failed", txnId: row.id, err: String(err) });
     }
   }
 
-  if (mismatches > 0) {
+  if (lostAtSameday.length > 0) {
+    const totalLoss = lostAtSameday.reduce((s, t) => s + t.amount, 0);
     await sendOpsAlert({
-      title: "BBPS ledger disagrees with provider",
+      title: "⚠️ BBPS LOSS: SameDay debited our wallet but we refunded retailer",
       severity: "critical",
-      details: { verified, mismatches },
+      details: {
+        count: lostAtSameday.length,
+        totalAmount: `₹${totalLoss.toFixed(2)}`,
+        refIds: lostAtSameday.slice(0, 10).map((t) => t.refId).join(", "),
+        action: "URGENT: Verify SameDay portal — re-debit or absorb these transactions",
+        ranAt,
+      },
+      href: "/dashboard/admin/recon",
+    });
+  }
+
+  if (falseSuccess.length > 0) {
+    const totalFalse = falseSuccess.reduce((s, t) => s + t.amount, 0);
+    await sendOpsAlert({
+      title: "⚠️ BBPS FALSE SUCCESS: DB SUCCESS but provider says FAILED/REFUNDED",
+      severity: "critical",
+      details: {
+        count: falseSuccess.length,
+        totalAmount: `₹${totalFalse.toFixed(2)}`,
+        refIds: falseSuccess.slice(0, 10).map((t) => t.refId).join(", "),
+        action: "Verify SameDay portal and notify affected retailers if bill was not paid",
+        ranAt,
+      },
+      href: "/dashboard/admin/recon",
+    });
+  }
+
+  if (mismatches > 0 && lostAtSameday.length === 0 && falseSuccess.length === 0) {
+    await sendOpsAlert({
+      title: "BBPS ledger has minor status mismatches with provider",
+      severity: "warning",
+      details: { verified, mismatches, ranAt },
     });
   }
 

@@ -62,7 +62,10 @@ type PayResponse = {
   order_id?: string;
   operator_reference?: string;
   request_id?: string;
+  /** Partner-level service charge deducted from our SameDay wallet (₹). */
   charge?: number;
+  /** Echo of the bill amount SameDay processed (₹). */
+  amount?: number;
 };
 
 type StatusResponse = {
@@ -70,6 +73,11 @@ type StatusResponse = {
   order_id?: string | null;
   status?: string;
   operator_reference?: string | null;
+  /** Partner-level service charge deducted from our SameDay wallet (₹). */
+  charge?: number;
+  /** Echo of the bill amount (₹). */
+  amount?: number;
+  request_id?: string | null;
 };
 
 // ---------- pure mapping helpers (unit-tested) ----------
@@ -224,22 +232,42 @@ export const samedayBbps: BbpsProvider = {
       pincode: cc.pincode,
     });
     if (!r.ok) return r;
+
+    // Prefer the pay-specific order_id; fall back to request_id so status
+    // lookups can still work (status() detects which field to use by prefix).
+    const partnerTxnId = r.data.order_id || r.data.request_id || "";
+
+    // SameDay deducts (bill_amount + charge) from our partner wallet. Surface
+    // the actual charge in raw so runTransaction / recon can detect
+    // vendorCharge mismatches. A missing charge field (old API version) is fine.
     return {
       ok: true,
       data: {
-        txnReference: r.data.order_id || r.data.request_id || "",
-        receipt: r.data.operator_reference || r.data.order_id || "",
+        txnReference: partnerTxnId,
+        receipt: r.data.operator_reference || partnerTxnId || "",
       },
-      partnerTxnId: r.data.order_id || r.data.request_id,
-      raw: r.raw,
+      partnerTxnId: partnerTxnId || undefined,
+      raw: {
+        ...(r.raw as object),
+        // Explicit capture so it's visible in the Transaction.response JSON
+        // and searchable in the admin ledger / recon queries.
+        _samedayCharge: r.data.charge,
+        _samedayAmount: r.data.amount,
+      },
     };
   },
 
   async status(ref) {
-    const body = ref.orderId ? { order_id: ref.orderId } : { request_id: ref.requestId };
-    if (!body.order_id && !body.request_id) {
+    const id = ref.orderId || ref.requestId;
+    if (!id) {
       return { ok: false, code: "BAD_PARAMS", message: "status() needs orderId or requestId" };
     }
+    // SameDay uses two different ID namespaces:
+    //   order_id  → "P2N_PAY_..." prefix (returned in pay response)
+    //   request_id→ "SDS..."     prefix (also returned in pay response, use on timeout)
+    // Sending the wrong field causes a silent lookup miss, so detect by prefix.
+    const isRequestId = id.startsWith("SDS");
+    const body = isRequestId ? { request_id: id } : { order_id: id };
     const r = await samedayRequest<StatusResponse>(creds(), "POST", `${P}/bill/status`, body);
     if (!r.ok) return r;
     return {
@@ -247,6 +275,9 @@ export const samedayBbps: BbpsProvider = {
       data: {
         status: mapPay2NewStatus(r.data.status),
         operatorRef: r.data.operator_reference ?? undefined,
+        // Propagate charge/amount so recon can detect wallet debit mismatches.
+        charge: r.data.charge,
+        amount: r.data.amount,
       },
       raw: r.raw,
     };

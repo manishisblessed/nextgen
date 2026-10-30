@@ -195,9 +195,19 @@ export interface BbpsProvider {
   /**
    * Optional: poll a payment's terminal state by provider order id or request
    * id — used after timeouts (never blind-retry pay) and by reconciliation.
+   *
+   * `charge` and `amount` are surfaced by SameDay Pay2New so reconciliation can
+   * verify that the actual wallet debit matches what the scheme predicted.
    */
   status?(ref: { orderId?: string; requestId?: string }): Promise<
-    PartnerResult<{ status: "SUCCESS" | "PENDING" | "FAILED" | "REFUNDED"; operatorRef?: string }>
+    PartnerResult<{
+      status: "SUCCESS" | "PENDING" | "FAILED" | "REFUNDED";
+      operatorRef?: string;
+      /** Actual partner-level service charge deducted from our wallet (₹), when known. */
+      charge?: number;
+      /** Echo of the bill amount the provider processed (₹), when known. */
+      amount?: number;
+    }>
   >;
 }
 
