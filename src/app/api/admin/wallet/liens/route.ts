@@ -151,6 +151,7 @@ export async function GET(req: Request) {
         { name: { contains: q, mode: "insensitive" } },
         { email: { contains: q, mode: "insensitive" } },
         { shopName: { contains: q, mode: "insensitive" } },
+        { userCode: { contains: q, mode: "insensitive" } },
       ],
     };
   }

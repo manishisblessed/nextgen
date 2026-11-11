@@ -23,10 +23,11 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/services/rechargekit-direct/charges
  *
- * Scheme-driven charge preview for the Offline CC Bill Payment rail. The direct
- * RechargeKit API exposes no charges endpoint, so the customer-facing charge,
- * GST, total wallet debit, and commission are resolved purely from the user's
- * scheme slab (priced under the "rechargekit_direct" product scope).
+ * Scheme-driven charge preview for the Offline CC Bill Payment rail (Chagans
+ * CC Bill API V2). Chagans has no charges preview endpoint, so the
+ * customer-facing charge, GST, total wallet debit, and commission are resolved
+ * purely from the user's scheme slab (priced under the "rechargekit_direct"
+ * product scope).
  */
 export async function POST(req: Request) {
   let user;

@@ -1,0 +1,826 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertCircle, RefreshCw, Loader2, CheckCircle2, Clock } from "lucide-react";
+import { Input, Label } from "@/components/ui/Input";
+import { OperatorSelect } from "@/components/ui/OperatorSelect";
+import { Button } from "@/components/ui/Button";
+import {
+  TransactionResult,
+  type TxnResult,
+} from "@/components/dashboard/TransactionResult";
+import { TxnPinDialog } from "@/components/security/TxnPinDialog";
+import { generateRefId, formatINR } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type Biller = {
+  billerId: string;
+  billerName: string;
+  // backwards-compat aliases from the operators endpoint
+  operatorCode?: string;
+  operatorName?: string;
+};
+
+type RequiredField = {
+  paramName: string;
+  dataType: string; // "NUMERIC" | "ALPHA" | "ALPHANUMERIC" | ...
+};
+
+type BillerParamsState = {
+  requiredFields: RequiredField[];
+  billerName: string;
+  enquiryId: string;
+  fetchedAt: number; // Date.now() — used to detect 30-min expiry
+};
+
+type FetchedBill = {
+  billerResponse: Record<string, unknown>;
+  additionalInfo: Record<string, unknown>;
+  message: string;
+  dueAmount: number | null;
+};
+
+type ChargeQuote = {
+  serviceCharge: number;
+  gst: number;
+  totalCharge: number;
+  totalDebit: number;
+  commission: number;
+};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** enquiryId expires after 30 min on Chagans' side — block at 29 min. */
+const ENQUIRY_TTL_MS = 29 * 60 * 1000;
+
+/** Build the Zod-positional parameter key from a 0-based index. */
+function paramKey(idx: number): string {
+  return `param${idx + 1}`;
+}
+
+/**
+ * Extract a displayable consumer identifier (for the receipt) from the
+ * filled parameter values — preferring the first numeric-looking value.
+ */
+function extractConsumerId(
+  fields: RequiredField[],
+  values: Record<string, string>
+): string {
+  for (let i = 0; i < fields.length; i++) {
+    const v = values[paramKey(i)] ?? "";
+    if (v.length >= 4) return v;
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------------------
+// Bill response helper — extract human-readable details from billerResponse
+// ---------------------------------------------------------------------------
+
+function extractBillDetails(br: Record<string, unknown>): {
+  customerName?: string;
+  dueDate?: string;
+  minAmount?: number;
+  statementBalance?: number;
+} {
+  const str = (keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = br[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  };
+  const num = (keys: string[]): number | undefined => {
+    for (const k of keys) {
+      const v = br[k];
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && Number.isFinite(Number(v)) && Number(v) > 0)
+        return Number(v);
+    }
+  };
+  return {
+    customerName: str(["customerName", "name", "accountName", "billerName"]),
+    dueDate: str(["dueDate", "due_date", "billDueDate", "paymentDueDate"]),
+    minAmount: num(["minAmount", "minDueAmount", "minimumAmount", "minimumDue"]),
+    statementBalance: num(["statementBalance", "totalBalance", "totalOutstanding"]),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function ChagansCCBillForm() {
+  // --- Step 1: Billers ---
+  const [billers, setBillers] = useState<Biller[]>([]);
+  const [billerId, setBillerId] = useState("");
+  const [billerName, setBillerName] = useState("");
+  const [loadingBillers, setLoadingBillers] = useState(true);
+
+  // --- Step 2: Biller params ---
+  const [billerParams, setBillerParams] = useState<BillerParamsState | null>(null);
+  const [loadingParams, setLoadingParams] = useState(false);
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+
+  // --- Step 3: Fetched bill ---
+  const [fetchedBill, setFetchedBill] = useState<FetchedBill | null>(null);
+  const [fetching, setFetching] = useState(false);
+
+  // --- Step 4: Pay ---
+  const [amount, setAmount] = useState("");
+  const [quote, setQuote] = useState<ChargeQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
+
+  // --- Shared ---
+  const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState<string | null>(null);
+  const [result, setResult] = useState<TxnResult>(null);
+
+  // ---------------------------------------------------------------------------
+  // Step 1 — load billers
+  // ---------------------------------------------------------------------------
+
+  const loadBillers = useCallback(async (refresh = false) => {
+    setLoadingBillers(true);
+    try {
+      const url = `/api/services/rechargekit-direct/operators${refresh ? "?refresh=true" : ""}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.operators)) {
+        const list: Biller[] = data.operators.map(
+          (o: { billerId?: string; operatorCode?: string; billerName?: string; operatorName?: string }) => ({
+            billerId: o.billerId ?? o.operatorCode ?? "",
+            billerName: o.billerName ?? o.operatorName ?? "",
+          })
+        );
+        setBillers(list);
+        if (list[0] && !refresh) {
+          setBillerId(list[0].billerId);
+          setBillerName(list[0].billerName);
+        }
+      } else {
+        setError(data.error ?? "Could not load billers — please refresh");
+      }
+    } catch {
+      setError("Could not load billers — check your connection");
+    } finally {
+      setLoadingBillers(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBillers();
+  }, [loadBillers]);
+
+  // ---------------------------------------------------------------------------
+  // Step 2 — load biller params whenever billerId changes
+  // ---------------------------------------------------------------------------
+
+  const loadBillerParams = useCallback(
+    async (id: string, name: string) => {
+      if (!id) return;
+      setLoadingParams(true);
+      setBillerParams(null);
+      setParamValues({});
+      setFetchedBill(null);
+      setAmount("");
+      setQuote(null);
+      setError(null);
+      try {
+        const res = await fetch("/api/services/rechargekit-direct/billers-params", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ billerId: id }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error ?? "Could not load biller fields — please try again");
+          return;
+        }
+        // Initialise paramValues with empty strings for each required field.
+        const init: Record<string, string> = {};
+        (data.requiredFields as RequiredField[]).forEach((_, i) => {
+          init[paramKey(i)] = "";
+        });
+        setBillerParams({
+          requiredFields: data.requiredFields,
+          billerName: data.billerName || name,
+          enquiryId: data.enquiryId,
+          fetchedAt: data.enquiryFetchedAt ?? Date.now(),
+        });
+        setParamValues(init);
+      } catch {
+        setError("Could not load biller fields — check your connection");
+      } finally {
+        setLoadingParams(false);
+      }
+    },
+    []
+  );
+
+  // Auto-load params when biller selection changes.
+  useEffect(() => {
+    if (billerId) {
+      const name = billers.find((b) => b.billerId === billerId)?.billerName ?? "";
+      loadBillerParams(billerId, name);
+    }
+  }, [billerId, billers, loadBillerParams]);
+
+  // ---------------------------------------------------------------------------
+  // enquiryId expiry check
+  // ---------------------------------------------------------------------------
+
+  const enquiryExpired = useMemo(() => {
+    if (!billerParams) return false;
+    return Date.now() - billerParams.fetchedAt >= ENQUIRY_TTL_MS;
+  }, [billerParams]);
+
+  const enquiryRemainingMin = useMemo(() => {
+    if (!billerParams) return 0;
+    const elapsed = Date.now() - billerParams.fetchedAt;
+    return Math.max(0, Math.floor((ENQUIRY_TTL_MS - elapsed) / 60_000));
+  }, [billerParams]);
+
+  // ---------------------------------------------------------------------------
+  // Step 2 validation — all required param fields filled
+  // ---------------------------------------------------------------------------
+
+  const paramsValid = useMemo(() => {
+    if (!billerParams || billerParams.requiredFields.length === 0) return false;
+    return billerParams.requiredFields.every((_, i) => {
+      const v = paramValues[paramKey(i)] ?? "";
+      return v.trim().length > 0;
+    });
+  }, [billerParams, paramValues]);
+
+  // ---------------------------------------------------------------------------
+  // Step 3 — fetch bill
+  // ---------------------------------------------------------------------------
+
+  async function handleFetchBill() {
+    if (!billerParams || !paramsValid) return;
+    setError(null);
+
+    // If the enquiryId expired, re-fetch params before proceeding.
+    if (enquiryExpired) {
+      await loadBillerParams(billerId, billerName);
+      setError("Session expired — biller fields refreshed. Please click 'Fetch Bill' again.");
+      return;
+    }
+
+    setFetching(true);
+    setFetchedBill(null);
+    setAmount("");
+    setQuote(null);
+
+    try {
+      const res = await fetch("/api/services/rechargekit-direct/fetch-bill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          billerId,
+          enquiryId: billerParams.enquiryId,
+          parameters: paramValues,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(
+          typeof data.error === "string"
+            ? data.error
+            : "Bill fetch failed — check the details and try again"
+        );
+        return;
+      }
+      setFetchedBill(data as FetchedBill);
+      // Pre-fill amount if the API returned a due amount.
+      if (data.dueAmount && data.dueAmount > 0) {
+        setAmount(String(data.dueAmount));
+      }
+    } catch {
+      setError("Network error while fetching the bill — please retry");
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Charge quote — debounced on amount change
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    const amt = Number(amount);
+    if (!amt || amt <= 0) {
+      setQuote(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setQuoteLoading(true);
+      try {
+        const res = await fetch("/api/services/rechargekit-direct/charges", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: amt }),
+        });
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          setQuote({
+            serviceCharge: data.serviceCharge,
+            gst: data.gst,
+            totalCharge: data.totalCharge,
+            totalDebit: data.totalDebit,
+            commission: data.commission,
+          });
+        }
+      } catch {
+        /* swallow — charge preview is best-effort */
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [amount]);
+
+  // ---------------------------------------------------------------------------
+  // Step 4 — pay
+  // ---------------------------------------------------------------------------
+
+  function handlePaySubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fetchedBill || !amount || Number(amount) <= 0) return;
+    if (enquiryExpired) {
+      setError("Session expired (30 min). Please re-fetch the bill before paying.");
+      return;
+    }
+    setError(null);
+    setProcessing(null);
+    setPinOpen(true);
+  }
+
+  async function payWithPin(pin: string): Promise<string | null> {
+    if (!billerParams) return "Session lost — please reload the page";
+    if (enquiryExpired) {
+      setPinOpen(false);
+      setError("Session expired. Please re-fetch the bill before paying.");
+      return null;
+    }
+    setPaying(true);
+    try {
+      const res = await fetch("/api/services/rechargekit-direct/pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-txn-pin": pin },
+        body: JSON.stringify({
+          billerId,
+          billerName: billerParams.billerName || billerName,
+          enquiryId: billerParams.enquiryId,
+          parameters: paramValues,
+          amount: Number(amount),
+          idempotencyKey: generateRefId("CGCC"),
+        }),
+      });
+      const data = await res.json();
+
+      // PIN errors — keep dialog open.
+      if (data.txnPin) {
+        return typeof data.error === "string"
+          ? data.error
+          : "PIN verification failed";
+      }
+
+      // Async-pending (PROCESSING / 202).
+      if (data.status === "PROCESSING" || data.status === "INITIATED") {
+        setPinOpen(false);
+        setProcessing(
+          "Payment is being processed. Check your transaction history for the final status — do NOT re-submit."
+        );
+        resetAfterPay();
+        return null;
+      }
+
+      if (!res.ok || data.status !== "SUCCESS") {
+        setPinOpen(false);
+        if (data.code === "INSUFFICIENT_BALANCE") {
+          setError(
+            `Insufficient wallet balance. Required: ${formatINR(data.required_amount ?? 0)}, Available: ${formatINR(data.wallet_balance ?? 0)}`
+          );
+        } else {
+          setError(
+            typeof data.error === "string"
+              ? data.error
+              : "Payment failed — any debited amount is auto-refunded to your wallet"
+          );
+        }
+        return null;
+      }
+
+      // SUCCESS
+      setPinOpen(false);
+      const consumerId = extractConsumerId(billerParams.requiredFields, paramValues);
+      setResult({
+        refId: data.refId,
+        service: `Offline CC Bill Payment — ${billerParams.billerName || billerName}`,
+        amount: Number(amount),
+        customer: consumerId || billerName,
+        meta: {
+          ...(consumerId ? { "Consumer ID": consumerId } : {}),
+          ...(data.data?.transactionId
+            ? { "Chagans Txn ID": data.data.transactionId }
+            : {}),
+        },
+      });
+      resetAfterPay();
+      return null;
+    } catch {
+      setPinOpen(false);
+      setError(
+        "Network error — check your transaction history before retrying to avoid a duplicate payment."
+      );
+      return null;
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  function resetAfterPay() {
+    setFetchedBill(null);
+    setAmount("");
+    setQuote(null);
+    // Reset param values but keep biller selection + params loaded.
+    if (billerParams) {
+      const init: Record<string, string> = {};
+      billerParams.requiredFields.forEach((_, i) => {
+        init[paramKey(i)] = "";
+      });
+      setParamValues(init);
+    }
+    setError(null);
+  }
+
+  function handleBillerChange(newId: string) {
+    const found = billers.find((b) => b.billerId === newId);
+    setBillerId(newId);
+    setBillerName(found?.billerName ?? "");
+    // Params + bill reset is handled by the useEffect on billerId change.
+  }
+
+  // ---------------------------------------------------------------------------
+  // Derived display helpers
+  // ---------------------------------------------------------------------------
+
+  const selectedBiller = billers.find((b) => b.billerId === billerId);
+  const billDetails = fetchedBill
+    ? extractBillDetails(fetchedBill.billerResponse)
+    : null;
+  const amtNum = Number(amount);
+  const maxAmount =
+    (fetchedBill?.billerResponse?.maxAmount as number | undefined) ?? 500000;
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  return (
+    <>
+      <form
+        onSubmit={handlePaySubmit}
+        className="grid gap-4 rounded-2xl border border-ink-100 bg-white p-6 sm:grid-cols-2"
+      >
+        {/* ── Step 1: Biller selection ── */}
+        <div className="sm:col-span-2">
+          <Label htmlFor="biller">Card issuer / Bank</Label>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <OperatorSelect
+                id="biller"
+                value={billerId}
+                onChange={handleBillerChange}
+                options={billers.map((b) => ({
+                  value: b.billerId,
+                  label: b.billerName,
+                }))}
+                loading={loadingBillers}
+                disabled={loadingBillers || loadingParams}
+                placeholder="Select card issuer"
+                loadingText="Loading billers…"
+                emptyText="No billers found"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => loadBillers(true)}
+              disabled={loadingBillers || loadingParams}
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-ink-200 text-ink-500 transition hover:bg-ink-50 hover:text-ink-700 disabled:opacity-50"
+              title="Refresh biller list"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${loadingBillers ? "animate-spin" : ""}`}
+              />
+            </button>
+          </div>
+          {!loadingBillers && billers.length > 0 && (
+            <p className="mt-1 text-[11px] text-ink-400">
+              {billers.length} billers available
+            </p>
+          )}
+        </div>
+
+        {/* ── Step 2: Dynamic biller fields ── */}
+        {loadingParams && (
+          <div className="sm:col-span-2 flex items-center gap-2 text-sm text-ink-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading biller fields…
+          </div>
+        )}
+
+        {billerParams && !loadingParams && (
+          <>
+            {billerParams.requiredFields.length === 0 ? (
+              /* Fallback: biller returned no fields — manual entry not possible */
+              <p className="sm:col-span-2 text-sm text-amber-600">
+                This biller did not return input field definitions. Please
+                select a different biller or contact support.
+              </p>
+            ) : (
+              billerParams.requiredFields.map((field, idx) => (
+                <div
+                  key={idx}
+                  className={
+                    billerParams.requiredFields.length === 1
+                      ? "sm:col-span-2"
+                      : ""
+                  }
+                >
+                  <Label htmlFor={`param-${idx}`}>{field.paramName}</Label>
+                  <Input
+                    id={`param-${idx}`}
+                    required
+                    inputMode={
+                      field.dataType === "NUMERIC" ? "numeric" : "text"
+                    }
+                    placeholder={
+                      field.dataType === "NUMERIC"
+                        ? `Enter ${field.paramName} (numbers only)`
+                        : `Enter ${field.paramName}`
+                    }
+                    value={paramValues[paramKey(idx)] ?? ""}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const val =
+                        field.dataType === "NUMERIC"
+                          ? raw.replace(/\D/g, "")
+                          : raw;
+                      setParamValues((prev) => ({
+                        ...prev,
+                        [paramKey(idx)]: val,
+                      }));
+                      // Reset bill when params change.
+                      if (fetchedBill) {
+                        setFetchedBill(null);
+                        setAmount("");
+                        setQuote(null);
+                      }
+                    }}
+                  />
+                </div>
+              ))
+            )}
+
+            {/* enquiryId expiry indicator */}
+            {!enquiryExpired && billerParams.requiredFields.length > 0 && (
+              <p className="sm:col-span-2 flex items-center gap-1 text-[11px] text-ink-400">
+                <Clock className="h-3 w-3" />
+                Session valid for ~{enquiryRemainingMin} more min
+              </p>
+            )}
+            {enquiryExpired && (
+              <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Session expired. Select the biller again or click the refresh
+                  button to start a new session.
+                </span>
+              </div>
+            )}
+
+            {/* Fetch Bill button */}
+            {billerParams.requiredFields.length > 0 && !fetchedBill && (
+              <div className="sm:col-span-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleFetchBill}
+                  disabled={
+                    fetching || !paramsValid || enquiryExpired || loadingParams
+                  }
+                  isLoading={fetching}
+                >
+                  Fetch bill
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Step 3: Bill details ── */}
+        {fetchedBill && (
+          <div className="sm:col-span-2">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <p className="font-semibold text-ink-900">
+                  {billDetails?.customerName ??
+                    selectedBiller?.billerName ??
+                    "Bill fetched"}
+                </p>
+              </div>
+              {billDetails?.dueDate && (
+                <p className="mt-1 text-xs text-ink-600">
+                  Due date: {billDetails.dueDate}
+                </p>
+              )}
+              {fetchedBill.dueAmount && fetchedBill.dueAmount > 0 ? (
+                <p className="mt-2 font-display text-xl font-bold text-emerald-700">
+                  {formatINR(fetchedBill.dueAmount)}
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-ink-500">
+                  {fetchedBill.message || "Bill details retrieved — enter the amount below"}
+                </p>
+              )}
+              {billDetails?.minAmount !== undefined && (
+                <p className="mt-1 text-xs text-ink-600">
+                  Minimum due: {formatINR(billDetails.minAmount)}
+                  {billDetails.statementBalance !== undefined && (
+                    <> · Statement balance: {formatINR(billDetails.statementBalance)}</>
+                  )}
+                </p>
+              )}
+            </div>
+            {/* Re-fetch option */}
+            <button
+              type="button"
+              onClick={() => {
+                setFetchedBill(null);
+                setAmount("");
+                setQuote(null);
+                setError(null);
+              }}
+              className="mt-2 text-xs text-ink-400 underline underline-offset-2 hover:text-ink-600"
+            >
+              Re-fetch bill
+            </button>
+          </div>
+        )}
+
+        {/* ── Step 4: Amount + charges ── */}
+        {fetchedBill && (
+          <>
+            <div className="sm:col-span-2">
+              <Label htmlFor="amount">Amount to pay (₹)</Label>
+              <Input
+                id="amount"
+                required
+                type="number"
+                min={1}
+                max={maxAmount}
+                placeholder="Enter amount in rupees"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+              {/* Quick-fill buttons */}
+              {(fetchedBill.dueAmount || billDetails?.minAmount) && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {billDetails?.minAmount !== undefined && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(String(billDetails.minAmount))}
+                      className="rounded-full border border-ink-200 px-3 py-1 text-xs font-medium text-ink-700 hover:border-brand-300 hover:text-brand-700"
+                    >
+                      Min due — {formatINR(billDetails.minAmount!)}
+                    </button>
+                  )}
+                  {fetchedBill.dueAmount && fetchedBill.dueAmount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(String(fetchedBill.dueAmount))}
+                      className="rounded-full border border-ink-200 px-3 py-1 text-xs font-medium text-ink-700 hover:border-brand-300 hover:text-brand-700"
+                    >
+                      Total due — {formatINR(fetchedBill.dueAmount)}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Charge preview */}
+            {quote && amtNum > 0 && (
+              <div className="sm:col-span-2 rounded-xl border border-ink-200 bg-ink-50/50 p-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-ink-600">Bill amount</span>
+                  <span className="font-medium text-ink-900">
+                    {formatINR(amtNum)}
+                  </span>
+                </div>
+                <div className="mt-1 flex justify-between">
+                  <span className="text-ink-600">Service charge</span>
+                  <span className="font-medium text-ink-900">
+                    {formatINR(quote.serviceCharge)}
+                  </span>
+                </div>
+                {quote.gst > 0 && (
+                  <div className="mt-1 flex justify-between">
+                    <span className="text-ink-600">GST (18%)</span>
+                    <span className="font-medium text-ink-900">
+                      {formatINR(quote.gst)}
+                    </span>
+                  </div>
+                )}
+                <hr className="my-2 border-ink-200" />
+                <div className="flex justify-between font-semibold">
+                  <span className="text-ink-700">Total debit from wallet</span>
+                  <span className="text-ink-900">
+                    {formatINR(quote.totalDebit)}
+                  </span>
+                </div>
+                {quote.commission > 0 && (
+                  <p className="mt-2 text-xs text-emerald-600">
+                    Commission earned: {formatINR(quote.commission)} (net of 2% TDS)
+                  </p>
+                )}
+              </div>
+            )}
+            {quoteLoading && amtNum > 0 && (
+              <p className="sm:col-span-2 text-center text-xs text-ink-400 animate-pulse">
+                Calculating charges…
+              </p>
+            )}
+          </>
+        )}
+
+        {/* ── Error ── */}
+        {error && (
+          <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* ── Processing notice (async payment) ── */}
+        {processing && (
+          <div className="sm:col-span-2 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <span>{processing}</span>
+          </div>
+        )}
+
+        {/* ── Submit ── */}
+        {fetchedBill && (
+          <div className="sm:col-span-2">
+            <Button
+              type="submit"
+              size="lg"
+              className="w-full"
+              disabled={paying || !amtNum || amtNum <= 0 || enquiryExpired}
+              isLoading={paying}
+            >
+              Pay{" "}
+              {quote
+                ? formatINR(quote.totalDebit)
+                : amtNum
+                  ? formatINR(amtNum)
+                  : "bill"}
+            </Button>
+            <p className="mt-2 text-center text-[11px] text-ink-400">
+              Confirmed with your transaction PIN. Debited from your wallet —
+              failed payments are auto-refunded.
+            </p>
+          </div>
+        )}
+      </form>
+
+      <TxnPinDialog
+        open={pinOpen}
+        title="Pay credit card bill"
+        detail={`${billerParams?.billerName ?? billerName}${
+          amount ? ` · ${formatINR(Number(amount))}` : ""
+        }`}
+        amount={amtNum || undefined}
+        busy={paying}
+        onConfirm={payWithPin}
+        onCancel={() => !paying && setPinOpen(false)}
+      />
+      <TransactionResult result={result} onClose={() => setResult(null)} />
+    </>
+  );
+}

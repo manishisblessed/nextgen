@@ -18,6 +18,7 @@ import { samedaySettlementConfigured } from "./sameday-settlement";
 import { samedaySettlementPayout } from "./sameday-payout";
 import { rechargekitConfigured } from "./sameday-rechargekit";
 import { rechargekitDirectConfigured } from "./rechargekit-direct";
+import { chagansCcBillConfigured } from "./chagans-cc-bill";
 import { leegalityConfigured } from "./leegality";
 import { msg91Configured, msg91Sms } from "./msg91";
 import { resendConfigured, resendEmail } from "./resend";
@@ -332,6 +333,7 @@ export function partnerStatus() {
     settlement: { live: flags.settlement && samedaySettlementConfigured(), provider: flags.settlement && samedaySettlementConfigured() ? "SAMEDAY" : "NONE" },
     rechargekit: { live: flags.rechargekit && rechargekitConfigured(), provider: flags.rechargekit && rechargekitConfigured() ? "SAMEDAY_RECHARGEKIT" : "NONE" },
     rechargekitDirect: { live: flags.rechargekitDirect && rechargekitDirectConfigured(), provider: flags.rechargekitDirect && rechargekitDirectConfigured() ? "RECHARGEKIT_DIRECT" : "NONE" },
+    chagansCcBill: { live: flags.rechargekitDirect && chagansCcBillConfigured(), provider: flags.rechargekitDirect && chagansCcBillConfigured() ? "CHAGANS_CC_BILL" : "NONE" },
     esign:    { live: flags.esign && leegalityConfigured(), provider: flags.esign && leegalityConfigured() ? "LEEGALITY" : "NONE" }
   };
 }

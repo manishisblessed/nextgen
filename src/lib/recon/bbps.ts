@@ -7,6 +7,7 @@ import { round, add } from "@/lib/money";
 import { sendOpsAlert } from "@/lib/monitoring/alerts";
 import { emitWebhookEvent } from "@/lib/platform/webhooks";
 import { logger } from "@/lib/logger";
+import { reconcileNonTerminalByRef } from "@/lib/recon/reconcileOne";
 
 const BBPS_SERVICES: ServiceCode[] = [
   "BILL_ELECTRICITY", "BILL_WATER", "BILL_GAS",
@@ -60,12 +61,14 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
   let settled = 0;
   let refunded = 0;
 
-  // 1. DRAIN — poll every PROCESSING BBPS transaction older than 2 minutes.
+  // 1. DRAIN — poll every PROCESSING or NEEDS_REVIEW BBPS txn older than 2 min.
+  //    NEEDS_REVIEW rows are parked here when the initial pay call returned an
+  //    indeterminate result; they are re-polled exactly the same way using the
+  //    shared reconcileNonTerminalByRef helper (which mines refs from JSON).
   const inflight = await prisma.transaction.findMany({
     where: {
-      status: "PROCESSING",
+      status: { in: ["PROCESSING", "NEEDS_REVIEW"] },
       service: { in: BBPS_SERVICES },
-      partnerTxnId: { not: null },
       createdAt: { lt: new Date(now - DRAIN_AGE_MS) },
     },
     orderBy: { createdAt: "asc" },
@@ -75,6 +78,7 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
       refId: true,
       userId: true,
       partnerTxnId: true,
+      status: true,
       amount: true,
       fee: true,
       commission: true,
@@ -87,6 +91,19 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
   let drained = 0;
   for (const txn of inflight) {
     try {
+      // NEEDS_REVIEW rows may have no partnerTxnId yet. Route them through the
+      // shared reconcileNonTerminalByRef which mines request/response JSON for
+      // any resolvable ref before polling the provider.
+      if (txn.status === "NEEDS_REVIEW") {
+        const res = await reconcileNonTerminalByRef(txn.refId, { source: "recon_bbps_sweep" });
+        if (res.found) {
+          if (res.outcome === "settled") settled++;
+          else if (res.outcome === "refunded") refunded++;
+          else drained++;
+        }
+        continue;
+      }
+
       const r = await bbps.status({ orderId: txn.partnerTxnId! });
       if (!r.ok) continue;
 

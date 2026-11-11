@@ -78,6 +78,7 @@ const baseServices: NavItem[] = [
   { href: "/dashboard/wallet", label: "Payment Gateway", icon: CreditCard, badge: "New" },
   { href: "/dashboard/money-transfer", label: "Money Transfer", icon: Send },
   { href: "/dashboard/payout", label: "Payout", icon: Landmark, badge: "New" },
+  { href: "/dashboard/knteer-payout", label: "Bank Transfer", icon: Landmark },
   { href: "/dashboard/aadhaar-pay", label: "AePS / Aadhaar Pay", icon: Fingerprint },
   { href: "/dashboard/upi", label: "UPI Collect", icon: Send },
   { href: "/dashboard/recharge/mobile", label: "Recharges", icon: Smartphone },

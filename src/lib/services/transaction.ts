@@ -10,7 +10,25 @@ import { emitWebhookEvent } from "../platform/webhooks";
 import { distributeCommission, distributeMdrCommission, mdrKindForService } from "../commission/distribute";
 import { creditServiceMargin } from "../commission/revenue";
 import { isChargeDrivenService } from "../scheme/constants";
+import { sendOpsAlert } from "../monitoring/alerts";
 import type { PartnerResult } from "../partners/types";
+
+// ─── Recon-capable rails ──────────────────────────────────────────────────────
+// Service rails that (a) have a provider status() API and (b) are drained by a
+// reconciliation sweep — i.e. rails where an INDETERMINATE pay outcome can be
+// safely HELD (NEEDS_REVIEW) and resolved out-of-band instead of blind-refunded.
+// Kept in sync with the recon coverage in src/lib/recon/bbps.ts.
+const RECON_CAPABLE_BBPS_SERVICES: ServiceCode[] = [
+  "BILL_ELECTRICITY", "BILL_WATER", "BILL_GAS",
+  "BILL_CREDIT_CARD", "BILL_EDUCATION", "BILL_INSURANCE",
+  "RECHARGE_BROADBAND",
+];
+
+function railSupportsHoldAndRecon(partner: string, service: ServiceCode): boolean {
+  if (partner === "SAMEDAY_RECHARGEKIT") return true;
+  if (partner === "SAMEDAY_PAY2NEW") return RECON_CAPABLE_BBPS_SERVICES.includes(service);
+  return false;
+}
 
 /**
  * Wraps every external partner call inside our DB ledger so we get:
@@ -263,6 +281,45 @@ export async function runTransaction<TIn, TOut>(
       operator: input.operator ?? null,
     });
     return { status: "SUCCESS", refId, data: result.data };
+  }
+
+  // 4b. INDETERMINATE path — a transport/gateway failure (NETWORK / HTTP 5xx /
+  // timeout) on a recon-capable rail parks the row in NEEDS_REVIEW without an
+  // immediate refund. Funds are held; the provider status API / recon sweep /
+  // admin resolver will confirm the true outcome and trigger a double-checked
+  // deferred refund via finalizeServiceTransaction.
+  if (!result.ok && railSupportsHoldAndRecon(input.partner, input.service)) {
+    await prisma.transaction.update({
+      where: { id: txn.id },
+      data: {
+        status: "NEEDS_REVIEW",
+        errorCode: result.code,
+        errorMessage:
+          "Payment is being verified with the provider. Your funds are safe and held until it is confirmed — no action needed.",
+        response: (result.raw ?? null) as Prisma.InputJsonValue,
+      },
+    });
+    void sendOpsAlert({
+      title: "Payment HELD for review (funds NOT refunded) — awaiting provider confirm",
+      severity: "critical",
+      details: {
+        refId,
+        service: input.service,
+        partner: input.partner,
+        code: result.code ?? null,
+        amount: input.amount,
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        userId: input.userId,
+        action: "txn.held_for_review",
+        entity: "Transaction",
+        entityId: txn.id,
+        meta: { refId, code: result.code, reason: "provider_indeterminate_pending_recon" },
+      },
+    });
+    return { status: "NEEDS_REVIEW" as const, refId, error: "Payment under verification" };
   }
 
   // Failure path — refund the reserved money via the ledger (REVERSAL credit).

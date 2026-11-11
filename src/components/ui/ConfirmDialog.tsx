@@ -21,6 +21,7 @@ export function ConfirmDialog({
   tone = "danger",
   busy = false,
   input,
+  extraActions,
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,6 +33,8 @@ export function ConfirmDialog({
   tone?: "danger" | "default";
   busy?: boolean;
   input?: { label: string; placeholder?: string; required?: boolean };
+  /** Optional actions rendered to the left of Cancel/Confirm (e.g. a "Not found — refund" shortcut). */
+  extraActions?: ReactNode;
 }) {
   const [value, setValue] = useState("");
 
@@ -48,6 +51,7 @@ export function ConfirmDialog({
       size="sm"
       footer={
         <>
+          {extraActions && <div className="mr-auto flex gap-2">{extraActions}</div>}
           <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
             {cancelLabel}
           </Button>

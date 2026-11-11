@@ -113,8 +113,14 @@ export async function samedayRequest<T extends { success?: boolean }>(
  * key pair per partner account.
  */
 export function samedayCredentials(
-  product: "BBPS" | "SETTLEMENT" | "RECHARGEKIT"
+  product: "BBPS" | "SETTLEMENT" | "RECHARGEKIT" | "KNTEER_PAYOUT"
 ): SamedayCredentials | null {
+  if (product === "KNTEER_PAYOUT") {
+    const apiKey = process.env.SAMEDAY_KNTEER_PAYOUT_API_KEY || env.SAMEDAY_POS_API_KEY;
+    const apiSecret = process.env.SAMEDAY_KNTEER_PAYOUT_API_SECRET || env.SAMEDAY_POS_API_SECRET;
+    if (!apiKey || !apiSecret) return null;
+    return { baseUrl: env.SAMEDAY_POS_BASE_URL, apiKey, apiSecret };
+  }
   const keyMap = {
     BBPS: env.SAMEDAY_BBPS_API_KEY,
     SETTLEMENT: env.SAMEDAY_SETTLEMENT_API_KEY,

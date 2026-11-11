@@ -28,11 +28,14 @@ import {
   FileText,
   CheckCircle2,
   XCircle,
+  ShieldAlert,
+  TrendingUp,
 } from "lucide-react";
 import { SettlementReportTab } from "./SettlementReportTab";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -47,6 +50,8 @@ import type {
   PosPaymentMode,
   LocalPosMachine,
   MyPosMachinesResponse,
+  PosMachineLimitsResponse,
+  PosMachineLimitStatus,
   PosTerminalTreeResponse,
   TerminalTreeMember,
   TerminalTreeTerminal,
@@ -163,6 +168,124 @@ function readPosDeepLink(): { tab: Tab | null; from: string | null; to: string |
   };
 }
 
+// ─── POS Machine Limit Alert Banner ───────────────────────────────────────────
+// Fetches /api/pos/machine-limits and shows a red alert when any machine has
+// exceeded its monthly transaction limit, plus an amber warning when any is
+// at 80–100 %. Mounted above the tabs so it's always visible.
+
+function formatLimitINR(n: number): string {
+  if (n >= 100_000) return `₹${(n / 100_000).toFixed(n % 100_000 === 0 ? 0 : 1)} L`;
+  return `₹${n.toLocaleString("en-IN")}`;
+}
+
+function LimitProgressBar({ pct, exceeded }: { pct: number; exceeded: boolean }) {
+  const cappedPct = Math.min(pct, 100);
+  return (
+    <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink-200">
+      <div
+        className={cn(
+          "h-full rounded-full transition-all",
+          exceeded ? "bg-rose-500" : cappedPct >= 80 ? "bg-amber-400" : "bg-emerald-500"
+        )}
+        style={{ width: `${cappedPct}%` }}
+      />
+    </div>
+  );
+}
+
+function MachineLimitAlertBanner() {
+  const { data, isLoading } = useSWR<PosMachineLimitsResponse>(
+    "/api/pos/machine-limits",
+    fetcher,
+    { revalidateOnFocus: false, refreshInterval: 60_000 }
+  );
+
+  if (isLoading || !data) return null;
+  if (data.exceeded.length === 0 && data.warning.length === 0) return null;
+
+  const isExceeded = data.exceeded.length > 0;
+
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border p-4",
+        isExceeded
+          ? "border-rose-300 bg-rose-50"
+          : "border-amber-300 bg-amber-50"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            isExceeded ? "bg-rose-100" : "bg-amber-100"
+          )}
+        >
+          <ShieldAlert className={cn("h-4 w-4", isExceeded ? "text-rose-600" : "text-amber-600")} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-sm font-bold", isExceeded ? "text-rose-800" : "text-amber-800")}>
+            {isExceeded
+              ? `${data.exceeded.length} machine${data.exceeded.length > 1 ? "s have" : " has"} exceeded the monthly transaction limit`
+              : `${data.warning.length} machine${data.warning.length > 1 ? "s are" : " is"} approaching the monthly transaction limit`}
+          </p>
+          <p className={cn("mt-0.5 text-xs", isExceeded ? "text-rose-700" : "text-amber-700")}>
+            {isExceeded
+              ? "These machines have processed more than their allowed monthly volume. Contact your admin to raise or reset the limit."
+              : "These machines are at 80 % or more of their monthly transaction cap. Plan accordingly."}
+          </p>
+
+          {/* Machine cards */}
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {[...data.exceeded, ...data.warning].map((m: PosMachineLimitStatus) => (
+              <div
+                key={m.machineId}
+                className={cn(
+                  "rounded-xl border px-3 py-2.5",
+                  m.limitExceeded
+                    ? "border-rose-200 bg-white"
+                    : "border-amber-200 bg-white"
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="font-mono text-xs font-bold text-ink-900">
+                      {m.tid ?? m.serial ?? "TID —"}
+                    </span>
+                    {m.model && (
+                      <span className="ml-1.5 text-[10px] text-ink-400">{m.model}</span>
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold",
+                      m.limitExceeded
+                        ? "bg-rose-100 text-rose-700"
+                        : "bg-amber-100 text-amber-700"
+                    )}
+                  >
+                    {m.limitUsedPct}%
+                  </span>
+                </div>
+                <LimitProgressBar pct={m.limitUsedPct} exceeded={m.limitExceeded} />
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="text-[10px] text-ink-400">
+                    <TrendingUp className="mr-0.5 inline h-3 w-3" />
+                    {formatLimitINR(m.monthlyTotal)} used
+                  </span>
+                  <span className="text-[10px] font-semibold text-ink-500">
+                    Limit: {formatLimitINR(m.effectiveLimit)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PosPage() {
   const { data: authSession } = useSession();
   const isRetailer = (authSession?.user as { role?: string } | undefined)?.role === "RETAILER";
@@ -196,6 +319,9 @@ export default function PosPage() {
           </Button>
         }
       />
+
+      {/* Machine transaction limit alert — shows when any machine exceeds or nears its monthly cap */}
+      <MachineLimitAlertBanner />
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl border border-ink-100 bg-ink-50/60 p-1">
@@ -465,6 +591,37 @@ function MachinesTab() {
     { key: "city", header: "City", render: (r) => r.city || "—" },
     { key: "status", header: "Status", render: (r) => machineBadge(r.status) },
     {
+      key: "monthlyLimit",
+      header: "Monthly Limit",
+      render: (r) => {
+        const limit = r.effectiveLimit ?? 650_000;
+        const used = r.monthlyTotal ?? 0;
+        const pct = r.limitUsedPct ?? 0;
+        const exceeded = r.limitExceeded ?? false;
+        return (
+          <div className="min-w-[120px]">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className={cn("font-semibold", exceeded ? "text-rose-600" : pct >= 80 ? "text-amber-600" : "text-ink-500")}>
+                {formatLimitINR(used)}
+              </span>
+              <span className="text-ink-400">{formatLimitINR(limit)}</span>
+            </div>
+            <LimitProgressBar pct={pct} exceeded={exceeded} />
+            <div className="mt-0.5 text-right text-[10px] font-bold">
+              <span className={cn(exceeded ? "text-rose-600" : pct >= 80 ? "text-amber-600" : "text-ink-400")}>
+                {pct}%
+              </span>
+              {exceeded && (
+                <span className="ml-1 inline-flex items-center gap-0.5 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-bold text-rose-700">
+                  <ShieldAlert className="h-2.5 w-2.5" /> EXCEEDED
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
       key: "assignee",
       header: "Assigned To",
       render: (r) => {
@@ -492,10 +649,11 @@ function MachinesTab() {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Active Terminals" value={stats ? String(stats.active) : "..."} icon={Monitor} accent="brand" />
         <StatCard label="Total Machines" value={stats ? String(stats.total) : "..."} icon={CreditCard} accent="violet" />
-        <StatCard label="On This Page" value={String(machines.length)} icon={ArrowLeftRight} accent="emerald" />
+        <StatCard label="Limit Exceeded" value={stats ? String(stats.exceededCount) : "..."} icon={ShieldAlert} accent="accent" />
+        <StatCard label="Near Limit (≥80%)" value={stats ? String(stats.warningCount) : "..."} icon={TrendingUp} accent="emerald" />
       </div>
 
       <div className="flex items-center gap-3">
@@ -801,6 +959,13 @@ function TransactionsTab({ view }: { view: TxnView }) {
     { key: "customer_name", header: "Customer", render: (r) => <span className="max-w-[140px] truncate block text-xs">{cleanName(r.customer_name)}</span> },
     { key: "card_number", header: "Card No.", render: (r) => r.card_number ? <span className="font-mono text-xs">{r.card_number}</span> : "—" },
     { key: "rrn", header: "RRN", render: (r) => <span className="font-mono text-xs">{r.rrn}</span> },
+    { key: "slip", header: "Slip", render: (r) => {
+      // Build the canonical transactionRef matching the server mirror key.
+      const tid = (r.terminal_id ?? "").trim().toUpperCase();
+      const rrn = (r.rrn ?? "").replace(/\s+/g, "").toUpperCase();
+      const ref = rrn ? (tid ? `SDPOS:${tid}:${rrn}` : `SDPOS:${rrn}`) : `SDP-${r.id}`;
+      return <SlipActions type="pos" id={ref} />;
+    }},
   ];
   const cols = colsAll.filter((c) => showClassification || c.key !== "card_classification");
 

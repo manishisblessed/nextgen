@@ -1,7 +1,8 @@
 import type { WalletLien } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { placeLienHold, releaseLienHold, sweepLiensForUser } from "@/lib/ledger";
+import { placeLienHold, releaseLienHold, sweepLiensForUser, creditWallet, debitWallet } from "@/lib/ledger";
 import { dec, gt, sub, toNumber } from "@/lib/money";
+import { getSuspenseAccountId } from "@/lib/wallet/suspense";
 
 /**
  * Admin wallet liens (chargeback / fraud recovery).
@@ -167,6 +168,92 @@ export async function releaseWalletLien(
         releasedAt: new Date(),
         closedAt: new Date(),
         remarks: note?.trim() ? `${lien.remarks} | Released: ${note.trim()}` : lien.remarks,
+      },
+    });
+  });
+}
+
+/**
+ * Reverse a RECOVERED lien — return the already-recovered funds back to the
+ * retailer. Used when a lien was placed and recovered in error (e.g. SameDay
+ * later refunded our float too, creating a double-recovery).
+ *
+ * Double-entry: debit Company Suspense → credit retailer wallet.
+ * Idempotent via stable idempotency keys on each leg.
+ * Refuses if the lien is already RELEASED.
+ */
+export async function reverseWalletLien(
+  lienId: string,
+  actorId: string,
+  note?: string
+): Promise<WalletLien> {
+  // Look up the suspense account ID before entering the transaction
+  // (getSuspenseAccountId caches after first call and is read-only).
+  const suspenseId = await getSuspenseAccountId();
+
+  return prisma.$transaction(async (tx) => {
+    const lien = await tx.walletLien.findUnique({ where: { id: lienId } });
+    if (!lien) throw new WalletLienError("NOT_FOUND", "Lien not found", 404);
+    if (lien.status === "RELEASED")
+      throw new WalletLienError("BAD_STATE", "Lien is already RELEASED");
+
+    // Release any outstanding hold (the unfrozen portion is returned to the
+    // retailer's spendable balance automatically).
+    const remaining = sub(lien.amount, lien.recoveredAmount);
+    if (gt(remaining, 0)) {
+      await releaseLienHold(lien.targetUserId, remaining, tx);
+    }
+
+    // Return the already-recovered portion from Company Suspense back to the
+    // retailer wallet via a double-entry journal movement.
+    const recoveredAmt = toNumber(lien.recoveredAmount);
+    if (recoveredAmt > 0) {
+      // Debit Company Suspense (reversal of the original sweep credit).
+      await debitWallet(
+        {
+          userId: suspenseId,
+          amount: recoveredAmt,
+          reason: "REVERSAL",
+          refType: "WalletLien",
+          refId: lienId,
+          idempotencyKey: `lien:${lienId}:reverse:suspense`,
+        },
+        tx
+      );
+      // Credit retailer (funds returned).
+      await creditWallet(
+        {
+          userId: lien.targetUserId,
+          amount: recoveredAmt,
+          reason: "REVERSAL",
+          refType: "WalletLien",
+          refId: lienId,
+          idempotencyKey: `lien:${lienId}:reverse:user`,
+        },
+        tx
+      );
+      // Notify the retailer.
+      await tx.notification.create({
+        data: {
+          userId: lien.targetUserId,
+          title: "Lien reversal — funds returned",
+          body: `₹${recoveredAmt.toFixed(2)} that was previously recovered via a wallet lien has been returned to your wallet.`,
+          channel: "INAPP",
+          href: "/dashboard/wallet",
+        },
+      });
+    }
+
+    return tx.walletLien.update({
+      where: { id: lienId },
+      data: {
+        status: "RELEASED",
+        releasedById: actorId,
+        releasedAt: new Date(),
+        closedAt: new Date(),
+        remarks: note?.trim()
+          ? `${lien.remarks} | Reversed: ${note.trim()}`
+          : `${lien.remarks} | Reversed by admin`,
       },
     });
   });

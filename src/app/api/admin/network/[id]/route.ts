@@ -80,6 +80,10 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
                 u.userLimit.instantDailyCap != null
                   ? toNumber(dec(u.userLimit.instantDailyCap))
                   : null,
+              posMachineTransactionLimit:
+                u.userLimit.posMachineTransactionLimit != null
+                  ? toNumber(dec(u.userLimit.posMachineTransactionLimit))
+                  : null,
               settlementTier: u.userLimit.settlementTier,
               note: u.userLimit.note,
             }
@@ -117,6 +121,8 @@ const Body = z.discriminatedUnion("action", [
     settlementDailyCap: z.number().positive().nullable().optional(),
     settlementPerTxnCap: z.number().positive().nullable().optional(),
     instantDailyCap: z.number().positive().nullable().optional(),
+    /** Per-machine monthly POS transaction cap for all this user's terminals (₹). */
+    posMachineTransactionLimit: z.number().positive().nullable().optional(),
     settlementTier: z.string().max(40).nullable().optional(),
     note: z.string().max(300).nullable().optional(),
   }),

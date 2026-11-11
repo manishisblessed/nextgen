@@ -249,9 +249,29 @@ export async function rechargekitPay(input: {
     return r;
   }
 
+  const providerStatus = normalizeStatus(r.data.status);
+
+  // A synchronous FAILED or REFUNDED status from RechargeKit on the card-push
+  // rail DOES NOT guarantee that no money moved — SameDay may still debit the
+  // subscriber and reverse our float separately. Never classify these as a safe
+  // immediate refund; return ok:false (non-indeterminate) so runTransaction
+  // routes them into NEEDS_REVIEW for deferred double-checked resolution.
+  if (providerStatus === "FAILED" || providerStatus === "REFUNDED") {
+    log.warn(
+      { status: providerStatus, txnId: r.data.txn_id, requestId: r.data.request_id },
+      "RechargeKit pay returned terminal failure — holding for recon double-check"
+    );
+    return {
+      ok: false,
+      code: `PROVIDER_${providerStatus}`,
+      message: r.data.message || `Provider returned ${providerStatus}`,
+      raw: r.raw,
+    };
+  }
+
   const result: RechargekitPayResult = {
     success: true,
-    status: normalizeStatus(r.data.status) as "SUCCESS" | "PENDING" | "FAILED",
+    status: providerStatus as "SUCCESS" | "PENDING" | "FAILED",
     txnId: r.data.txn_id ?? "",
     operatorReference: r.data.operator_reference,
     amount: r.data.amount ?? input.amount,

@@ -1273,9 +1273,17 @@ function LiensTab({
   const [liens, setLiens] = useState<Lien[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("ACTIVE");
+  const [status, setStatus] = useState("all");
+  const [listQuery, setListQuery] = useState("");
+  const [debouncedListQuery, setDebouncedListQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
+
+  // Debounce the lien-list search query.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedListQuery(listQuery), 300);
+    return () => clearTimeout(t);
+  }, [listQuery]);
   const pageSize = 25;
 
   useEffect(() => {
@@ -1313,6 +1321,7 @@ function LiensTab({
         page: String(page),
         pageSize: String(pageSize),
       });
+      if (debouncedListQuery.trim()) params.set("q", debouncedListQuery.trim());
       const res = await fetch(`/api/admin/wallet/liens?${params}`);
       const data = await res.json();
       if (res.ok) {
@@ -1322,7 +1331,7 @@ function LiensTab({
     } finally {
       setLoading(false);
     }
-  }, [status, page]);
+  }, [status, page, debouncedListQuery]);
 
   useEffect(() => {
     loadLiens();
@@ -1375,7 +1384,13 @@ function LiensTab({
     }
   };
 
-  const act = async (id: string, action: "recover" | "release") => {
+  const act = async (id: string, action: "recover" | "release" | "reverse") => {
+    if (action === "reverse") {
+      const ok = window.confirm(
+        "Return all recovered funds back to the retailer wallet?\n\nThis debits Company Suspense and credits the retailer. Only do this if SameDay has already refunded the float and you have confirmed a double-recovery."
+      );
+      if (!ok) return;
+    }
     setActing(id);
     try {
       const res = await fetch(`/api/admin/wallet/liens/${id}`, {
@@ -1385,7 +1400,14 @@ function LiensTab({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Action failed");
-      onDone(action === "recover" ? "Recovery sweep run." : "Lien released.", true);
+      onDone(
+        action === "recover"
+          ? "Recovery sweep run."
+          : action === "reverse"
+          ? "Lien reversed — funds returned to retailer."
+          : "Lien released.",
+        true
+      );
       loadLiens();
     } catch (e) {
       onDone(e instanceof Error ? e.message : "Action failed", false);
@@ -1486,6 +1508,15 @@ function LiensTab({
               Release
             </Button>
           </div>
+        ) : r.status !== "RELEASED" && Number(r.recoveredAmount) > 0 ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={acting === r.id}
+            onClick={() => act(r.id, "reverse")}
+          >
+            Reverse
+          </Button>
         ) : null,
     },
   ];
@@ -1647,6 +1678,12 @@ function LiensTab({
       {/* Liens list */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={listQuery}
+            onChange={(e) => { setListQuery(e.target.value); setPage(1); }}
+            placeholder="Search name / userCode / shop…"
+            className={`${inputCls} w-56`}
+          />
           <select
             value={status}
             onChange={(e) => { setStatus(e.target.value); setPage(1); }}

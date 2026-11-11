@@ -29,10 +29,13 @@ import {
   Eye,
   XCircle,
   Clock,
+  ShieldAlert,
+  Gauge,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { SlipButton } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -235,8 +238,193 @@ export default function AdminPosPage() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// MACHINES TAB
+// MACHINES TAB — helpers + Set-Limit modal
 // ═══════════════════════════════════════════════════════════════════════
+
+/** Platform default monthly machine limit — mirrors the server constant. */
+const POS_PLATFORM_DEFAULT_LIMIT = 650_000;
+
+function formatLimitINR(n: number): string {
+  if (n >= 100_000) return `₹${(n / 100_000).toFixed(n % 100_000 === 0 ? 0 : 2).replace(/\.?0+$/, "")} L`;
+  return `₹${n.toLocaleString("en-IN")}`;
+}
+
+function SetMachineLimitModal({
+  machine,
+  onClose,
+  onSaved,
+}: {
+  machine: LocalPosMachine;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const label = machine.tid ?? machine.serial ?? machine.externalId;
+  const currentLimit = machine.transactionLimit;
+
+  const [limitStr, setLimitStr] = useState(
+    currentLimit != null ? String(currentLimit) : ""
+  );
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    const raw = limitStr.trim();
+    const limitValue = raw === "" ? null : Number(raw);
+
+    if (raw !== "" && (isNaN(limitValue!) || limitValue! <= 0)) {
+      setErr("Enter a positive number, or leave blank to use the platform default.");
+      return;
+    }
+
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/admin/pos/machines/${machine.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionLimit: limitValue }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr(typeof d.error === "string" ? d.error : "Save failed");
+        return;
+      }
+      toast.success(
+        limitValue == null
+          ? `${label}: limit cleared (platform default ₹6.5 L applies)`
+          : `${label}: limit set to ${formatLimitINR(limitValue)}`
+      );
+      onSaved();
+    } catch {
+      setErr("Request failed. Check your connection.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const PRESETS = [
+    { label: "₹1 L", value: 100_000 },
+    { label: "₹2.5 L", value: 250_000 },
+    { label: "₹5 L", value: 500_000 },
+    { label: "₹6.5 L (default)", value: 650_000 },
+    { label: "₹10 L", value: 1_000_000 },
+    { label: "₹25 L", value: 2_500_000 },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-ink-100 bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
+          <div>
+            <h3 className="font-display text-base font-semibold text-ink-900">
+              Set Transaction Limit
+            </h3>
+            <p className="text-xs text-ink-500">
+              Machine: <span className="font-mono font-semibold">{label}</span>
+              {machine.model && ` · ${machine.model}`}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="space-y-4 p-5">
+          {/* Info callout */}
+          <div className="rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-xs text-brand-800">
+            <Gauge className="mb-0.5 mr-1 inline h-3.5 w-3.5" />
+            <strong>Monthly cap per machine.</strong> The limit resets on the first day of every IST calendar month.
+            Limit priority: <em>machine-level</em> → user-level → platform default (₹6,50,000).
+          </div>
+
+          {/* Current */}
+          <div className="rounded-xl border border-ink-100 bg-ink-50/50 px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-500">Current limit</p>
+            <p className="mt-0.5 text-sm font-bold text-ink-900">
+              {currentLimit != null
+                ? formatLimitINR(currentLimit)
+                : <span className="text-ink-400">Not set — platform default applies (₹6.5 L)</span>}
+            </p>
+          </div>
+
+          {/* Presets */}
+          <div>
+            <p className="mb-2 text-xs font-semibold text-ink-500">Quick presets</p>
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setLimitStr(String(p.value))}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                    limitStr === String(p.value)
+                      ? "border-brand-400 bg-brand-50 text-brand-700"
+                      : "border-ink-200 text-ink-600 hover:border-brand-300 hover:bg-brand-50"
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Manual input */}
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ink-500">
+              Custom limit (₹) — leave blank to use platform default
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="1000"
+              value={limitStr}
+              onChange={(e) => { setLimitStr(e.target.value); setErr(null); }}
+              placeholder={`Platform default: ${formatLimitINR(POS_PLATFORM_DEFAULT_LIMIT)}`}
+              className="w-full rounded-xl border border-ink-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+            />
+          </div>
+
+          {err && (
+            <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {err}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            {currentLimit != null && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={saving}
+                onClick={() => { setLimitStr(""); save(); }}
+              >
+                Clear override
+              </Button>
+            )}
+            <Button variant="primary" size="sm" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Save limit
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function MachinesTab() {
   const [page, setPage] = useState(1);
@@ -251,6 +439,7 @@ function MachinesTab() {
   const [unassigning, setUnassigning] = useState<Set<string>>(new Set());
   const [unassignTarget, setUnassignTarget] = useState<LocalPosMachine | null>(null);
   const [recallOpen, setRecallOpen] = useState(false);
+  const [limitTarget, setLimitTarget] = useState<LocalPosMachine | null>(null);
 
   const params = new URLSearchParams({ page: String(page), pageSize: "50" });
   if (statusFilter) params.set("status", statusFilter);
@@ -467,6 +656,28 @@ function MachinesTab() {
     },
     { key: "location", header: "Location", render: (r) => r.location || "—" },
     { key: "status", header: "Status", render: (r) => machineBadge(r.status) },
+    {
+      key: "transactionLimit",
+      header: "Txn Limit / mo.",
+      render: (r) => (
+        <div className="flex items-center gap-1.5">
+          {r.transactionLimit != null ? (
+            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700">
+              {formatLimitINR(r.transactionLimit)}
+            </span>
+          ) : (
+            <span className="text-xs text-ink-400">Default (₹6.5 L)</span>
+          )}
+          <button
+            onClick={() => setLimitTarget(r)}
+            title="Set transaction limit"
+            className="rounded-lg p-1 text-ink-400 hover:bg-ink-100 hover:text-brand-600"
+          >
+            <Gauge className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ),
+    },
     {
       key: "assignee",
       header: "Assigned To",
@@ -735,6 +946,14 @@ function MachinesTab() {
           machines={assignTargets}
           onClose={() => setAssignTargets([])}
           onAssigned={() => { setAssignTargets([]); setSelected(new Set()); mutate(); }}
+        />
+      )}
+
+      {limitTarget && (
+        <SetMachineLimitModal
+          machine={limitTarget}
+          onClose={() => setLimitTarget(null)}
+          onSaved={() => { setLimitTarget(null); mutate(); }}
         />
       )}
 
@@ -1326,6 +1545,17 @@ function TxnSlipDrawer({ txn, showClassification, onClose }: { txn: PosTransacti
               <Download className="h-4 w-4" /> Download Receipt
             </a>
           )}
+          {/* NextGenPay formatted slip */}
+          {(() => {
+            const tid = (txn.terminal_id ?? "").trim().toUpperCase();
+            const rrn = (txn.rrn ?? "").replace(/\s+/g, "").toUpperCase();
+            const ref = rrn ? (tid ? `SDPOS:${tid}:${rrn}` : `SDPOS:${rrn}`) : `SDP-${txn.id}`;
+            return (
+              <div className="mt-3">
+                <SlipButton type="pos" id={ref} label="View / Download NextGenPay Slip" />
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

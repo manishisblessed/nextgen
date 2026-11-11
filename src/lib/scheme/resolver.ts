@@ -27,6 +27,19 @@ import { resolveUserScheme, type SchemeSource } from "./resolve-scheme";
 /** @deprecated Use SchemeSource from ./resolve-scheme (kept as an alias). */
 export type ResolvedRateSource = SchemeSource;
 
+/**
+ * Thrown when a service's pricing cannot be resolved (e.g. KNTEER_PAYOUT with
+ * no active scheme slab). The transfer route catches this and returns 422.
+ */
+export class PricingUnavailableError extends Error {
+  public statusCode = 422;
+  public code = "PRICING_UNAVAILABLE";
+  constructor(message = "Pricing is not available for this service. Contact support.") {
+    super(message);
+    this.name = "PricingUnavailableError";
+  }
+}
+
 export type EffectiveRate = {
   source: SchemeSource;
   schemeId: string | null;

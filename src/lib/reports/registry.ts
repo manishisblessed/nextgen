@@ -214,7 +214,7 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
     type: "pg",
     title: "Payment Gateway Report",
     short: "Payment Gateway",
-    description: "Online collections via Razorpay / UPI collect, with fees and success rate.",
+    description: "PG collections and wallet top-ups via Chagans, Razorpay and other gateways, with fees and success rate.",
     icon: CreditCard,
     accent: "emerald",
     columns: [
@@ -224,7 +224,7 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
       { key: "service", header: "Mode" },
       { key: "customer", header: "Customer" },
       { key: "amount", header: "Amount", format: "money", align: "right" },
-      { key: "fee", header: "Fee", format: "money", align: "right" },
+      { key: "fee", header: "Fee", format: "money", align: "right", color: "red" },
       { key: "status", header: "Status", format: "badge" },
     ],
     filters: {

@@ -5,6 +5,7 @@ import { CreditCard, Store, IndianRupee, Percent, RefreshCw, Users, Wallet } fro
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatINR } from "@/lib/utils";
@@ -171,6 +172,7 @@ export default function AdminPgPage() {
     { key: "net", header: "Net credited", align: "right", render: (r) => <span className="font-semibold text-brand-700">{formatINR(r.net)}</span> },
     { key: "status", header: "Status", render: (r) => statusBadge(r.status) },
     { key: "createdAt", header: "When", render: (r) => <span className="text-xs text-ink-500">{fmtDateTime(r.createdAt)}</span> },
+    { key: "slip", header: "Slip", render: (r) => <SlipActions type="txn" id={r.ref} /> },
   ];
 
   const retailerCols: Column<PgRetailer>[] = [
@@ -212,6 +214,7 @@ export default function AdminPgPage() {
     { key: "amount", header: "Gross paid", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
     { key: "partner", header: "Gateway", render: (r) => <span className="text-xs">{r.partner ?? "—"}</span> },
     { key: "createdAt", header: "When", render: (r) => <span className="text-xs text-ink-500">{fmtDateTime(r.createdAt)}</span> },
+    { key: "slip", header: "Slip", render: (r) => <SlipActions type="txn" id={r.refId} /> },
   ];
 
   const tabs: Array<{ id: Tab; label: string; icon: typeof CreditCard }> = [

@@ -1,171 +1,251 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CreditCard,
-  Link2,
-  Copy,
-  Check,
   IndianRupee,
   ArrowLeftRight,
   Percent,
-  Banknote
+  Banknote,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Input, Label } from "@/components/ui/Input";
-import { pgTransactions, type PgTransaction } from "@/lib/data";
-import { formatINR, generateRefId } from "@/lib/utils";
+import { formatINR } from "@/lib/utils";
+
+type PgStats = {
+  todayCollections: number;
+  todayVolume: number;
+  todayFees: number;
+  successRate: number;
+  pendingSettlement: number;
+  pendingCount: number;
+};
+
+type PgTxn = {
+  id: string;
+  txnId: string;
+  orderId: string;
+  mode: string;
+  amount: number;
+  fee: number;
+  net: number;
+  status: string;
+  settlement: string;
+  gateway: string;
+  date: string;
+  settledAt: string | null;
+};
+
+type PgOverview = {
+  stats: PgStats;
+  transactions: PgTxn[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+const STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "brand"> = {
+  SETTLED: "success",
+  PENDING: "warning",
+  FAILED: "danger",
+};
+
+const GATEWAY_LABELS: Record<string, string> = {
+  CHAGANS_COMET: "Comet",
+  CHAGANS_STAR: "Star",
+  RAZORPAY: "Razorpay",
+  VIABLE_PG: "Viable",
+  BULKPE_PG: "BulkPe",
+};
 
 export default function PgPage() {
-  const [amount, setAmount] = useState("");
-  const [purpose, setPurpose] = useState("");
-  const [link, setLink] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [data, setData] = useState<PgOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
-  function createLink() {
-    if (!amount) return;
-    const ref = generateRefId("PAY");
-    setLink(
-      `https://pay.nxtgpay.com/l/${ref.toLowerCase()}?am=${amount}`
-    );
-    setCopied(false);
-  }
+  const fetchData = useCallback(async (p = 1) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/pg/overview?page=${p}`);
+      if (res.ok) {
+        const d = (await res.json()) as PgOverview;
+        setData(d);
+        setPage(d.page);
+      }
+    } catch {
+      /* silently fail — stats just stay stale */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  function copy() {
-    navigator.clipboard.writeText(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  }
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
-  const cols: Column<PgTransaction>[] = [
-    { key: "id", header: "Txn ID", render: (r) => <span className="font-mono text-xs">{r.id}</span> },
-    { key: "orderId", header: "Order", render: (r) => <span className="font-mono text-xs">{r.orderId}</span> },
-    { key: "mode", header: "Mode" },
-    { key: "amount", header: "Amount", align: "right", render: (r) => <span className="font-semibold">{formatINR(r.amount)}</span> },
-    { key: "fee", header: "Fee", align: "right", render: (r) => (r.fee ? formatINR(r.fee) : "—") },
-    {
-      key: "status",
-      header: "Status",
-      render: (r) => (
-        <Badge
-          variant={
-            r.status === "Success"
-              ? "success"
-              : r.status === "Pending"
-                ? "warning"
-                : r.status === "Refunded"
-                  ? "brand"
-                  : "danger"
-          }
-        >
-          {r.status}
-        </Badge>
-      )
-    },
-    { key: "settlement", header: "Settlement" },
-    { key: "date", header: "Date" }
-  ];
+  const stats = data?.stats;
+  const transactions = data?.transactions ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize ?? 20;
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Payment Gateway"
         title="PG Collections"
-        description="Accept UPI, cards, net banking and wallets. Track every order with real-time status and automated T+1 settlement."
+        description="Track your wallet top-ups and PG collections with real-time status, fees and settlement."
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Today's Collections" value="₹1.28 L" delta="+14.2%" icon={IndianRupee} accent="brand" />
-        <StatCard label="Success Rate" value="96.8%" delta="+0.6%" icon={Percent} accent="emerald" />
-        <StatCard label="Transactions Today" value="42" delta="+8" icon={ArrowLeftRight} accent="violet" />
-        <StatCard label="Pending Settlement" value="₹2.69 L" icon={Banknote} accent="accent" />
+        <StatCard
+          label="Today's Collections"
+          value={stats ? formatINR(stats.todayVolume) : "—"}
+          icon={IndianRupee}
+          accent="brand"
+        />
+        <StatCard
+          label="Success Rate"
+          value={stats ? `${stats.successRate}%` : "—"}
+          icon={Percent}
+          accent="emerald"
+        />
+        <StatCard
+          label="Transactions Today"
+          value={stats ? String(stats.todayCollections) : "—"}
+          icon={ArrowLeftRight}
+          accent="violet"
+        />
+        <StatCard
+          label="Pending Settlement"
+          value={stats ? formatINR(stats.pendingSettlement) : "—"}
+          icon={Banknote}
+          accent="accent"
+        />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            createLink();
-          }}
-          className="space-y-4 rounded-2xl border border-ink-100 bg-white p-6"
-        >
-          <div className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white">
-              <Link2 className="h-4 w-4" />
-            </span>
+      {/* Recent PG transactions — real data from PgSettlementEntry */}
+      <div className="overflow-hidden rounded-2xl border border-ink-100 bg-white">
+        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
+          <div>
             <h3 className="font-display text-base font-semibold text-ink-900">
-              Create payment link
+              Recent PG transactions
             </h3>
+            <p className="text-xs text-ink-500">
+              {total > 0
+                ? `${total} total collection${total === 1 ? "" : "s"}`
+                : "No PG collections yet"}
+            </p>
           </div>
-          <div>
-            <Label htmlFor="pg-amount">Amount (₹)</Label>
-            <Input
-              id="pg-amount"
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Enter amount"
-            />
-          </div>
-          <div>
-            <Label htmlFor="pg-purpose">Purpose (optional)</Label>
-            <Input
-              id="pg-purpose"
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              placeholder="e.g. Invoice #4427"
-            />
-          </div>
-          <Button type="submit" size="lg" className="w-full">
-            <CreditCard className="h-4 w-4" /> Generate link
-          </Button>
-        </form>
-
-        <div className="rounded-2xl border border-ink-100 bg-gradient-to-br from-brand-50 to-accent-50 p-6">
-          <h3 className="font-display text-base font-semibold text-ink-900">
-            Share with your customer
-          </h3>
-          <p className="mt-1 text-xs text-ink-600">
-            Customers can pay via UPI, debit/credit cards, net banking and
-            wallets. You get notified instantly.
-          </p>
-          {link ? (
-            <div className="mt-6 space-y-3">
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-4 py-3">
-                <span className="truncate font-mono text-xs font-semibold text-ink-900">
-                  {link}
-                </span>
-                <button
-                  type="button"
-                  onClick={copy}
-                  className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-brand-700"
-                >
-                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs text-ink-700 shadow-sm">
-                {purpose || "Payment request"} • ₹{amount}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-6 grid h-32 place-items-center rounded-xl border border-dashed border-ink-200 bg-white/60 text-xs text-ink-500">
-              Enter an amount and generate a link to see it here.
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => fetchData(page)}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-xl border border-ink-200 px-3 py-1.5 text-xs font-semibold text-ink-700 hover:bg-ink-50 disabled:opacity-60"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
         </div>
-      </div>
 
-      <DataTable
-        title="Recent PG transactions"
-        description="All orders collected through your payment gateway."
-        columns={cols}
-        data={pgTransactions}
-      />
+        {loading && !data ? (
+          <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-ink-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading…
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className="px-5 py-16 text-center">
+            <CreditCard className="mx-auto h-10 w-10 text-ink-300" />
+            <p className="mt-3 text-sm font-medium text-ink-700">No collections yet</p>
+            <p className="mt-1 text-xs text-ink-500">
+              Top up your wallet via the Payment Gateway to see your collections here.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-ink-50/60 text-left text-xs uppercase tracking-wider text-ink-500">
+                  <tr>
+                    <th className="px-5 py-3 font-semibold">Date</th>
+                    <th className="px-5 py-3 font-semibold">Txn ID</th>
+                    <th className="px-5 py-3 font-semibold">Gateway</th>
+                    <th className="px-5 py-3 font-semibold">Mode</th>
+                    <th className="px-5 py-3 font-semibold text-right">Amount</th>
+                    <th className="px-5 py-3 font-semibold text-right">Fee</th>
+                    <th className="px-5 py-3 font-semibold text-right">Net</th>
+                    <th className="px-5 py-3 font-semibold">Status</th>
+                    <th className="px-5 py-3 font-semibold">Settlement</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100 text-ink-800">
+                  {transactions.map((t) => (
+                    <tr key={t.id} className="hover:bg-ink-50/40">
+                      <td className="whitespace-nowrap px-5 py-3 text-xs text-ink-500">
+                        {new Date(t.date).toLocaleString("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </td>
+                      <td className="px-5 py-3 font-mono text-xs">{t.txnId}</td>
+                      <td className="px-5 py-3 text-xs">
+                        {GATEWAY_LABELS[t.gateway] ?? t.gateway}
+                      </td>
+                      <td className="px-5 py-3 text-xs">{t.mode}</td>
+                      <td className="px-5 py-3 text-right font-semibold">
+                        {formatINR(t.amount)}
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs text-rose-600">
+                        {t.fee > 0 ? `−${formatINR(t.fee)}` : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-right font-semibold text-emerald-700">
+                        {formatINR(t.net)}
+                      </td>
+                      <td className="px-5 py-3">
+                        <Badge variant={STATUS_VARIANT[t.status] ?? "brand"}>
+                          {t.status}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-ink-500">{t.settlement}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-ink-100 px-5 py-3">
+                <p className="text-xs text-ink-500">
+                  Page {page} of {totalPages}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page <= 1}
+                    onClick={() => fetchData(page - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={page >= totalPages}
+                    onClick={() => fetchData(page + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -41,6 +41,7 @@ export type ServiceRouteSeed = {
  */
 export const SERVICE_KEYS = {
   PAYOUT: "payout_bulkpe",
+  KNTEER_PAYOUT: "knteer_payout",
   PG: "pg_razorpay",
   POS: "pos_sameday",
   QR: "qr_dynamic",
@@ -83,6 +84,7 @@ export const SERVICE_KEY_TO_HREF: Record<string, string> = {
   [SERVICE_KEYS.POS]: "/dashboard/pos",
   [SERVICE_KEYS.QR]: "/dashboard/qr",
   [SERVICE_KEYS.PAYOUT]: "/dashboard/payout",
+  [SERVICE_KEYS.KNTEER_PAYOUT]: "/dashboard/knteer-payout",
   [SERVICE_KEYS.AEPS]: "/dashboard/aadhaar-pay",
   [SERVICE_KEYS.UPI]: "/dashboard/upi",
   [SERVICE_KEYS.RECHARGE]: "/dashboard/recharge/mobile",
@@ -111,6 +113,7 @@ const SERVICE_HREF_PREFIXES: Array<[prefix: string, key: string]> = [
   ["/dashboard/pos", SERVICE_KEYS.POS],
   ["/dashboard/qr", SERVICE_KEYS.QR],
   ["/dashboard/payout", SERVICE_KEYS.PAYOUT],
+  ["/dashboard/knteer-payout", SERVICE_KEYS.KNTEER_PAYOUT],
   ["/dashboard/aadhaar-pay", SERVICE_KEYS.AEPS],
   ["/dashboard/upi", SERVICE_KEYS.UPI],
   ["/dashboard/recharge", SERVICE_KEYS.RECHARGE],
@@ -151,6 +154,16 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     enabled: true,
     note: "Bank / UPI disbursals via the Same Day settlement API. Turning this off blocks new payout submissions immediately.",
     sortOrder: 10,
+  },
+  {
+    key: SERVICE_KEYS.KNTEER_PAYOUT,
+    name: "Payout-2 (Same Day Knteer)",
+    type: "SERVICE",
+    kind: "PAYOUT",
+    provider: "SAMEDAY_KNTEER",
+    enabled: false,
+    note: "Bank Transfer via the Knteer rail (displayed as \"Bank Transfer\" in the UI). Enable after setting SAMEDAY_KNTEER_PAYOUT_API_KEY/SECRET.",
+    sortOrder: 11,
   },
   {
     key: SERVICE_KEYS.PG,
@@ -317,9 +330,9 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     name: "Offline CC Bill Payment",
     type: "SERVICE",
     kind: "BBPS",
-    provider: "RECHARGEKIT",
+    provider: "CHAGANS",
     enabled: true,
-    note: "Direct credit card payment via the RechargeKit API (offline rail — no Same Day wrapper). Full 16-digit card number + bank details, IMPS/NEFT transfer type, no bill fetch needed.",
+    note: "Credit card bill payment via the Chagans CC Bill API V2 (BBPS flow — getBillers → getBillerParams → fetchBill → payBill). Replaces the RechargeKit Direct rail.",
     sortOrder: 95,
   },
   {

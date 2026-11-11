@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -228,6 +229,11 @@ export default function PayoutApprovalsPage() {
           </div>
         );
       },
+    },
+    {
+      key: "slip" as keyof Payout,
+      header: "Slip",
+      render: (r) => <SlipActions type="payout" id={r.id} />,
     },
   ];
 

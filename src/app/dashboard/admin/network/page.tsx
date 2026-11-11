@@ -51,6 +51,7 @@ type NetworkUser = {
   walletCap: number | null;
   settlementDailyCap: number | null;
   instantDailyCap: number | null;
+  posMachineTransactionLimit: number | null;
   autoSettle: boolean;
   settlementPaused: boolean;
   children: number;
@@ -608,6 +609,9 @@ function UserDrawer({
   const [instantDailyCap, setInstantDailyCap] = useState(
     user.instantDailyCap != null ? String(user.instantDailyCap) : ""
   );
+  const [posMachineTransactionLimit, setPosMachineTransactionLimit] = useState(
+    user.posMachineTransactionLimit != null ? String(user.posMachineTransactionLimit) : ""
+  );
   const [autoSettle, setAutoSettle] = useState(user.autoSettle);
   const [busy, setBusy] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<string | null>(null);
@@ -1071,6 +1075,14 @@ function UserDrawer({
               onChange={(e) => setSettlementTier(e.target.value)}
               className={inputCls}
             />
+            <input
+              type="number"
+              placeholder="POS machine monthly limit ₹ (default 6,50,000)"
+              title="Monthly transaction volume cap applied to all POS machines assigned to this user. Leave blank to use the platform default (₹6,50,000)."
+              value={posMachineTransactionLimit}
+              onChange={(e) => setPosMachineTransactionLimit(e.target.value)}
+              className={inputCls}
+            />
             <Button
               size="sm"
               disabled={busy === "limits"}
@@ -1081,6 +1093,7 @@ function UserDrawer({
                     walletCap: walletCap ? Number(walletCap) : null,
                     settlementDailyCap: settlementDailyCap ? Number(settlementDailyCap) : null,
                     instantDailyCap: instantDailyCap ? Number(instantDailyCap) : null,
+                    posMachineTransactionLimit: posMachineTransactionLimit ? Number(posMachineTransactionLimit) : null,
                     settlementTier: settlementTier || null,
                   });
                   onChanged("Limits updated.", true);
@@ -1094,7 +1107,8 @@ function UserDrawer({
           </div>
           <p className="mt-2 text-xs text-ink-400">
             Instant settle daily cap limits how much (net) this user can instant-settle per day, on top of the global
-            pool. Leave blank for no per-user cap.
+            pool. POS machine monthly limit caps the total CAPTURED transaction volume per machine per IST calendar month
+            — leave blank for the platform default (₹6,50,000). Individual machine overrides take priority over this.
           </p>
         </Section>
 

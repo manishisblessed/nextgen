@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { requireRole, AuthError } from "@/lib/auth-server";
+import { requireAdminActivity } from "@/lib/security/adminActivity";
+import { toErrorResponse } from "@/lib/security/apiErrors";
 import { prisma } from "@/lib/db";
 import { dec, toNumber } from "@/lib/money";
+import { clientIp } from "@/lib/security/audit";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -106,4 +110,65 @@ export async function GET(_req: Request, props: { params: Promise<{ id: string }
     console.error("[admin/pos/machines/:id] GET error:", e);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+const PatchBody = z.object({
+  /** Set or clear the per-machine monthly transaction-volume cap (₹). null clears the override. */
+  transactionLimit: z.number().positive().nullable(),
+});
+
+/**
+ * PATCH /api/admin/pos/machines/:id
+ *
+ * Update the per-machine monthly transaction-volume cap.
+ * Accepts `{ transactionLimit: number | null }`.
+ * null removes the machine-level override (falls back to user-level or platform default).
+ */
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  let admin;
+  try {
+    admin = await requireAdminActivity(req, {
+      action: "pos.machine.set_limit",
+      roles: ["MASTER_ADMIN", "ADMIN"],
+      entity: "PosMachine",
+      entityId: params.id,
+    });
+  } catch (e) {
+    return toErrorResponse(e);
+  }
+
+  const parsed = PatchBody.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success)
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  const machine = await prisma.posMachine.findFirst({
+    where: { OR: [{ id: params.id }, { serial: params.id }, { tid: params.id }] },
+    select: { id: true, tid: true, serial: true },
+  });
+  if (!machine) return NextResponse.json({ error: "Machine not found" }, { status: 404 });
+
+  const { transactionLimit } = parsed.data;
+
+  await prisma.posMachine.update({
+    where: { id: machine.id },
+    data: { transactionLimit: transactionLimit ?? null },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: admin.id,
+      action: "pos.machine.limit_set",
+      entity: "PosMachine",
+      entityId: machine.id,
+      meta: {
+        transactionLimit,
+        tid: machine.tid,
+        serial: machine.serial,
+      },
+      ip: clientIp(req),
+    },
+  });
+
+  return NextResponse.json({ ok: true, transactionLimit });
 }

@@ -183,6 +183,7 @@ model User {
   notifications          Notification[]
   commissionSlabs        CommissionSlab[]
   payoutRequests         PayoutRequest[]         @relation("PayoutOwner")
+  knteerBeneficiaries    KnteerBeneficiary[]
   payoutBeneficiaries    PayoutBeneficiary[]     @relation("PayoutBeneficiaries")
   schemesCreated         Scheme[]                @relation("SchemeCreator")
   posMachines            PosMachine[]            @relation("PosAssignee")
@@ -670,6 +671,7 @@ enum ServiceCode {
   INSURANCE
   POS // POS acquirer settlement (first-class so earnings/commission attribute per-service)
   QR // Static QR collection settlement (first-class so revenue/commission attribute per-service, incl. per-leg split)
+  KNTEER_PAYOUT // Knteer bank-transfer rail (displayed as "Bank Transfer" in UI)
 }
 
 enum TxnStatus {
@@ -679,6 +681,10 @@ enum TxnStatus {
   FAILED
   REFUNDED
   HOLD
+  // Parked after an INDETERMINATE partner response (lost / 5xx / timeout) on a
+  // recon-capable rail (BBPS/RechargeKit). Funds are HELD — never blind-refunded
+  // — until the recon sweep / admin resolver confirms the true outcome.
+  NEEDS_REVIEW
 }
 
 model Transaction {
@@ -731,6 +737,13 @@ model Transaction {
   // refunds
   refundedAt     DateTime?
   refundRefId    String?
+  // Deferred-refund cooling-off (SameDay recon-capable rails). A provider
+  // "failure" can arrive while the payment was ACTUALLY charged, so the reserve
+  // is NEVER released on the first failure signal. The first confirmed failure
+  // stamps this timestamp (now + REFUND_HOLD_MINUTES); the reserve is credited
+  // back only after it passes AND a fresh status re-check still reports failure
+  // AND no REVERSAL was already posted. Cleared on settle.
+  refundEligibleAt DateTime?
 
   ipAddress String?
   device    String?
@@ -1447,6 +1460,16 @@ model PayoutRequest {
   checkerId String? // who approved/rejected
   remarks   String? // checker remarks on approve/reject
 
+  // Rail tag: "SETTLEMENT" = standard payout, "KNTEER" = Knteer bank-transfer.
+  rail              String  @default("SETTLEMENT")
+
+  // Knteer beneficiary link (populated only for rail="KNTEER" rows).
+  knteerBeneficiaryId String?
+  knteerBeneficiary   KnteerBeneficiary? @relation(fields: [knteerBeneficiaryId], references: [id])
+
+  // GST rate basis points used at quote time (0 = no GST, 1800 = 18%).
+  gstRate Int @default(0)
+
   // Provider (BulkPe) correlation
   bulkpeReferenceId String  @unique // our idempotency reference_id sent to BulkPe
   bulkpeTxnId       String? // BulkPe's transaction id
@@ -1466,6 +1489,7 @@ model PayoutRequest {
   @@index([userId, status])
   @@index([status, createdAt])
   @@index([checkerId, status])
+  @@index([userId, rail, accountLast4, status, createdAt])
 }
 
 // ---------- Payout beneficiary book (penny-drop verified) ----------
@@ -1524,6 +1548,43 @@ model PayoutBeneficiary {
 }
 
 // =====================================================================
+// Knteer bank-transfer beneficiary book (Phase: Payout-2)
+// =====================================================================
+
+model KnteerBeneficiary {
+  id     String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accountNumber     String  // AES-256-GCM encrypted at rest
+  accountLast4      String  // plain — display-only
+  ifscCode          String
+  accountHolderName String  // bank-verified name
+  bankName          String
+  mobile            String
+
+  referenceId String?
+
+  registrationType   String  @default("register")
+  verificationCharge Decimal @default(0) @db.Decimal(8, 2)
+  isRegistered       Boolean @default(true)
+  isBankVerified     Boolean @default(false)
+
+  email String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payoutRequests PayoutRequest[]
+
+  @@unique([userId, accountLast4, ifscCode])
+  @@index([userId])
+  @@index([ifscCode])
+  @@map("knteer_beneficiaries")
+}
+
+// =====================================================================
 // POS machines (Same Day Solution) — local mirror + assignment layer.
 //
 // Machines themselves are sourced externally (read-only feed). This local
@@ -1556,6 +1617,11 @@ model PosMachine {
 
   // Full external payload for audit / future fields.
   meta Json?
+
+  // Per-machine monthly transaction-volume cap (₹).
+  // null = fall through to the assignee's UserLimit.posMachineTransactionLimit,
+  // then to the platform default of ₹6,50,000.
+  transactionLimit Decimal? @db.Decimal(14, 2)
 
   // Manual-inventory extensions (Console A5): machines may also be created
   // by hand / bulk CSV upload rather than the external sync.
@@ -2047,6 +2113,11 @@ model UserLimit {
   // on top of the global instant pool (settlement.pos_instant.dailyLimitAmount);
   // the stricter of the two wins. null = only the global pool constrains them.
   instantDailyCap Decimal? @db.Decimal(14, 2)
+
+  // Per-machine monthly POS transaction-volume cap for ALL terminals assigned to
+  // this user. The most-specific limit wins: machine-level > this > platform
+  // default (₹6,50,000). null = only the machine-level or platform default applies.
+  posMachineTransactionLimit Decimal? @db.Decimal(14, 2)
 
   note        String?
   updatedById String?

@@ -13,6 +13,7 @@ export const SERVICE_CODES = [
   "UPI_COLLECT",
   "UPI_PAYOUT",
   "PAYOUT",
+  "KNTEER_PAYOUT",
   "WALLET_TOPUP",
   "WALLET_WITHDRAW",
   "RECHARGE_MOBILE",
@@ -38,6 +39,7 @@ export type ServiceCodeValue = (typeof SERVICE_CODES)[number];
 export function serviceGroup(code: string): string {
   if (code.startsWith("AEPS")) return "AePS";
   if (code === "PAYOUT") return "Payout";
+  if (code === "KNTEER_PAYOUT") return "Bank Transfer";
   if (code.startsWith("DMT")) return "Money Transfer";
   if (code.startsWith("UPI")) return "UPI";
   if (code.startsWith("WALLET")) return "Wallet";
@@ -45,6 +47,15 @@ export function serviceGroup(code: string): string {
   if (code.startsWith("BILL")) return "Bill Payments";
   if (code.startsWith("TRAVEL")) return "Travel";
   return "Other";
+}
+
+/** Map service codes to human-friendly UI labels (never expose "KNTEER"). */
+const SERVICE_LABEL_MAP: Record<string, string> = {
+  KNTEER_PAYOUT: "Bank Transfer",
+};
+
+export function serviceLabel(code: string): string {
+  return SERVICE_LABEL_MAP[code] ?? code.replace(/_/g, " ");
 }
 
 /**
@@ -71,7 +82,7 @@ export const SERVICE_FAMILIES = [
     key: "PAYOUT",
     label: "Payout",
     routeKind: "PAYOUT",
-    services: ["PAYOUT"],
+    services: ["PAYOUT", "KNTEER_PAYOUT"],
   },
 ] as const;
 
@@ -88,6 +99,7 @@ export type ServiceFamily = (typeof SERVICE_FAMILIES)[number];
 export const CHARGE_DRIVEN_SERVICE_CODES: ReadonlySet<string> = new Set<string>([
   ...(SERVICE_FAMILIES.find((f) => f.key === "BBPS")!.services as readonly string[]),
   "PAYOUT",
+  "KNTEER_PAYOUT",
 ]);
 
 /** True when a service uses the charge-markup-minus-commission margin model. */

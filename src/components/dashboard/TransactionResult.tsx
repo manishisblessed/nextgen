@@ -12,6 +12,11 @@ function payByLine(userCode?: string | null): string {
     : "Pay by NxtGenPay";
 }
 
+/** Encode a string for safe use inside HTML attribute values / text nodes. */
+function he(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export type TxnResult = {
   refId: string;
   service: string;
@@ -22,7 +27,12 @@ export type TxnResult = {
   status?: "SUCCESS" | "PENDING";
 } | null;
 
-function buildReceiptHtml(r: NonNullable<TxnResult>, userCode?: string | null): string {
+function buildReceiptHtml(
+  r: NonNullable<TxnResult>,
+  userCode?: string | null,
+  retailerName?: string | null,
+  logoUrl?: string,
+): string {
   const pending = r.status === "PENDING";
   const headStyle = pending
     ? "background:linear-gradient(135deg,#d97706,#b45309)"
@@ -36,15 +46,27 @@ function buildReceiptHtml(r: NonNullable<TxnResult>, userCode?: string | null): 
     ? Object.entries(r.meta)
         .map(
           ([k, v]) =>
-            `<tr><td style="padding:6px 0;color:#666;font-size:13px">${k}</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${v}</td></tr>`
+            `<tr><td style="padding:6px 0;color:#666;font-size:13px">${he(String(k))}</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${he(String(v))}</td></tr>`
         )
         .join("")
     : "";
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt — ${r.refId}</title>
+
+  // Logo strip at the top of the printed receipt card.
+  const logoHtml = logoUrl
+    ? `<div style="text-align:center;padding:16px 24px 12px;border-bottom:1px solid #f3f4f6"><img src="${he(logoUrl)}" alt="NextGenPay" style="height:34px;width:auto" /></div>`
+    : `<div style="text-align:center;padding:16px 24px 12px;font-weight:800;font-size:20px;color:#7367F0;letter-spacing:-0.5px;border-bottom:1px solid #f3f4f6">NextGenPay</div>`;
+
+  // Retailer row — shown right after Reference ID.
+  const retailerRow = retailerName
+    ? `<tr><td style="padding:6px 0;color:#666;font-size:13px">Retailer</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${he(retailerName)}</td></tr>`
+    : "";
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt — ${he(r.refId)}</title>
 <style>@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}.r{max-width:400px;margin:24px auto;font-family:system-ui,sans-serif;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden}.hdr{${headStyle};color:#fff;padding:32px 24px;text-align:center}.hdr h2{margin:0 0 4px;font-size:18px;font-weight:600}.hdr .amt{font-size:28px;font-weight:700;margin:8px 0 2px}.hdr .svc{font-size:12px;opacity:.8}.body{padding:20px 24px}table{width:100%;border-collapse:collapse}tr+tr{border-top:1px solid #f3f4f6}.foot{text-align:center;padding:16px 24px;font-size:11px;color:#999;border-top:1px dashed #e5e7eb}</style></head>
-<body><div class="r"><div class="hdr"><h2>${headTitle}</h2><div class="amt">₹${r.amount.toLocaleString("en-IN")}</div><div class="svc">${r.service}</div></div>
-<div class="body"><table><tr><td style="padding:6px 0;color:#666;font-size:13px">Reference ID</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px;font-family:monospace">${r.refId}</td></tr>
-${r.customer ? `<tr><td style="padding:6px 0;color:#666;font-size:13px">Customer</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${r.customer}</td></tr>` : ""}
+<body><div class="r">${logoHtml}<div class="hdr"><h2>${headTitle}</h2><div class="amt">₹${r.amount.toLocaleString("en-IN")}</div><div class="svc">${he(r.service)}</div></div>
+<div class="body"><table><tr><td style="padding:6px 0;color:#666;font-size:13px">Reference ID</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px;font-family:monospace">${he(r.refId)}</td></tr>
+${retailerRow}
+${r.customer ? `<tr><td style="padding:6px 0;color:#666;font-size:13px">Customer</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${he(r.customer)}</td></tr>` : ""}
 ${metaRows}
 <tr><td style="padding:6px 0;color:#666;font-size:13px">Date</td><td style="padding:6px 0;text-align:right;font-weight:600;font-size:13px">${date}</td></tr></table></div>
 <div class="foot"><div style="font-weight:600;color:#059669;margin-bottom:4px">${payByLine(userCode)}</div>NextGenPay — Powered by BBPS</div></div></body></html>`;
@@ -67,13 +89,16 @@ export function TransactionResult({
 
   const downloadReceipt = useCallback(() => {
     if (!result) return;
-    const w = window.open("", "_blank", "width=460,height=650");
+    const w = window.open("", "_blank", "width=460,height=720");
     if (!w) return;
-    w.document.write(buildReceiptHtml(result, userCode));
+    // Use an absolute logo URL — the receipt opens in a blank window so
+    // relative paths would be unresolved without an explicit base.
+    const logoUrl = `${window.location.origin}/logo.svg`;
+    w.document.write(buildReceiptHtml(result, userCode, session?.name, logoUrl));
     w.document.close();
     w.addEventListener("afterprint", () => w.close());
     setTimeout(() => w.print(), 300);
-  }, [result, userCode]);
+  }, [result, userCode, session]);
 
   if (!result) return null;
 
@@ -93,14 +118,19 @@ export function TransactionResult({
       aria-modal
     >
       <div className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-glow">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full bg-ink-100 text-ink-700 hover:bg-ink-200"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        {/* Top bar — logo on the left, close on the right */}
+        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="NextGenPay" className="h-7 w-auto" />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ink-100 text-ink-700 hover:bg-ink-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
 
         <div
           className={`px-6 py-8 text-center text-white ${
@@ -140,6 +170,15 @@ export function TransactionResult({
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
+
+          {session?.name && (
+            <div className="rounded-xl bg-ink-50 px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-500">
+                Retailer
+              </p>
+              <p className="text-sm font-medium text-ink-900">{session.name}</p>
+            </div>
+          )}
 
           {result.customer && (
             <div className="rounded-xl bg-ink-50 px-4 py-3">

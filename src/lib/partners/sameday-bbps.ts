@@ -106,8 +106,14 @@ export function mapPay2NewStatus(
 ): "SUCCESS" | "PENDING" | "FAILED" | "REFUNDED" {
   switch ((raw || "").toUpperCase()) {
     case "SUCCESS":
+    case "COMPLETED": // SameDay Pay2New sometimes returns "COMPLETED" as a terminal success status
+    case "COMPLETE":
+    case "APPROVED":
       return "SUCCESS";
     case "FAILED":
+    case "FAILURE":
+    case "DECLINED":
+    case "REJECTED":
       return "FAILED";
     case "REFUNDED":
       return "REFUNDED";

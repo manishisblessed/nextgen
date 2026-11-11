@@ -15,13 +15,13 @@ import {
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { Input, Label } from "@/components/ui/Input";
 import { useStepUp } from "@/components/security/StepUpProvider";
-import { TxnPinDialog } from "@/components/security/TxnPinDialog";
 import { QR_REJECTION_REASONS } from "@/lib/qr/rejectionReasons";
 import { formatINR } from "@/lib/utils";
 
@@ -109,9 +109,6 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
   const [note, setNote] = useState("");
   const [reasons, setReasons] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  // Approval requires the admin's transaction PIN (single-approval model — the
-  // PIN, not a second admin, authorizes the money movement).
-  const [pinOpen, setPinOpen] = useState(false);
 
   const toggleReason = (value: string) =>
     setReasons((prev) => (prev.includes(value) ? prev.filter((r) => r !== value) : [...prev, value]));
@@ -141,37 +138,21 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
     setPortalVerified(false);
     setNote("");
     setReasons([]);
-    setPinOpen(false);
   }
 
-  /** Open the transaction-PIN sheet to authorize a single-admin approval. */
-  function startApprove() {
-    if (!selected || !portalVerified) return;
-    setPinOpen(true);
-  }
-
-  /**
-   * Finalize approval with the admin's transaction PIN (sent via `x-txn-pin`).
-   * Returns an error string to keep the PIN dialog open (wrong/locked/unset
-   * PIN), or null to let the parent close it.
-   */
-  async function approveWithPin(pin: string): Promise<string | null> {
-    if (!selected) return null;
+  async function approve() {
+    if (!selected) return;
     setBusy(true);
     try {
       const res = await fetchWithStepUp(`/api/admin/qr/claims/${selected.id}/approve`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-txn-pin": pin },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ portalVerified, note: note.trim() || undefined }),
       });
       const d = await res.json();
       if (!res.ok) {
-        // Wrong/locked/not-set PIN → keep the sheet open with an inline message.
-        if (d.txnPin) return typeof d.error === "string" ? d.error : "PIN verification failed";
-        // Any other failure (step-up cancelled, state race) → close and toast.
         toast.error(typeof d.error === "string" ? d.error : "Approval failed");
-        setPinOpen(false);
-        return null;
+        return;
       }
       if (d.status === "SETTLED") {
         toast.success(
@@ -182,14 +163,10 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
           `Approved — ${formatINR(selected.amount)} is now settleable to ${selected.retailer.name}. They receive it (net of MDR) on T+1.`
         );
       }
-      setPinOpen(false);
       setSelected(null);
       refresh();
-      return null;
     } catch {
       toast.error("Network error — refresh the queue before retrying.");
-      setPinOpen(false);
-      return null;
     } finally {
       setBusy(false);
     }
@@ -325,6 +302,11 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
           </Button>
         ) : null,
     },
+    {
+      key: "slip",
+      header: "Slip",
+      render: (r) => <SlipActions type="qr" id={r.id} />,
+    },
   ];
 
   return (
@@ -386,7 +368,7 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
                 </p>
               )}
               <p className="mt-2 rounded-lg bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700">
-                One approval is enough — you&apos;ll confirm your transaction PIN to authorize it.
+                One admin approval is enough — verify the UTR in the provider portal, then approve.
               </p>
             </div>
             <a
@@ -465,7 +447,7 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
                 : "QR-T+1 claim — approving marks it settleable; it credits on the next-day (T+1) sweep."}
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={startApprove} disabled={busy || !portalVerified}>
+              <Button onClick={approve} disabled={busy || !portalVerified}>
                 <CheckCircle2 className="mr-1 h-4 w-4" />
                 {selected.settlementKind === "INSTANT"
                   ? `Approve & settle ${formatINR(selected.amount)}`
@@ -482,22 +464,6 @@ function ReviewQueueTab({ kind }: { kind: QrKind }) {
           </div>
         </div>
       )}
-
-      <TxnPinDialog
-        open={pinOpen}
-        title="Confirm approval"
-        detail={
-          selected
-            ? `Approve ${selected.utr ? `UTR ${selected.utr}` : `card •••• ${selected.cardLast4 ?? ""}`} for ${selected.retailer.name}${
-                selected.settlementKind === "INSTANT" ? " — credits their wallet now (net of MDR)." : " — settles on T+1 (net of MDR)."
-              }`
-            : undefined
-        }
-        amount={selected?.amount}
-        busy={busy}
-        onConfirm={approveWithPin}
-        onCancel={() => setPinOpen(false)}
-      />
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">

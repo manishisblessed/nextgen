@@ -258,6 +258,20 @@ export interface LocalPosMachine {
   assignedAt: string | null;
   assignee: PosAssignee | null;
   syncedAt: string;
+
+  // ── Transaction-volume limit fields (per-machine override; null = not set) ──
+  /** Admin-set machine-level monthly transaction cap (₹). null = no override. */
+  transactionLimit: number | null;
+
+  // ── Computed limit usage fields (populated in user-facing /my-machines only) ──
+  /** Effective monthly limit (machine-level OR user-level OR platform default 6,50,000). */
+  effectiveLimit?: number;
+  /** Current calendar-month CAPTURED transaction volume (₹). */
+  monthlyTotal?: number;
+  /** 0–100 percentage of limit used this month. May exceed 100 if breached. */
+  limitUsedPct?: number;
+  /** True when monthlyTotal > effectiveLimit. */
+  limitExceeded?: boolean;
 }
 
 /** Per-user fleet breakdown row (direct assignments + outstanding rental dues). */
@@ -302,7 +316,30 @@ export interface MyPosMachinesResponse {
   stats: {
     total: number;
     active: number;
+    /** Machines currently over their monthly transaction limit. */
+    exceededCount: number;
+    /** Machines between 80–100 % of their monthly transaction limit. */
+    warningCount: number;
   };
+}
+
+/** Compact limit-status record used by the dashboard alert widget. */
+export interface PosMachineLimitStatus {
+  machineId: string;
+  tid: string | null;
+  serial: string | null;
+  model: string | null;
+  effectiveLimit: number;
+  monthlyTotal: number;
+  limitUsedPct: number;
+  limitExceeded: boolean;
+}
+
+export interface PosMachineLimitsResponse {
+  exceeded: PosMachineLimitStatus[];
+  warning: PosMachineLimitStatus[];
+  /** Platform-default limit applied to machines without an override. */
+  platformDefault: number;
 }
 
 export interface PosSyncResult {

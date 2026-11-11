@@ -584,11 +584,25 @@ async function reportPushPull(user: SessionUser, params: ReportParams): Promise<
 /*  3 · Payment Gateway (Razorpay / UPI-collect transactions)            */
 /* --------------------------------------------------------------------- */
 
+/** Partners whose transactions are PG collections (wallet top-up / online collect). */
+const PG_PARTNERS = ["RAZORPAY", "CHAGANS_PG", "VIABLE_PG", "BULKPE_PG"];
+
+/** Display-friendly label for a PG partner. */
+const PG_PARTNER_LABELS: Record<string, string> = {
+  RAZORPAY: "Razorpay",
+  CHAGANS_PG: "Chagans PG",
+  VIABLE_PG: "Viable PG",
+  BULKPE_PG: "BulkPe PG",
+};
+
 async function reportPg(user: SessionUser, params: ReportParams): Promise<ReportResult> {
   const ids = await allowedUserIds(user);
   const createdAt = dateFilter(params);
   const pgMatch: Prisma.TransactionWhereInput = {
-    OR: [{ partner: "RAZORPAY" }, { service: "UPI_COLLECT" }],
+    OR: [
+      { partner: { in: PG_PARTNERS } },
+      { service: "UPI_COLLECT" },
+    ],
   };
   const where: Prisma.TransactionWhereInput = {
     AND: [
@@ -621,7 +635,7 @@ async function reportPg(user: SessionUser, params: ReportParams): Promise<Report
   const rows = list.map((r) => ({
     date: r.createdAt.toISOString(),
     refId: r.refId,
-    partner: r.partner ?? "—",
+    partner: PG_PARTNER_LABELS[r.partner ?? ""] ?? r.partner ?? "—",
     service: humanize(r.service),
     customer: r.customer ?? "—",
     amount: toNumber(r.amount),
@@ -630,10 +644,12 @@ async function reportPg(user: SessionUser, params: ReportParams): Promise<Report
   }));
 
   const { from, to } = effectiveRange(params);
+  const partnerIn = Prisma.join(PG_PARTNERS);
   const trend = trendToSeries(
     await dailyTrend({
       table: "Transaction", dateCol: "createdAt", valueExpr: `"amount"`, userCol: "userId",
-      ids, from, to, extra: Prisma.sql`AND ("partner" = 'RAZORPAY' OR "service" = 'UPI_COLLECT')`,
+      ids, from, to,
+      extra: Prisma.sql`AND ("partner" IN (${partnerIn}) OR "service" = 'UPI_COLLECT')`,
     }),
     "Daily collections", "#185df5"
   );
@@ -652,7 +668,7 @@ async function reportPg(user: SessionUser, params: ReportParams): Promise<Report
     ],
     trend,
     note: total === 0
-      ? "PG collections are recorded as Razorpay or UPI-collect transactions. None were found for this range."
+      ? "No Payment Gateway collections were found for this range."
       : null,
   };
 }

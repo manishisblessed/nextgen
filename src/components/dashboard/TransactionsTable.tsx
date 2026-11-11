@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { BankLogo } from "@/components/dashboard/BankLogo";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import type { Transaction } from "@/lib/data";
 import { formatINR } from "@/lib/utils";
 
@@ -75,6 +76,7 @@ export function TransactionsTable({
                 )}
                 <th className="px-5 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3 font-semibold">Date</th>
+                <th className="px-5 py-3 font-semibold">Slip</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100 text-ink-800">
@@ -100,6 +102,9 @@ export function TransactionsTable({
                     <Badge variant={statusVariant[t.status]}>{t.status}</Badge>
                   </td>
                   <td className="px-5 py-3 text-xs text-ink-500">{t.date}</td>
+                  <td className="px-5 py-3">
+                    <SlipActions type="txn" id={t.id} />
+                  </td>
                 </tr>
               ))}
             </tbody>

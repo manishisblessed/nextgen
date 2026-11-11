@@ -359,6 +359,7 @@ type PosMachineWithAssignee = {
   assignedUserId: string | null;
   assignedAt: Date | null;
   syncedAt: Date;
+  transactionLimit: { toNumber(): number } | null; // Prisma Decimal
   assignedUser: {
     id: string;
     name: string;
@@ -385,6 +386,7 @@ export const posMachineSelect = {
   assignedUserId: true,
   assignedAt: true,
   syncedAt: true,
+  transactionLimit: true,
   assignedUser: {
     select: { id: true, name: true, phone: true, role: true },
   },
@@ -473,6 +475,7 @@ export function serializePosMachine(
     state: row.state,
     assignedUserId: row.assignedUserId,
     assignedAt: row.assignedAt ? row.assignedAt.toISOString() : null,
+    transactionLimit: row.transactionLimit != null ? row.transactionLimit.toNumber() : null,
     assignee: row.assignedUser
       ? {
           id: row.assignedUser.id,

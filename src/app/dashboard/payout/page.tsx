@@ -39,6 +39,7 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { ReportActions } from "@/components/dashboard/ReportActions";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
@@ -307,6 +308,11 @@ export default function PayoutPage() {
           {new Date(r.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
         </span>
       ),
+    },
+    {
+      key: "slip",
+      header: "Slip",
+      render: (r) => <SlipActions type="payout" id={r.id} />,
     },
   ];
 

@@ -409,10 +409,13 @@ export async function settleTopup(
         const utr = webhookVerified?.reference ?? null;
         // The net credit already committed inside handleTopupCapture; now flip
         // the initiating TOPUP record to SUCCESS (idempotent; no second credit).
+        // Set `fee` on the Transaction so the PG Report / Summary aggregates
+        // pick up the MDR without having to parse the response JSON.
         await prisma.transaction.updateMany({
           where: { id: txn.id, status: { in: ["INITIATED", "PROCESSING", "HOLD"] } },
           data: {
             status: "SUCCESS",
+            fee: new Prisma.Decimal(capture.mdrAmount ?? 0),
             response: {
               utr,
               verifiedAmount: verified ?? null,

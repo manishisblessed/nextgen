@@ -20,6 +20,7 @@ import {
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
+import { SlipActions } from "@/components/dashboard/SlipActions";
 import { Badge } from "@/components/ui/Badge";
 import { Input, Label } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -715,6 +716,11 @@ export default function QrCollectionsPage() {
           View
         </a>
       ),
+    },
+    {
+      key: "slip",
+      header: "Slip",
+      render: (r) => <SlipActions type="qr" id={r.id} />,
     },
   ];
 

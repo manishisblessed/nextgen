@@ -322,10 +322,10 @@ export type QrClaimReviewInput = {
 /**
  * Approve a claim — the FRAUD gate. A SINGLE admin approval attests the payment
  * is real (UTR found in the provider portal) and makes the claim SETTLEABLE.
- * The approving admin must confirm their transaction PIN (enforced at the route
- * layer) — the PIN, not a second admin, is the authorization control. Approval
- * NO LONGER moves money: settlement is a separate step where the scheme's QR MDR
- * is deducted (instant/T0 via the retailer button, or T1 via the daily cron).
+ * The admin's 2FA step-up (enforced at the route layer via requireAdminActivity)
+ * is the authorization control. Approval NO LONGER moves money: settlement is a
+ * separate step where the scheme's QR MDR is deducted (instant/T0 via the
+ * retailer button, or T1 via the daily cron).
  *
  * Race-safe: the status transition is claimed with updateMany. Any legacy claim
  * still parked in AWAITING_SECOND_APPROVAL is finalized by this single approval

@@ -71,6 +71,7 @@ export async function GET(req: Request) {
               settlementDailyCap: true,
               instantDailyCap: true,
               walletCap: true,
+              posMachineTransactionLimit: true,
             },
           },
           settlementConfig: { select: { autoSettleEnabled: true, pausedUntil: true } },
@@ -114,6 +115,10 @@ export async function GET(req: Request) {
           u.userLimit?.settlementDailyCap != null ? toNumber(dec(u.userLimit.settlementDailyCap)) : null,
         instantDailyCap:
           u.userLimit?.instantDailyCap != null ? toNumber(dec(u.userLimit.instantDailyCap)) : null,
+        posMachineTransactionLimit:
+          u.userLimit?.posMachineTransactionLimit != null
+            ? toNumber(dec(u.userLimit.posMachineTransactionLimit))
+            : null,
         autoSettle: u.settlementConfig?.autoSettleEnabled ?? true,
         settlementPaused:
           !!u.settlementConfig?.pausedUntil && u.settlementConfig.pausedUntil > new Date(),

@@ -28,6 +28,27 @@ export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function formatIST(
+  iso: string | undefined | null,
+  opts?: Intl.DateTimeFormatOptions
+): string {
+  if (!iso) return "—";
+  try {
+    const defaultOpts: Intl.DateTimeFormatOptions = {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    };
+    return new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", ...defaultOpts, ...opts });
+  } catch {
+    return iso;
+  }
+}
+
 // ── IST business-day helpers ────────────────────────────────────────────────
 // The platform's operating timezone is Asia/Kolkata (fixed +05:30, no DST), and
 // the live payin monitor resets at IST midnight (see `istPeriodStart` in

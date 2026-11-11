@@ -78,12 +78,22 @@ const schema = z.object({
   // Falls back to POS key pair when unset. Gated by flags.rechargekit.
   SAMEDAY_RECHARGEKIT_API_KEY: z.string().min(1).optional(),
   SAMEDAY_RECHARGEKIT_API_SECRET: z.string().min(1).optional(),
+  // Cooling-off window (minutes) before a provider-confirmed-failed SameDay
+  // recon-capable txn is actually refunded to the retailer. During this window
+  // a fresh status re-poll double-checks the outcome. 0 = no hold.
+  REFUND_HOLD_MINUTES: z.coerce.number().int().min(0).default(30),
 
-  // Direct RechargeKit API — "Offline CC Bill Payment". Talks straight to
-  // RechargeKit (no Same Day HMAC wrapper); auth via Authorization: Bearer.
-  // Gated by flags.rechargekitDirect (PARTNER_RECHARGEKIT_DIRECT_ENABLED).
+  // Direct RechargeKit API — kept for backwards-compatibility only. No longer
+  // used by the Offline CC Bill Payment service (replaced by Chagans CC Bill).
   RECHARGEKIT_DIRECT_BASE_URL: z.string().url().default("https://v2bapi.rechargkit.biz"),
   RECHARGEKIT_DIRECT_API_TOKEN: z.string().min(1).optional(),
+
+  // Chagans CC Bill Pay — merchantId issued by Chagans after the one-time
+  // /ccBillpay/createMerchant onboarding call. Required for every CC Bill API
+  // request. Uses the same CHAGAN_CLIENT_ID / CLIENT_SECRET / API_TOKEN as the
+  // PartnerPG rail (those live in process.env directly, not the typed schema).
+  // Gated by flags.rechargekitDirect (PARTNER_RECHARGEKIT_DIRECT_ENABLED).
+  CHAGAN_CC_MERCHANT_ID: z.string().min(1).optional(),
 
   // Phase 3 — settlement automation. A daily worker job sweeps the Same Day
   // partner-wallet balance above the float you keep, into a verified account.
@@ -194,7 +204,15 @@ const schema = z.object({
   // flag is off, only an explicitly-assigned active scheme resolves (legacy
   // behaviour) and unassigned network users stay gate-blocked. Fail-safe: if no
   // active default exists, resolution returns NONE (never charges ₹0 silently).
-  SCHEME_DEFAULT_FALLBACK: z.string().default("false")
+  SCHEME_DEFAULT_FALLBACK: z.string().default("false"),
+
+  // ---------- Payout-2 / Knteer bank-transfer rail ----------
+  SAMEDAY_KNTEER_PAYOUT_API_KEY: z.string().min(1).optional(),
+  SAMEDAY_KNTEER_PAYOUT_API_SECRET: z.string().min(1).optional(),
+  PARTNER_KNTEER_PAYOUT_ENABLED: z.string().default("false"),
+  KNTEER_ACCOUNT_ENCRYPTION_KEY: z.string().min(1).optional(),
+  KNTEER_DUP_GUARD_COOLDOWN_SEC: z.string().default("1800"),
+  KNTEER_MANUAL_REFUND_MIN_AGE_SEC: z.string().default("1800")
 });
 
 /**
@@ -280,7 +298,10 @@ export const flags = {
   stepUp: env.SECURITY_STEPUP_ENABLED === "true",
 
   // Scheme Manager — global default scheme fallback (see SCHEME_DEFAULT_FALLBACK).
-  schemeDefaultFallback: env.SCHEME_DEFAULT_FALLBACK === "true"
+  schemeDefaultFallback: env.SCHEME_DEFAULT_FALLBACK === "true",
+
+  // Payout-2 / Knteer bank-transfer rail.
+  knteerPayout: env.PARTNER_KNTEER_PAYOUT_ENABLED === "true"
 } as const;
 
 export const isProd = env.NODE_ENV === "production";

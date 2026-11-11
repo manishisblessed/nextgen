@@ -1,6 +1,6 @@
 import { CreditCard } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
-import { RechargekitDirectCCForm } from "@/components/dashboard/RechargekitDirectCCForm";
+import { ChagansCCBillForm } from "@/components/dashboard/ChagansCCBillForm";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +10,9 @@ export default function OfflineCCPayPage() {
       <ServicePageHeader
         icon={CreditCard}
         title="Offline CC Bill Payment"
-        description="Pay credit card bills directly via RechargeKit — enter the full card number, bank details, transfer type (IMPS/NEFT), and amount. Charges are shown before confirmation."
+        description="Pay credit card bills directly — select your card issuer, enter your consumer details, fetch the bill, and pay securely from your wallet."
       />
-      <RechargekitDirectCCForm />
+      <ChagansCCBillForm />
     </div>
   );
 }
