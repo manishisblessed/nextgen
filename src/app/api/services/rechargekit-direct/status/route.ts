@@ -38,11 +38,11 @@ export async function POST(req: Request) {
     const session = await requireAuth();
     await assertServiceEnabled(SERVICE_KEYS.RECHARGEKIT_DIRECT, {
       name: "Offline CC Bill Payment",
-      userId: session.userId,
+      userId: session.id,
     });
     await enforceRateLimit(
-      `cc-status:${session.userId}`,
-      RATE_LIMITS.SERVICE_READ
+      `cc-status:${session.id}`,
+      RATE_LIMITS.default
     );
 
     const body = Body.parse(await req.json());
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
       const txn = await prisma.transaction.findFirst({
         where: {
           refId: body.refId,
-          userId: session.userId,
+          userId: session.id,
           partner: "CHAGANS_CC_BILL",
         },
         select: { partnerTxnId: true },
