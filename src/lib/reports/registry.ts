@@ -328,7 +328,7 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
     type: "qr",
     title: "QR Codes Report",
     short: "QR Codes",
-    description: "Static & dynamic UPI QR collections per outlet (source pending a later phase).",
+    description: "UPI QR collections per outlet with payment count, volume and settlement status.",
     icon: QrCode,
     accent: "violet",
     columns: [

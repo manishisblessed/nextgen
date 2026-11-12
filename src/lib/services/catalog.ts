@@ -58,6 +58,7 @@ export const SERVICE_KEYS = {
   VIRTUAL_ACCOUNT: "virtual_account",
   RECHARGEKIT_CC: "rechargekit_cc",
   RECHARGEKIT_DIRECT: "rechargekit_direct",
+  BBPS_CHAGANS: "bbps_chagan",
 } as const;
 
 export type ServiceKey = (typeof SERVICE_KEYS)[keyof typeof SERVICE_KEYS];
@@ -94,6 +95,7 @@ export const SERVICE_KEY_TO_HREF: Record<string, string> = {
   [SERVICE_KEYS.BBPS_CREDIT_CARD]: "/dashboard/bill-pay/credit-card",
   [SERVICE_KEYS.RECHARGEKIT_CC]: "/dashboard/bill-pay/cc-pay",
   [SERVICE_KEYS.RECHARGEKIT_DIRECT]: "/dashboard/bill-pay/offline-cc-pay",
+  [SERVICE_KEYS.BBPS_CHAGANS]: "/dashboard/bill-pay/cc-bill-pay",
   [SERVICE_KEYS.DMT]: "/dashboard/money-transfer",
   [SERVICE_KEYS.TRAVEL]: "/dashboard/travel/flight",
   [SERVICE_KEYS.VIRTUAL_ACCOUNT]: "/dashboard/virtual-account",
@@ -122,6 +124,7 @@ const SERVICE_HREF_PREFIXES: Array<[prefix: string, key: string]> = [
   ["/dashboard/bill-pay/credit-card", SERVICE_KEYS.BBPS_CREDIT_CARD],
   ["/dashboard/bill-pay/cc-pay", SERVICE_KEYS.RECHARGEKIT_CC],
   ["/dashboard/bill-pay/offline-cc-pay", SERVICE_KEYS.RECHARGEKIT_DIRECT],
+  ["/dashboard/bill-pay/cc-bill-pay", SERVICE_KEYS.BBPS_CHAGANS],
   ["/dashboard/bill-pay", SERVICE_KEYS.BBPS],
   ["/dashboard/money-transfer", SERVICE_KEYS.DMT],
   ["/dashboard/travel", SERVICE_KEYS.TRAVEL],
@@ -331,9 +334,19 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     type: "SERVICE",
     kind: "BBPS",
     provider: "CHAGANS",
-    enabled: true,
-    note: "Credit card bill payment via the Chagans CC Bill API V2 (BBPS flow — getBillers → getBillerParams → fetchBill → payBill). Replaces the RechargeKit Direct rail.",
+    enabled: false,
+    note: "DEPRECATED — replaced by bbps_chagan (CC Bill Payment). Kept for backward compatibility with existing transactions.",
     sortOrder: 95,
+  },
+  {
+    key: SERVICE_KEYS.BBPS_CHAGANS,
+    name: "CC Bill Payment (Chagans)",
+    type: "SERVICE",
+    kind: "BBPS",
+    provider: "CHAGANS",
+    enabled: true,
+    note: "Credit card bill payment via the Chagans CC Bill API V2 (BBPS flow — getBillers → getBillerParams → fetchBill → payBill). Retailer-facing name: CC Bill Payment.",
+    sortOrder: 96,
   },
   {
     key: SERVICE_KEYS.TRAVEL,

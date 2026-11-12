@@ -23,8 +23,10 @@ export const BBPS_PRICE_SCOPES = {
   BBPS_CREDIT_CARD: SERVICE_KEYS.BBPS_CREDIT_CARD,
   /** Credit Card Bill Payment-2 (cc-pay) — Same Day RechargeKit. */
   RECHARGEKIT_CC: SERVICE_KEYS.RECHARGEKIT_CC,
-  /** Offline CC Bill Payment (offline-cc-pay) — direct RechargeKit API. */
+  /** Offline CC Bill Payment (offline-cc-pay) — DEPRECATED, replaced by BBPS_CHAGANS. */
   RECHARGEKIT_DIRECT: SERVICE_KEYS.RECHARGEKIT_DIRECT,
+  /** CC Bill Payment (cc-bill-pay) — Chagans CC Bill API V2. */
+  BBPS_CHAGANS: SERVICE_KEYS.BBPS_CHAGANS,
   /** Unified Bill Payment Platform (bbps-2) — BulkPe. */
   BBPS_BULKPE: SERVICE_KEYS.BBPS_BULKPE,
 } as const;
@@ -34,14 +36,16 @@ export type BbpsPriceScope = (typeof BBPS_PRICE_SCOPES)[keyof typeof BBPS_PRICE_
 const SCOPE_KEYS: readonly string[] = Object.values(BBPS_PRICE_SCOPES);
 
 /** Map each product scope to the backing partner family (for the fallback). */
-const SCOPE_FAMILY: Record<string, "SAMEDAY" | "BULKPE"> = {
+const SCOPE_FAMILY: Record<string, "SAMEDAY" | "BULKPE" | "CHAGANS"> = {
   [BBPS_PRICE_SCOPES.BBPS_SAMEDAY]: "SAMEDAY",
   [BBPS_PRICE_SCOPES.BBPS_CREDIT_CARD]: "SAMEDAY",
   [BBPS_PRICE_SCOPES.RECHARGEKIT_CC]: "SAMEDAY",
-  // Direct RechargeKit is priced independently via its own scope key; the family
-  // fallback points at SAMEDAY so existing CC rate cards/slabs still apply until
-  // a dedicated card is pinned to this product.
-  [BBPS_PRICE_SCOPES.RECHARGEKIT_DIRECT]: "SAMEDAY",
+  // Offline CC Bill Payment is now powered by the Chagans CC Bill API V2.
+  // Its own product scope key ("rechargekit_direct") is the primary pricing
+  // key; the CHAGANS family is the fallback so a CHAGANS-family rate card
+  // (if one exists) applies when no product-specific card is pinned.
+  [BBPS_PRICE_SCOPES.RECHARGEKIT_DIRECT]: "CHAGANS",
+  [BBPS_PRICE_SCOPES.BBPS_CHAGANS]: "CHAGANS",
   [BBPS_PRICE_SCOPES.BBPS_BULKPE]: "BULKPE",
 };
 
@@ -56,7 +60,7 @@ export function isBbpsPriceScope(v: string | null | undefined): v is BbpsPriceSc
 }
 
 /** The partner family a scope falls back to (null when not a product scope). */
-export function priceScopeFamily(scope: string | null | undefined): "SAMEDAY" | "BULKPE" | null {
+export function priceScopeFamily(scope: string | null | undefined): "SAMEDAY" | "BULKPE" | "CHAGANS" | null {
   return scope && SCOPE_FAMILY[scope] ? SCOPE_FAMILY[scope] : null;
 }
 
@@ -89,6 +93,7 @@ const CC_ONLY_SCOPES = new Set<string>([
   BBPS_PRICE_SCOPES.BBPS_CREDIT_CARD,
   BBPS_PRICE_SCOPES.RECHARGEKIT_CC,
   BBPS_PRICE_SCOPES.RECHARGEKIT_DIRECT,
+  BBPS_PRICE_SCOPES.BBPS_CHAGANS,
 ]);
 const UTILITY_ONLY_SCOPES = new Set<string>([
   BBPS_PRICE_SCOPES.BBPS_SAMEDAY,

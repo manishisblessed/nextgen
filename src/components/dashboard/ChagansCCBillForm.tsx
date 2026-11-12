@@ -114,7 +114,12 @@ function extractBillDetails(br: Record<string, unknown>): {
 // Component
 // ---------------------------------------------------------------------------
 
-export function ChagansCCBillForm() {
+export function ChagansCCBillForm({
+  apiBase = "/api/services/rechargekit-direct",
+}: {
+  /** Base path for the API routes (e.g. "/api/services/chagans-cc"). */
+  apiBase?: string;
+} = {}) {
   // --- Step 1: Billers ---
   const [billers, setBillers] = useState<Biller[]>([]);
   const [billerId, setBillerId] = useState("");
@@ -142,6 +147,17 @@ export function ChagansCCBillForm() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [result, setResult] = useState<TxnResult>(null);
 
+  // --- Status Check ---
+  const [statusRefId, setStatusRefId] = useState<string>("");
+  const [statusChecking, setStatusChecking] = useState(false);
+  const [statusResult, setStatusResult] = useState<{
+    orderId: string;
+    status: string;
+    amount: number | null;
+    message: string | null;
+  } | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
   // ---------------------------------------------------------------------------
   // Step 1 — load billers
   // ---------------------------------------------------------------------------
@@ -149,7 +165,7 @@ export function ChagansCCBillForm() {
   const loadBillers = useCallback(async (refresh = false) => {
     setLoadingBillers(true);
     try {
-      const url = `/api/services/rechargekit-direct/operators${refresh ? "?refresh=true" : ""}`;
+      const url = `${apiBase}/operators${refresh ? "?refresh=true" : ""}`;
       const res = await fetch(url);
       const data = await res.json();
       if (res.ok && Array.isArray(data.operators)) {
@@ -172,7 +188,7 @@ export function ChagansCCBillForm() {
     } finally {
       setLoadingBillers(false);
     }
-  }, []);
+  }, [apiBase]);
 
   useEffect(() => {
     loadBillers();
@@ -193,7 +209,7 @@ export function ChagansCCBillForm() {
       setQuote(null);
       setError(null);
       try {
-        const res = await fetch("/api/services/rechargekit-direct/billers-params", {
+        const res = await fetch(`${apiBase}/billers-params`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ billerId: id }),
@@ -221,7 +237,7 @@ export function ChagansCCBillForm() {
         setLoadingParams(false);
       }
     },
-    []
+    [apiBase]
   );
 
   // Auto-load params when biller selection changes.
@@ -280,7 +296,7 @@ export function ChagansCCBillForm() {
     setQuote(null);
 
     try {
-      const res = await fetch("/api/services/rechargekit-direct/fetch-bill", {
+      const res = await fetch(`${apiBase}/fetch-bill`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -324,7 +340,7 @@ export function ChagansCCBillForm() {
     const timer = setTimeout(async () => {
       setQuoteLoading(true);
       try {
-        const res = await fetch("/api/services/rechargekit-direct/charges", {
+        const res = await fetch(`${apiBase}/charges`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ amount: amt }),
@@ -376,7 +392,7 @@ export function ChagansCCBillForm() {
     }
     setPaying(true);
     try {
-      const res = await fetch("/api/services/rechargekit-direct/pay", {
+      const res = await fetch(`${apiBase}/pay`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-txn-pin": pin },
         body: JSON.stringify({
@@ -428,7 +444,7 @@ export function ChagansCCBillForm() {
       const consumerId = extractConsumerId(billerParams.requiredFields, paramValues);
       setResult({
         refId: data.refId,
-        service: `Offline CC Bill Payment — ${billerParams.billerName || billerName}`,
+        service: `CC Bill Payment — ${billerParams.billerName || billerName}`,
         amount: Number(amount),
         customer: consumerId || billerName,
         meta: {
@@ -484,6 +500,37 @@ export function ChagansCCBillForm() {
   const amtNum = Number(amount);
   const maxAmount =
     (fetchedBill?.billerResponse?.maxAmount as number | undefined) ?? 500000;
+
+  // ---------------------------------------------------------------------------
+  // Status check handler
+  // ---------------------------------------------------------------------------
+  const handleCheckStatus = useCallback(
+    async (refIdOverride?: string) => {
+      const id = refIdOverride || statusRefId.trim();
+      if (!id) return;
+      setStatusChecking(true);
+      setStatusError(null);
+      setStatusResult(null);
+      try {
+        const res = await fetch(`${apiBase}/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refId: id }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          setStatusError(data.message || "Status check failed");
+          return;
+        }
+        setStatusResult(data.data);
+      } catch {
+        setStatusError("Network error while checking status");
+      } finally {
+        setStatusChecking(false);
+      }
+    },
+    [statusRefId, apiBase]
+  );
 
   // ---------------------------------------------------------------------------
   // Render
@@ -821,6 +868,68 @@ export function ChagansCCBillForm() {
         onCancel={() => !paying && setPinOpen(false)}
       />
       <TransactionResult result={result} onClose={() => setResult(null)} />
+
+      {/* ── Transaction Status Check ── */}
+      <div className="mt-8 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+        <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
+          🔍 Check Transaction Status
+        </h3>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+            placeholder="Enter Transaction Ref ID"
+            value={statusRefId}
+            onChange={(e) => setStatusRefId(e.target.value)}
+          />
+          <Button
+            size="sm"
+            disabled={statusChecking || !statusRefId.trim()}
+            onClick={() => handleCheckStatus()}
+          >
+            {statusChecking ? "Checking…" : "Check Status"}
+          </Button>
+        </div>
+        {statusError && (
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {statusError}
+          </p>
+        )}
+        {statusResult && (
+          <div className="mt-3 rounded border border-gray-200 bg-white p-3 text-sm dark:border-gray-600 dark:bg-gray-700">
+            <div className="grid grid-cols-2 gap-2">
+              <span className="text-gray-500 dark:text-gray-400">Status:</span>
+              <span
+                className={`font-semibold ${
+                  statusResult.status === "SUCCESS"
+                    ? "text-green-600 dark:text-green-400"
+                    : statusResult.status === "FAILED"
+                      ? "text-red-600 dark:text-red-400"
+                      : statusResult.status === "REFUNDED"
+                        ? "text-orange-600 dark:text-orange-400"
+                        : "text-yellow-600 dark:text-yellow-400"
+                }`}
+              >
+                {statusResult.status}
+              </span>
+              <span className="text-gray-500 dark:text-gray-400">Order ID:</span>
+              <span className="font-mono text-xs">{statusResult.orderId}</span>
+              {statusResult.amount != null && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Amount:</span>
+                  <span>{formatINR(statusResult.amount)}</span>
+                </>
+              )}
+              {statusResult.message && (
+                <>
+                  <span className="text-gray-500 dark:text-gray-400">Message:</span>
+                  <span>{statusResult.message}</span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </>
   );
 }

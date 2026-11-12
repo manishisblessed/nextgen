@@ -36,9 +36,16 @@
  *
  * Money-safety:
  *   payBill is synchronous — Chagans returns SUCCESS or FAILED in the same
- *   response. There is NO polling API; a PENDING status (if ever returned) is
- *   treated as PROCESSING by runTransaction and the recon sweep finalises it.
+ *   response (confirmed by Chagans: "There is no callback for CC Bill Pay
+ *   Service"). A PENDING status (if ever returned) is treated as PROCESSING
+ *   by runTransaction and the recon sweep finalises it via checkStatus.
  *   NEVER retry a payBill on timeout — money may already have moved.
+ *
+ *   5. checkStatus    — POST /bbps/checkStatus
+ *                       Transaction status check. Used by the recon sweep and
+ *                       admin panel to query the final state of a payment that
+ *                       timed out or returned PENDING. NOTE: the path prefix is
+ *                       /bbps/ (not /ccBillPay/) — this is correct per Chagans.
  */
 import { logger } from "../logger";
 import type { PartnerResult } from "./types";
@@ -195,6 +202,13 @@ export type ChagansCcPayResult = {
   transactionId: string;
   status: "SUCCESS" | "PENDING" | "FAILED";
   message: string;
+};
+
+export type ChagansCcStatusResult = {
+  orderId: string;
+  status: "SUCCESS" | "PENDING" | "FAILED" | "REFUNDED";
+  amount?: number;
+  message?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -489,6 +503,128 @@ export async function chagansCcPayBill(input: {
     data: { transactionId, status, message: r.data.message ?? "" },
     partnerTxnId: transactionId || input.externalRef,
     pending: status === "PENDING",
+    raw: r.raw,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 5. checkStatus — POST /bbps/checkStatus
+// ---------------------------------------------------------------------------
+
+/** Normalise a Chagans status-check status token. Includes "refunded". */
+function normaliseCheckStatus(raw: string | undefined): ChagansCcStatusResult["status"] {
+  const s = (raw ?? "").trim().toLowerCase();
+  if (
+    s === "success" ||
+    s === "successful" ||
+    s === "completed" ||
+    s === "complete" ||
+    s === "approved" ||
+    s === "paid"
+  )
+    return "SUCCESS";
+  if (s === "refunded" || s === "reversed" || s === "refund")
+    return "REFUNDED";
+  if (
+    s === "failed" ||
+    s === "failure" ||
+    s === "declined" ||
+    s === "rejected" ||
+    s === "cancelled" ||
+    s === "canceled"
+  )
+    return "FAILED";
+  return "PENDING";
+}
+
+/**
+ * Check the status of a CC Bill Pay transaction.
+ *
+ * Endpoint:  POST /bbps/checkStatus   (note: /bbps/ prefix, NOT /ccBillPay/)
+ * Body:      { orderId: "<Chagans transactionId from payBill>" }
+ *
+ * Used by:
+ *   - BBPS recon sweep (PROCESSING transactions with partner CHAGANS_CC_BILL)
+ *   - Admin "Resolve / verify with provider" action
+ *   - Manual /status route for ops troubleshooting
+ *
+ * Response shape is parsed defensively since Chagans did not provide a sample.
+ * We look for the status in common fields: status, data.status, result,
+ * data.result, etc.
+ */
+export async function chagansCcCheckStatus(
+  orderId: string
+): Promise<PartnerResult<ChagansCcStatusResult>> {
+  if (!orderId) {
+    return {
+      ok: false,
+      code: "BAD_PARAMS",
+      message: "checkStatus requires an orderId (Chagans transactionId)",
+    };
+  }
+
+  log.info({ orderId }, "Chagans CC checkStatus initiated");
+
+  type StatusResp = {
+    data?: {
+      status?: string;
+      result?: string;
+      orderId?: string;
+      transactionId?: string;
+      amount?: string | number;
+    };
+    status?: string;
+    result?: string;
+  };
+
+  const r = await ccPost<StatusResp>("/bbps/checkStatus", {
+    orderId,
+  });
+
+  if (!r.ok) {
+    log.warn(
+      { code: r.code, message: r.message, orderId },
+      "Chagans CC checkStatus failed"
+    );
+    return r as PartnerResult<ChagansCcStatusResult>;
+  }
+
+  // Extract status from the deepest usable field. Chagans may return the status
+  // at top-level or nested inside `data` — check both.
+  const rawStatus =
+    r.data.data?.status ??
+    r.data.data?.result ??
+    r.data.status ??
+    r.data.result;
+
+  const status = normaliseCheckStatus(rawStatus);
+
+  // Extract amount (may be string or number).
+  let amount: number | undefined;
+  const rawAmt = r.data.data?.amount;
+  if (rawAmt !== undefined && rawAmt !== null) {
+    const n = typeof rawAmt === "number" ? rawAmt : Number(rawAmt);
+    if (Number.isFinite(n) && n > 0) amount = n;
+  }
+
+  const resolvedOrderId =
+    r.data.data?.orderId ??
+    r.data.data?.transactionId ??
+    orderId;
+
+  log.info(
+    { orderId, resolvedOrderId, status, amount },
+    "Chagans CC checkStatus response"
+  );
+
+  return {
+    ok: true,
+    data: {
+      orderId: resolvedOrderId,
+      status,
+      amount,
+      message: r.data.message,
+    },
     raw: r.raw,
   };
 }

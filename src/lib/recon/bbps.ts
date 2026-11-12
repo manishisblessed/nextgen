@@ -2,6 +2,7 @@ import { Prisma, type ServiceCode } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { flags } from "@/lib/env";
 import { getPartner } from "@/lib/partners";
+import { chagansCcCheckStatus } from "@/lib/partners/chagans-cc-bill";
 import { creditWallet } from "@/lib/ledger";
 import { round, add } from "@/lib/money";
 import { sendOpsAlert } from "@/lib/monitoring/alerts";
@@ -101,6 +102,98 @@ export async function runBbpsReconciliation(): Promise<BbpsReconSummary> {
           else if (res.outcome === "refunded") refunded++;
           else drained++;
         }
+        continue;
+      }
+
+      // Chagans CC Bill transactions use a different status API than the
+      // SameDay/BulkPe BBPS provider. Route them through their own adapter
+      // (POST /bbps/checkStatus) instead of bbps.status().
+      if (txn.partner === "CHAGANS_CC_BILL") {
+        if (!txn.partnerTxnId) { drained++; continue; }
+        const cr = await chagansCcCheckStatus(txn.partnerTxnId);
+        if (!cr.ok) { drained++; continue; }
+        // Map to the same r.data.status shape the loop below expects.
+        const r = { ok: true as const, data: { status: cr.data.status, operatorRef: cr.data.orderId, charge: undefined as number | undefined, amount: cr.data.amount } };
+        if (r.data.status === "PENDING") { drained++; continue; }
+        if (r.data.status === "SUCCESS") {
+          const updated = await prisma.transaction.updateMany({
+            where: { id: txn.id, status: "PROCESSING" },
+            data: {
+              status: "SUCCESS",
+              partnerTxnId: txn.partnerTxnId,
+              response: {
+                reconSettled: true,
+                providerStatus: r.data.status,
+                operatorRef: r.data.operatorRef,
+                chaganAmount: r.data.amount ?? null,
+              } as Prisma.InputJsonValue,
+            },
+          });
+          if (updated.count > 0) {
+            await prisma.auditLog.create({
+              data: {
+                userId: txn.userId,
+                action: "recon.bbps_settled",
+                entity: "Transaction",
+                entityId: txn.id,
+                meta: { refId: txn.refId, providerStatus: r.data.status, partner: "CHAGANS_CC_BILL" },
+              },
+            });
+            void emitWebhookEvent(txn.userId, "txn.success", {
+              refId: txn.refId,
+              service: txn.service,
+              amount: txn.amount.toNumber(),
+            });
+            settled++;
+          }
+        } else {
+          const reserveAmount = round(add(txn.amount.toNumber(), txn.fee.toNumber()));
+          const reversalKey = `txn:${txn.userId}:${txn.refId}:reversal:recon`;
+          const refundCount = await prisma.$transaction(async (tx) => {
+            const updated = await tx.transaction.updateMany({
+              where: { id: txn.id, status: "PROCESSING" },
+              data: {
+                status: r.data.status === "REFUNDED" ? "REFUNDED" : "FAILED",
+                errorCode: "CHAGAN_CC_PROVIDER_FAILED",
+                errorMessage: `Provider reported ${r.data.status} during reconciliation`,
+                response: {
+                  reconSettled: true,
+                  providerStatus: r.data.status,
+                } as Prisma.InputJsonValue,
+              },
+            });
+            if (updated.count === 0) return 0;
+            await creditWallet({
+              userId: txn.userId,
+              amount: reserveAmount,
+              reason: "REVERSAL",
+              refType: "Transaction",
+              refId: txn.id,
+              idempotencyKey: reversalKey,
+            }, tx);
+            await tx.auditLog.create({
+              data: {
+                userId: txn.userId,
+                action: "recon.bbps_refunded",
+                entity: "Transaction",
+                entityId: txn.id,
+                meta: { refId: txn.refId, providerStatus: r.data.status, partner: "CHAGANS_CC_BILL" },
+              },
+            });
+            return updated.count;
+          });
+          if (refundCount > 0) {
+            void emitWebhookEvent(txn.userId, "txn.failed", {
+              refId: txn.refId,
+              service: txn.service,
+              amount: txn.amount.toNumber(),
+              code: "CHAGAN_CC_PROVIDER_FAILED",
+              message: `Bill payment ${r.data.status.toLowerCase()} by provider`,
+            });
+            refunded++;
+          }
+        }
+        drained++;
         continue;
       }
 

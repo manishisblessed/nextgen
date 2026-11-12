@@ -26,6 +26,7 @@ const RECON_CAPABLE_BBPS_SERVICES: ServiceCode[] = [
 
 function railSupportsHoldAndRecon(partner: string, service: ServiceCode): boolean {
   if (partner === "SAMEDAY_RECHARGEKIT") return true;
+  if (partner === "CHAGANS_CC_BILL") return true;
   if (partner === "SAMEDAY_PAY2NEW") return RECON_CAPABLE_BBPS_SERVICES.includes(service);
   return false;
 }

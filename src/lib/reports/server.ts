@@ -1081,11 +1081,14 @@ async function reportCreditCard(user: SessionUser, params: ReportParams): Promis
 }
 
 /* --------------------------------------------------------------------- */
-/*  6 · QR Codes (no dedicated source model yet — graceful empty)         */
+/*  6 · QR Codes (per-QR collections from the QrClaim ledger)             */
 /* --------------------------------------------------------------------- */
 
-async function reportQr(_user: SessionUser, params: ReportParams): Promise<ReportResult> {
-  return {
+async function reportQr(user: SessionUser, params: ReportParams): Promise<ReportResult> {
+  const ids = await allowedUserIds(user);
+  const createdAt = dateFilter(params);
+
+  const emptyResult = (): ReportResult => ({
     rows: [],
     total: 0,
     page: params.page,
@@ -1098,8 +1101,122 @@ async function reportQr(_user: SessionUser, params: ReportParams): Promise<Repor
       money("Settled", 0, "emerald"),
     ],
     trend: null,
-    note:
-      "QR Codes are part of a later phase and don't have a dedicated data source yet. Once QR collections are persisted, this report will populate automatically.",
+    note: "No QR collections were found for this date range.",
+  });
+
+  // Base claim filter: scoped to the caller's network + date range.
+  const baseClaim: Prisma.QrClaimWhereInput = {
+    ...(ids ? { userId: { in: ids } } : {}),
+    ...(createdAt ? { createdAt } : {}),
+  };
+
+  // Find distinct QR IDs that have claims in scope.
+  const qrIdsRaw = await prisma.qrClaim.groupBy({
+    by: ["qrId"],
+    where: baseClaim,
+  });
+  const candidateQrIds = qrIdsRaw.map((r) => r.qrId);
+
+  if (candidateQrIds.length === 0) return emptyResult();
+
+  // Apply QR-level search filter on top of the claims-derived set.
+  const qrWhere: Prisma.StaticQrWhereInput = {
+    id: { in: candidateQrIds },
+    ...(params.q
+      ? {
+          OR: [
+            { label: { contains: params.q, mode: "insensitive" as const } },
+            { upiVpa: { contains: params.q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+
+  // Resolve the QR IDs that pass the search filter (for aggregation).
+  const filteredQrIds: string[] = params.q
+    ? (await prisma.staticQr.findMany({ where: qrWhere, select: { id: true } })).map((q) => q.id)
+    : candidateQrIds;
+
+  if (filteredQrIds.length === 0) {
+    return { ...emptyResult(), note: "No QR codes match your search." };
+  }
+
+  // Aggregate claims for the filtered QRs + paginated QR rows, in parallel.
+  const finalClaimWhere: Prisma.QrClaimWhereInput = {
+    ...baseClaim,
+    qrId: { in: filteredQrIds },
+  };
+
+  const [qrPage, total, claimGroups, totalAgg, settledAgg] = await Promise.all([
+    prisma.staticQr.findMany({
+      where: qrWhere,
+      orderBy: [{ active: "desc" }, { createdAt: "desc" }],
+      ...paginate(params),
+      select: {
+        id: true,
+        label: true,
+        upiVpa: true,
+        active: true,
+        enabled: true,
+        settlementKind: true,
+      },
+    }),
+    prisma.staticQr.count({ where: qrWhere }),
+    prisma.qrClaim.groupBy({
+      by: ["qrId"],
+      where: finalClaimWhere,
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    prisma.qrClaim.aggregate({
+      where: finalClaimWhere,
+      _count: { _all: true },
+      _sum: { amount: true },
+    }),
+    prisma.qrClaim.aggregate({
+      where: { ...finalClaimWhere, status: { in: ["APPROVED", "SETTLED"] } },
+      _sum: { netAmount: true },
+    }),
+  ]);
+
+  const claimMap = new Map(
+    claimGroups.map((g) => [
+      g.qrId,
+      { payments: g._count._all, collected: toNumber(g._sum.amount ?? 0) },
+    ])
+  );
+
+  const totalPayments = totalAgg._count._all;
+  const totalCollected = dec(totalAgg._sum.amount ?? 0);
+  const totalSettled = dec(settledAgg._sum.netAmount ?? 0);
+
+  const rows = qrPage.map((q) => {
+    const claims = claimMap.get(q.id) ?? { payments: 0, collected: 0 };
+    return {
+      id: q.id.slice(-8).toUpperCase(),
+      label: q.label,
+      type: q.settlementKind === "INSTANT" ? "Instant" : "T+1",
+      vpa: q.upiVpa ?? "—",
+      payments: claims.payments,
+      collected: claims.collected,
+      status: q.active ? "Active" : q.enabled ? "Paused" : "Disabled",
+    };
+  });
+
+  return {
+    rows,
+    total,
+    page: params.page,
+    pageSize: params.pageSize,
+    totals: { id: "Total", payments: totalPayments, collected: toNumber(totalCollected) },
+    summary: [
+      count("QR codes", total, "violet"),
+      money("Collected", totalCollected, "brand"),
+      count("Payments", totalPayments, "accent"),
+      money("Settled", totalSettled, "emerald"),
+    ],
+    trend: null,
+    note: null,
   };
 }
 
@@ -1527,7 +1644,12 @@ async function reportAccount(user: SessionUser, params: ReportParams): Promise<R
  */
 async function reportDailyUser(user: SessionUser, params: ReportParams): Promise<ReportResult> {
   const ids = await allowedUserIds(user);
-  const dateAnchor = params.to ?? params.from ?? new Date();
+  // The Daily User Report needs only the calendar date, not a point in time.
+  // params.to carries an end-of-day UTC timestamp (23:59:59 UTC) from the API
+  // route's parseDate; in IST (+05:30) that spills into the NEXT calendar day.
+  // Convert to a YYYY-MM-DD string so istDayBounds() applies the correct IST
+  // midnight instead of the misleading UTC end-of-day time.
+  const dateAnchor = (params.to ?? params.from ?? new Date()).toISOString().slice(0, 10);
 
   const report = await getDailyUserReport({
     date: dateAnchor,
