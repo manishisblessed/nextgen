@@ -28,7 +28,7 @@ import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatINR } from "@/lib/utils";
-import { SERVICE_FAMILIES, familyOf, type ServiceFamily } from "@/lib/scheme/constants";
+import { SERVICE_FAMILIES, familyOf, providerDisplayLabel, type ServiceFamily } from "@/lib/scheme/constants";
 import {
   OnboardingProgressView,
   type OnboardingProgress,
@@ -566,7 +566,7 @@ export default function NetworkMemberDetailPage() {
                                 {list.map((sl) => (
                                   <tr key={sl.id} className="border-t border-ink-50">
                                     <td className="px-3 py-2 font-medium text-ink-900">{sl.service.replace(/_/g, " ")}</td>
-                                    <td className="px-3 py-2 text-xs text-ink-600">{sl.provider ?? "All"}</td>
+                                    <td className="px-3 py-2 text-xs text-ink-600">{providerDisplayLabel(sl.provider)}</td>
                                     <td className="px-3 py-2 text-ink-600">{fmtBand(sl.minAmount, sl.maxAmount)}</td>
                                     <td className="px-3 py-2 text-right text-ink-900">{fmtServiceRate(sl.chargeType, sl.chargeValue)}</td>
                                     <td className="px-3 py-2 text-right font-semibold text-emerald-700">{fmtServiceRate(sl.commissionType, sl.commissionValue)}</td>

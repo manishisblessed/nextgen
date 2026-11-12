@@ -59,6 +59,37 @@ export function serviceLabel(code: string): string {
 }
 
 /**
+ * User-facing provider / product label for a BBPS scheme slab.
+ *
+ * Translates internal service-route keys (e.g. "bbps_chagan") and partner
+ * family tags (e.g. "CHAGANS") into the product name shown on retailer /
+ * network pages — NO internal partner or vendor names visible to users.
+ *
+ * Rule: if it maps to something, show that. Otherwise show "All" (= any
+ * provider), which is safe and non-revealing.
+ */
+const PROVIDER_DISPLAY_MAP: Record<string, string> = {
+  // BBPS product scope keys
+  bbps_sameday: "Bharat BillPay",
+  bbps_credit_card: "Credit Card",
+  bbps_bulkpe_svc: "Bharat BillPay",
+  bbps_bulkpe: "Bharat BillPay",
+  rechargekit_cc: "CC Bill Payment-2",
+  rechargekit_direct: "CC Bill Payment",
+  bbps_chagan: "CC Bill Payment",
+  // Partner family tags (used as fallback on older slabs)
+  SAMEDAY: "Bharat BillPay",
+  BULKPE: "Bharat BillPay",
+  CHAGANS: "CC Bill Payment",
+  RAZORPAY: "Payment Gateway",
+};
+
+export function providerDisplayLabel(provider: string | null | undefined): string {
+  if (!provider) return "All";
+  return PROVIDER_DISPLAY_MAP[provider] ?? PROVIDER_DISPLAY_MAP[provider.toUpperCase()] ?? "—";
+}
+
+/**
  * Icon-wise service families for the scheme-management UI (Same Day style):
  * each family gets an icon button on the scheme card that opens a slab modal
  * scoped to its services, plus an expandable slab-table section.

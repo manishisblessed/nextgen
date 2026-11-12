@@ -14,7 +14,7 @@ import {
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { SERVICE_FAMILIES, familyOf, schemeAssignerLabel, serviceLabel, type ServiceFamily } from "@/lib/scheme/constants";
+import { SERVICE_FAMILIES, familyOf, schemeAssignerLabel, serviceLabel, providerDisplayLabel, type ServiceFamily } from "@/lib/scheme/constants";
 
 type RateType = "FLAT" | "PERCENT";
 
@@ -249,7 +249,7 @@ export default function MyAssignedSchemePage() {
                         {list.map((s) => (
                           <tr key={s.id} className="border-t border-ink-50">
                             <td className="px-3 py-2 font-medium text-ink-900">{serviceLabel(s.service)}</td>
-                            <td className="px-3 py-2 text-xs text-ink-600">{s.provider ?? "All"}</td>
+                            <td className="px-3 py-2 text-xs text-ink-600">{providerDisplayLabel(s.provider)}</td>
                             <td className="px-3 py-2 text-ink-600">{fmtBand(s.minAmount, s.maxAmount)}</td>
                             <td className="px-3 py-2 text-right text-ink-900">{fmtServiceRate(s.chargeType, s.chargeValue)}</td>
                             <td className="px-3 py-2 text-right text-emerald-700 font-semibold">{fmtServiceRate(s.commissionType, s.commissionValue)}</td>

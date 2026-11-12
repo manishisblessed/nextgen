@@ -181,10 +181,11 @@ export function ChagansCCBillForm({
           setBillerName(list[0].billerName);
         }
       } else {
-        setError(data.error ?? "Could not load billers — please refresh");
+        // Do not expose raw provider error messages to users.
+        setError("Could not load card issuers — please tap the refresh button to try again");
       }
     } catch {
-      setError("Could not load billers — check your connection");
+      setError("Could not load card issuers — check your connection and refresh");
     } finally {
       setLoadingBillers(false);
     }
@@ -216,7 +217,7 @@ export function ChagansCCBillForm({
         });
         const data = await res.json();
         if (!res.ok) {
-          setError(data.error ?? "Could not load biller fields — please try again");
+          setError("Could not load biller details — please re-select the card issuer or try again");
           return;
         }
         // Initialise paramValues with empty strings for each required field.
@@ -307,11 +308,15 @@ export function ChagansCCBillForm({
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(
-          typeof data.error === "string"
-            ? data.error
-            : "Bill fetch failed — check the details and try again"
-        );
+        // Map common provider error codes to user-friendly messages; do not
+        // expose raw Chagans error strings to the user.
+        const msg =
+          data.code === "INVALID_PARAMS" || data.code === "CHAGAN_CC_INVALID_PARAMS"
+            ? "Could not find this account — check the details you entered and try again"
+            : data.code === "TIMEOUT" || data.code === "NETWORK"
+              ? "Connection timed out — please try again"
+              : "Bill details could not be fetched — check the information and try again";
+        setError(msg);
         return;
       }
       setFetchedBill(data as FetchedBill);

@@ -219,6 +219,15 @@ let billerCache: ChagansCcBiller[] | null = null;
 let billerCacheAt = 0;
 const BILLER_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+/**
+ * In-flight deduplication: if getBillers is already awaiting the Chagans API,
+ * every subsequent caller shares that same promise instead of each launching
+ * a separate request. Chagans detects duplicate in-flight calls with the same
+ * merchantId+categoryKey and returns "Duplicate request detected" — this guard
+ * eliminates that race entirely.
+ */
+let billerFetchInFlight: Promise<PartnerResult<ChagansCcBiller[]>> | null = null;
+
 // ---------------------------------------------------------------------------
 // 1. getBillers
 // ---------------------------------------------------------------------------
@@ -226,10 +235,16 @@ const BILLER_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 /**
  * Fetch the list of credit-card billers (card issuers / banks) for category C15.
  * Results are cached in-process for 6 hours; pass forceRefresh=true to bust.
+ *
+ * In-flight deduplication: concurrent callers share a single in-progress promise
+ * so we never fire two simultaneous requests to Chagans (they return "Duplicate
+ * request detected" when the same merchantId+categoryKey is sent twice in quick
+ * succession).
  */
 export async function chagansCcGetBillers(
   forceRefresh = false
 ): Promise<PartnerResult<ChagansCcBiller[]>> {
+  // 1. Serve from cache if still fresh (and not a forced refresh).
   if (
     !forceRefresh &&
     billerCache &&
@@ -238,32 +253,48 @@ export async function chagansCcGetBillers(
     return { ok: true, data: billerCache };
   }
 
-  type GetBillersResp = {
-    category?: string;
-    categoryName?: string;
-    data?: Array<{ billerId: string; billerName: string }>;
-  };
-
-  const r = await ccPost<GetBillersResp>("/ccBillPay/getBillers", {
-    merchantId: merchantId(),
-    categoryKey: CATEGORY_KEY,
-  });
-
-  if (!r.ok) {
-    log.warn({ code: r.code, message: r.message }, "Chagans CC getBillers failed");
-    return r as PartnerResult<ChagansCcBiller[]>;
+  // 2. If a fetch is already in-flight, share that promise (dedup).
+  if (billerFetchInFlight) {
+    log.debug("Chagans CC getBillers: reusing in-flight request");
+    return billerFetchInFlight;
   }
 
-  const billers: ChagansCcBiller[] = (r.data.data ?? []).map((b) => ({
-    billerId: b.billerId,
-    billerName: b.billerName,
-  }));
+  // 3. Launch a fresh fetch and expose it for dedup.
+  billerFetchInFlight = (async (): Promise<PartnerResult<ChagansCcBiller[]>> => {
+    try {
+      type GetBillersResp = {
+        category?: string;
+        categoryName?: string;
+        data?: Array<{ billerId: string; billerName: string }>;
+      };
 
-  billerCache = billers;
-  billerCacheAt = Date.now();
-  log.info({ count: billers.length }, "Chagans CC biller cache refreshed");
+      const r = await ccPost<GetBillersResp>("/ccBillPay/getBillers", {
+        merchantId: merchantId(),
+        categoryKey: CATEGORY_KEY,
+      });
 
-  return { ok: true, data: billers, raw: r.raw };
+      if (!r.ok) {
+        log.warn({ code: r.code, message: r.message }, "Chagans CC getBillers failed");
+        return r as PartnerResult<ChagansCcBiller[]>;
+      }
+
+      const billers: ChagansCcBiller[] = (r.data.data ?? []).map((b) => ({
+        billerId: b.billerId,
+        billerName: b.billerName,
+      }));
+
+      billerCache = billers;
+      billerCacheAt = Date.now();
+      log.info({ count: billers.length }, "Chagans CC biller cache refreshed");
+
+      return { ok: true, data: billers, raw: r.raw };
+    } finally {
+      // Always clear the in-flight pointer so the next call can retry.
+      billerFetchInFlight = null;
+    }
+  })();
+
+  return billerFetchInFlight;
 }
 
 // ---------------------------------------------------------------------------
