@@ -141,6 +141,22 @@ export async function POST(req: Request) {
       bankIfsc: d.bankIfsc,
     });
 
+    // Full KYC payload stored in meta — all fields the user submitted.
+    const kycMeta = {
+      name: d.name,
+      mobile: d.mobile,
+      email: d.email,
+      gender: d.gender,
+      pan: d.pan,
+      aadhaar: d.aadhaar,
+      dateOfBirth: d.dateOfBirth,
+      address: d.address,
+      latitude: d.latitude,
+      longitude: d.longitude,
+      bankAccountNo: d.bankAccountNo,
+      bankIfsc: d.bankIfsc,
+    };
+
     if (!result.ok) {
       // If there's an existing REJECTED record, update it to PENDING for retry
       if (existing?.status === "REJECTED") {
@@ -149,14 +165,10 @@ export async function POST(req: Request) {
           data: {
             status: "PENDING",
             meta: {
-              name: d.name,
-              mobile: d.mobile,
-              email: d.email,
-              pan: d.pan.slice(0, 5) + "****" + d.pan.slice(-1),
-              city: d.address.city,
-              pincode: d.address.pincode,
+              ...kycMeta,
               lastAttempt: new Date().toISOString(),
               error: result.message,
+              createdVia: "self-onboarding",
             },
           },
         });
@@ -173,7 +185,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Success — upsert the merchant record
+    // Success — upsert the merchant record with full KYC data
     const merchant = await prisma.bbpsMerchant.upsert({
       where: { userId: user.id },
       create: {
@@ -184,14 +196,10 @@ export async function POST(req: Request) {
         status: "ACTIVE",
         activatedAt: new Date(),
         meta: {
-          name: d.name,
-          mobile: d.mobile,
-          email: d.email,
-          pan: d.pan.slice(0, 5) + "****" + d.pan.slice(-1),
-          city: d.address.city,
-          pincode: d.address.pincode,
-          bankIfsc: d.bankIfsc,
+          ...kycMeta,
+          chagansMerchantId: result.data.merchantId,
           createdVia: "self-onboarding",
+          createdAt: new Date().toISOString(),
         },
       },
       update: {
@@ -201,19 +209,15 @@ export async function POST(req: Request) {
         activatedAt: new Date(),
         suspendedAt: null,
         meta: {
-          name: d.name,
-          mobile: d.mobile,
-          email: d.email,
-          pan: d.pan.slice(0, 5) + "****" + d.pan.slice(-1),
-          city: d.address.city,
-          pincode: d.address.pincode,
-          bankIfsc: d.bankIfsc,
+          ...kycMeta,
+          chagansMerchantId: result.data.merchantId,
           createdVia: "self-onboarding",
+          updatedAt: new Date().toISOString(),
         },
       },
     });
 
-    // Audit log
+    // Audit log — includes all KYC fields for compliance
     await prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -224,6 +228,7 @@ export async function POST(req: Request) {
           merchantId: result.data.merchantId,
           kycStatus: result.data.kycStatus,
           provider: "CHAGANS",
+          kyc: kycMeta,
         },
         ip: clientIp(req),
       },
