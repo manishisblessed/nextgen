@@ -15,6 +15,7 @@ import {
   Send,
   ShieldCheck,
   Zap,
+  Banknote,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatINRFull } from "./CumulativeWalletCard";
@@ -52,6 +53,11 @@ const PROVIDER_META: Record<
     subtitle: "KYC & Verification credits",
     tint: "emerald",
     icon: ShieldCheck,
+  },
+  chagans: {
+    subtitle: "CC Bill Pay float · Chagans",
+    tint: "amber",
+    icon: Banknote,
   },
 };
 
@@ -142,10 +148,10 @@ export function ProviderWalletsCard({
         </div>
       </header>
 
-      <div className="relative mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="relative mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {loading && !providers && (
           <>
-            {Array.from({ length: 3 }).map((_, i) => (
+            {Array.from({ length: 4 }).map((_, i) => (
               <div
                 key={i}
                 className="animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4"

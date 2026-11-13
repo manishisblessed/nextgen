@@ -5,6 +5,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { chagansCcGetBillers } from "@/lib/partners/chagans-cc-bill";
+import { getBbpsMerchantStatus } from "@/lib/services/bbpsMerchant";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -16,8 +17,10 @@ export const dynamic = "force-dynamic";
  * Cached in-process for 6 hours; pass ?refresh=true to bust the cache.
  */
 export async function GET(req: Request) {
+  let userId: string;
   try {
     const user = await requireAuth();
+    userId = user.id;
     if (user.role !== "RETAILER")
       throw new AuthError("CC Bill Payment is available for retailers only", 403);
     await assertServiceEnabled(SERVICE_KEYS.BBPS_CHAGANS, {
@@ -29,6 +32,12 @@ export async function GET(req: Request) {
   } catch (e) {
     return toErrorResponse(e);
   }
+
+  // Include merchant onboarding status so the UI can gate the form.
+  const merchant = await getBbpsMerchantStatus(userId);
+  const canTransact = !!(
+    merchant?.status === "ACTIVE" && merchant.providerMerchantId
+  );
 
   const refresh = new URL(req.url).searchParams.get("refresh") === "true";
   const result = await chagansCcGetBillers(refresh);
@@ -48,5 +57,7 @@ export async function GET(req: Request) {
       billerName: b.billerName,
     })),
     count: result.data.length,
+    merchant: merchant ? { status: merchant.status, kycStatus: merchant.kycStatus } : null,
+    canTransact,
   });
 }

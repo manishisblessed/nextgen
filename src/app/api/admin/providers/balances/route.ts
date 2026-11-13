@@ -6,6 +6,10 @@ import {
   settlementBalance,
 } from "@/lib/partners/sameday-settlement";
 import { checkBalance, ekychubConfigured } from "@/lib/partners/ekychub";
+import {
+  chagansCcBaseConfigured,
+  chagansCcBalance,
+} from "@/lib/partners/chagans-cc-bill";
 
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
@@ -33,7 +37,7 @@ export async function GET() {
   try {
     await requireRole("MASTER_ADMIN", "ADMIN", "FINANCE");
 
-    const [bulkpe, sameday, ekychub] = await Promise.all([
+    const [bulkpe, sameday, ekychub, chagans] = await Promise.all([
       withTimeout(probeBulkpe(), {
         key: "bulkpe",
         name: "BulkPe",
@@ -58,10 +62,18 @@ export async function GET() {
         balance: null,
         error: "timed out",
       }),
+      withTimeout(probeChagans(), {
+        key: "chagans",
+        name: "Chagans wallet",
+        provider: "CHAGANS",
+        configured: chagansCcBaseConfigured(),
+        balance: null,
+        error: "timed out",
+      }),
     ]);
 
     return NextResponse.json({
-      providers: [bulkpe, sameday, ekychub],
+      providers: [bulkpe, sameday, ekychub, chagans],
       asOf: new Date().toISOString(),
     });
   } catch (e) {
@@ -142,6 +154,30 @@ async function probeEkychub(): Promise<ProviderBalance> {
     if (!r.ok) return { ...base, error: r.message };
     const n = Number(r.data.balance);
     return { ...base, balance: Number.isFinite(n) ? n : null };
+  } catch (e) {
+    return { ...base, error: e instanceof Error ? e.message : "probe failed" };
+  }
+}
+
+async function probeChagans(): Promise<ProviderBalance> {
+  const base: ProviderBalance = {
+    key: "chagans",
+    name: "Chagans wallet",
+    provider: "CHAGANS",
+    configured: chagansCcBaseConfigured(),
+    balance: null,
+  };
+  if (!base.configured) return base;
+  try {
+    const r = await chagansCcBalance();
+    if (!r.ok) return { ...base, error: r.message };
+    const detail =
+      r.data.lienBalance > 0
+        ? `Lien: ₹${r.data.lienBalance.toFixed(2)} · Main: ₹${r.data.mainBalance.toFixed(2)}`
+        : r.data.mainBalance !== r.data.balance
+        ? `Main: ₹${r.data.mainBalance.toFixed(2)}`
+        : null;
+    return { ...base, balance: r.data.balance, detail };
   } catch (e) {
     return { ...base, error: e instanceof Error ? e.message : "probe failed" };
   }

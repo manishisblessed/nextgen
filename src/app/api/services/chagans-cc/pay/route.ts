@@ -13,6 +13,7 @@ import { getEffectiveRate, withGst } from "@/lib/scheme/resolver";
 import { toNumber, dec, sub, round } from "@/lib/money";
 import { runTransaction } from "@/lib/services/transaction";
 import { chagansCcPayBill } from "@/lib/partners/chagans-cc-bill";
+import { requireChagansMerchant } from "@/lib/services/bbpsMerchant";
 
 const Body = z
   .object({
@@ -62,6 +63,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const d = parsed.data;
+
+  let merchantId: string;
+  try {
+    const m = await requireChagansMerchant(user.id);
+    merchantId = m.providerMerchantId;
+  } catch (e) {
+    return toErrorResponse(e);
+  }
 
   try {
     const rate = await getEffectiveRate(
@@ -113,6 +122,7 @@ export async function POST(req: Request) {
           amount: d.amount,
           externalRef: d.idempotencyKey,
           customerPan: d.customerPan || undefined,
+          userMerchantId: merchantId,
         }),
     });
 

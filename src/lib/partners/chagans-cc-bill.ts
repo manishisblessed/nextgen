@@ -83,19 +83,171 @@ function chagansCcHeaders(): Record<string, string> {
   };
 }
 
-/** The merchantId from the Chagans createMerchant onboarding call. */
+/**
+ * Legacy fallback merchantId — only used when adapter functions are called
+ * without an explicit userMerchantId (e.g. the global getBillers cache).
+ * Per-user merchantId from BbpsMerchant is always preferred.
+ */
 function merchantId(): string {
   return process.env.CHAGAN_CC_MERCHANT_ID || "";
 }
 
-/** True when all four required credentials are present. */
-export function chagansCcBillConfigured(): boolean {
+/** True when the three base Chagans credentials are present (no merchantId needed). */
+export function chagansCcBaseConfigured(): boolean {
   return Boolean(
     process.env.CHAGAN_CLIENT_ID &&
     process.env.CHAGAN_CLIENT_SECRET &&
-    process.env.CHAGAN_API_TOKEN &&
-    process.env.CHAGAN_CC_MERCHANT_ID
+    process.env.CHAGAN_API_TOKEN
   );
+}
+
+/**
+ * True when the base Chagans credentials are present.
+ * MerchantId is now per-user (from BbpsMerchant), so this only checks the
+ * 3 API credentials needed for all Chagans calls.
+ */
+export function chagansCcBillConfigured(): boolean {
+  return chagansCcBaseConfigured();
+}
+
+// ---------------------------------------------------------------------------
+// Balance check — POST /partner/apiBalance
+// ---------------------------------------------------------------------------
+
+export type ChagansCcBalanceData = {
+  /** Total wallet balance (main usable float). */
+  balance: number;
+  /** Main account balance. */
+  mainBalance: number;
+  /** Amount currently on hold / in-lien. */
+  lienBalance: number;
+  /** Unsettled amount. */
+  unsettledBalance: number;
+};
+
+/**
+ * Fetch the live Chagans wallet balance.
+ * Uses standard auth headers only — no merchantId or apiType needed.
+ * Called by the admin Provider Wallets panel.
+ */
+export async function chagansCcBalance(): Promise<PartnerResult<ChagansCcBalanceData>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl()}/partner/apiBalance`, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        "client-id": process.env.CHAGAN_CLIENT_ID || "",
+        "client-secret": process.env.CHAGAN_CLIENT_SECRET || "",
+        authorization: `Bearer ${process.env.CHAGAN_API_TOKEN || ""}`,
+      },
+      signal: controller.signal,
+    });
+
+    const json = await res.json().catch(() => ({})) as {
+      success?: boolean;
+      code?: number;
+      message?: string;
+      data?: {
+        balance?: number;
+        mainBalance?: number;
+        lienBalance?: number;
+        unsettledBalance?: number;
+      };
+    };
+
+    if (!json.success || !json.data) {
+      return {
+        ok: false,
+        code: String(json.code ?? res.status),
+        message: json.message ?? "Balance fetch failed",
+      };
+    }
+
+    return {
+      ok: true,
+      data: {
+        balance: Number(json.data.balance ?? 0),
+        mainBalance: Number(json.data.mainBalance ?? 0),
+        lienBalance: Number(json.data.lienBalance ?? 0),
+        unsettledBalance: Number(json.data.unsettledBalance ?? 0),
+      },
+    };
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      code: isTimeout ? "TIMEOUT" : "NETWORK",
+      message: isTimeout ? "Balance probe timed out" : (err instanceof Error ? err.message : "Network error"),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 0. createMerchant — POST /ccBillpay/createMerchant
+// ---------------------------------------------------------------------------
+
+export type ChagansMerchantKyc = {
+  mobile: string;
+  name: string;
+  gender: "M" | "F" | "O";
+  pan: string;
+  email: string;
+  address: {
+    full: string;
+    city: string;
+    pincode: string;
+  };
+  aadhaar: string;
+  dateOfBirth: string; // YYYY-MM-DD
+  latitude: string;
+  longitude: string;
+  bankAccountNo: string;
+  bankIfsc: string;
+};
+
+export type ChagansMerchantResult = {
+  merchantId: string;
+  kycStatus: string;
+};
+
+/**
+ * Register a new merchant with Chagans (KYC-validated).
+ * Each retailer must have their own merchantId before they can transact.
+ * Calls POST /ccBillpay/createMerchant with full KYC details.
+ */
+export async function chagansCcCreateMerchant(
+  kyc: ChagansMerchantKyc
+): Promise<PartnerResult<ChagansMerchantResult>> {
+  const r = await ccPost<{
+    data?: { merchantId?: string; kycStatus?: string };
+  }>("/ccBillpay/createMerchant", kyc);
+
+  if (!r.ok) {
+    log.warn({ code: r.code, message: r.message }, "Chagans createMerchant failed");
+    return r;
+  }
+
+  const mid = r.data.data?.merchantId;
+  if (!mid) {
+    log.error({ raw: r.raw }, "Chagans createMerchant: no merchantId in response");
+    return { ok: false, code: "NO_MERCHANT_ID", message: "Merchant created but no merchantId returned" };
+  }
+
+  log.info({ merchantId: mid, kycStatus: r.data.data?.kycStatus }, "Chagans merchant created");
+
+  return {
+    ok: true,
+    data: {
+      merchantId: mid,
+      kycStatus: r.data.data?.kycStatus ?? "unknown",
+    },
+    raw: r.raw,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +461,8 @@ export async function chagansCcGetBillers(
  * must store it alongside a timestamp and warn/block if it expires before pay.
  */
 export async function chagansCcGetBillerParams(
-  billerId: string
+  billerId: string,
+  userMerchantId?: string
 ): Promise<PartnerResult<ChagansCcBillerParamsResult>> {
   type GetParamsResp = {
     enquiryId?: string;
@@ -321,7 +474,7 @@ export async function chagansCcGetBillerParams(
 
   const r = await ccPost<GetParamsResp>("/ccBillPay/getBillersParams", {
     categoryKey: CATEGORY_KEY,
-    merchantId: merchantId(),
+    merchantId: userMerchantId || merchantId(),
     billerId,
   });
 
@@ -394,6 +547,7 @@ export async function chagansCcFetchBill(input: {
   billerId: string;
   enquiryId: string;
   parameters: Record<string, string>; // { param1: "...", param2: "..." }
+  userMerchantId?: string;
 }): Promise<PartnerResult<ChagansCcFetchBillResult>> {
   type FetchBillResp = {
     data?: {
@@ -403,7 +557,7 @@ export async function chagansCcFetchBill(input: {
   };
 
   const r = await ccPost<FetchBillResp>("/ccBillPay/fetchBill", {
-    merchantId: merchantId(),
+    merchantId: input.userMerchantId || merchantId(),
     categoryKey: CATEGORY_KEY,
     billerId: input.billerId,
     enquiryId: input.enquiryId,
@@ -477,6 +631,7 @@ export async function chagansCcPayBill(input: {
   amount: number;
   externalRef: string;
   customerPan?: string;
+  userMerchantId?: string;
 }): Promise<PartnerResult<ChagansCcPayResult>> {
   log.info(
     {
@@ -495,7 +650,7 @@ export async function chagansCcPayBill(input: {
   };
 
   const r = await ccPost<PayBillResp>("/ccBillPay/payBill", {
-    merchantId: merchantId(),
+    merchantId: input.userMerchantId || merchantId(),
     categoryKey: CATEGORY_KEY,
     billerId: input.billerId,
     enquiryId: input.enquiryId,

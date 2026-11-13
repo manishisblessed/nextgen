@@ -88,11 +88,11 @@ const schema = z.object({
   RECHARGEKIT_DIRECT_BASE_URL: z.string().url().default("https://v2bapi.rechargkit.biz"),
   RECHARGEKIT_DIRECT_API_TOKEN: z.string().min(1).optional(),
 
-  // Chagans CC Bill Pay — merchantId issued by Chagans after the one-time
-  // /ccBillpay/createMerchant onboarding call. Required for every CC Bill API
-  // request. Uses the same CHAGAN_CLIENT_ID / CLIENT_SECRET / API_TOKEN as the
-  // PartnerPG rail (those live in process.env directly, not the typed schema).
-  // Gated by flags.rechargekitDirect (PARTNER_RECHARGEKIT_DIRECT_ENABLED).
+  // Chagans CC Bill Pay — merchantId is now per-user (stored in BbpsMerchant).
+  // This env var is kept as an optional legacy fallback for the global biller
+  // cache only. Per-user onboarding via POST /ccBillpay/createMerchant is the
+  // primary flow. Uses the same CHAGAN_CLIENT_ID / CLIENT_SECRET / API_TOKEN
+  // as the PartnerPG rail (those live in process.env directly, not the schema).
   CHAGAN_CC_MERCHANT_ID: z.string().min(1).optional(),
 
   // Phase 3 — settlement automation. A daily worker job sweeps the Same Day

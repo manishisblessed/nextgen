@@ -6,6 +6,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rateLimit";
 import { assertServiceEnabled } from "@/lib/services/guard";
 import { SERVICE_KEYS } from "@/lib/services/catalog";
 import { chagansCcGetBillerParams } from "@/lib/partners/chagans-cc-bill";
+import { requireChagansMerchant } from "@/lib/services/bbpsMerchant";
 
 const Body = z
   .object({
@@ -23,8 +24,9 @@ export const dynamic = "force-dynamic";
  * (valid 30 minutes) for the subsequent fetch-bill and pay calls.
  */
 export async function POST(req: Request) {
+  let user;
   try {
-    const user = await requireAuth();
+    user = await requireAuth();
     if (user.role !== "RETAILER")
       throw new AuthError("CC Bill Payment is available for retailers only", 403);
     await assertServiceEnabled(SERVICE_KEYS.BBPS_CHAGANS, {
@@ -41,7 +43,15 @@ export async function POST(req: Request) {
   if (!parsed.success)
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const result = await chagansCcGetBillerParams(parsed.data.billerId);
+  let merchantId: string;
+  try {
+    const m = await requireChagansMerchant(user.id);
+    merchantId = m.providerMerchantId;
+  } catch (e) {
+    return toErrorResponse(e);
+  }
+
+  const result = await chagansCcGetBillerParams(parsed.data.billerId, merchantId);
 
   if (!result.ok) {
     return NextResponse.json(

@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, RefreshCw, Loader2, CheckCircle2, Clock } from "lucide-react";
+import {
+  AlertCircle,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
+  Clock,
+  UserPlus,
+  ShieldCheck,
+} from "lucide-react";
 import { Input, Label } from "@/components/ui/Input";
 import { OperatorSelect } from "@/components/ui/OperatorSelect";
 import { Button } from "@/components/ui/Button";
@@ -147,6 +155,10 @@ export function ChagansCCBillForm({
   const [processing, setProcessing] = useState<string | null>(null);
   const [result, setResult] = useState<TxnResult>(null);
 
+  // --- Merchant onboarding ---
+  const [canTransact, setCanTransact] = useState<boolean | null>(null);
+  const [merchantStatus, setMerchantStatus] = useState<string | null>(null);
+
   // --- Status Check ---
   const [statusRefId, setStatusRefId] = useState<string>("");
   const [statusChecking, setStatusChecking] = useState(false);
@@ -168,6 +180,15 @@ export function ChagansCCBillForm({
       const url = `${apiBase}/operators${refresh ? "?refresh=true" : ""}`;
       const res = await fetch(url);
       const data = await res.json();
+
+      // Merchant onboarding status from the operators response.
+      if (typeof data.canTransact === "boolean") {
+        setCanTransact(data.canTransact);
+      }
+      if (data.merchant?.status) {
+        setMerchantStatus(data.merchant.status);
+      }
+
       if (res.ok && Array.isArray(data.operators)) {
         const list: Biller[] = data.operators.map(
           (o: { billerId?: string; operatorCode?: string; billerName?: string; operatorName?: string }) => ({
@@ -540,6 +561,21 @@ export function ChagansCCBillForm({
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+
+  // Show merchant onboarding gate if the user can't transact yet
+  if (canTransact === false) {
+    return (
+      <MerchantOnboardingGate
+        status={merchantStatus}
+        apiBase={apiBase}
+        onSuccess={() => {
+          setCanTransact(true);
+          setMerchantStatus("ACTIVE");
+          loadBillers();
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -936,5 +972,380 @@ export function ChagansCCBillForm({
         )}
       </div>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Merchant Onboarding Gate — shown when canTransact is false
+// ---------------------------------------------------------------------------
+
+function MerchantOnboardingGate({
+  status,
+  apiBase,
+  onSuccess,
+}: {
+  status: string | null;
+  apiBase: string;
+  onSuccess: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: "",
+    mobile: "",
+    email: "",
+    gender: "M",
+    pan: "",
+    aadhaar: "",
+    dateOfBirth: "",
+    bankAccountNo: "",
+    bankIfsc: "",
+    addressFull: "",
+    city: "",
+    pincode: "",
+    latitude: "",
+    longitude: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  // Auto-fill lat/long from browser
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setForm((f) => ({
+            ...f,
+            latitude: String(pos.coords.latitude.toFixed(6)),
+            longitude: String(pos.coords.longitude.toFixed(6)),
+          }));
+        },
+        () => {
+          // Geolocation denied — user will fill manually or we use defaults
+          setForm((f) => ({
+            ...f,
+            latitude: f.latitude || "28.6139",
+            longitude: f.longitude || "77.2090",
+          }));
+        }
+      );
+    }
+  }, []);
+
+  const update = (key: string, value: string) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setError(null);
+  };
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      const res = await fetch(`${apiBase}/merchant`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          mobile: form.mobile.trim(),
+          email: form.email.trim(),
+          gender: form.gender,
+          pan: form.pan.trim().toUpperCase(),
+          aadhaar: form.aadhaar.trim(),
+          dateOfBirth: form.dateOfBirth,
+          bankAccountNo: form.bankAccountNo.trim(),
+          bankIfsc: form.bankIfsc.trim().toUpperCase(),
+          latitude: form.latitude || "28.6139",
+          longitude: form.longitude || "77.2090",
+          address: {
+            full: form.addressFull.trim(),
+            city: form.city.trim(),
+            pincode: form.pincode.trim(),
+          },
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        // Parse Zod validation errors
+        if (data.error?.fieldErrors) {
+          const fields = data.error.fieldErrors as Record<string, string[]>;
+          const msgs = Object.entries(fields)
+            .map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`)
+            .join(" · ");
+          setError(msgs);
+        } else {
+          setError(
+            typeof data.error === "string"
+              ? data.error
+              : "Onboarding failed — please check your details"
+          );
+        }
+        return;
+      }
+
+      setSuccess(true);
+      setTimeout(onSuccess, 1500);
+    } catch {
+      setError("Network error — please check your connection");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Pending / Rejected / Suspended states
+  if (status === "PENDING") {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center">
+        <Clock className="mx-auto mb-3 h-10 w-10 text-amber-500" />
+        <h3 className="text-lg font-bold text-ink-900">
+          Merchant Onboarding Pending
+        </h3>
+        <p className="mt-2 text-sm text-ink-600">
+          Your merchant KYC verification is in progress. Please wait for approval
+          before you can use CC Bill Payment.
+        </p>
+      </div>
+    );
+  }
+
+  if (status === "SUSPENDED") {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+        <AlertCircle className="mx-auto mb-3 h-10 w-10 text-red-500" />
+        <h3 className="text-lg font-bold text-ink-900">
+          Merchant Account Suspended
+        </h3>
+        <p className="mt-2 text-sm text-ink-600">
+          Your merchant account has been suspended. Please contact your
+          administrator for assistance.
+        </p>
+      </div>
+    );
+  }
+
+  if (success) {
+    return (
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center">
+        <ShieldCheck className="mx-auto mb-3 h-10 w-10 text-emerald-500" />
+        <h3 className="text-lg font-bold text-ink-900">
+          Merchant Onboarding Complete!
+        </h3>
+        <p className="mt-2 text-sm text-ink-600">
+          Your KYC has been approved. Redirecting to CC Bill Payment...
+        </p>
+      </div>
+    );
+  }
+
+  const inputCls =
+    "w-full rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
+
+  return (
+    <div className="rounded-2xl border border-ink-100 bg-white p-6">
+      <div className="mb-6 flex items-center gap-3">
+        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow">
+          <UserPlus className="h-5 w-5" />
+        </span>
+        <div>
+          <h3 className="font-display text-lg font-bold text-ink-900">
+            Merchant Onboarding
+          </h3>
+          <p className="text-xs text-ink-500">
+            Complete your KYC to start making CC Bill Payments
+          </p>
+        </div>
+      </div>
+
+      {status === "REJECTED" && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="mr-1.5 inline h-4 w-4 -translate-y-0.5" />
+          Your previous onboarding was rejected. Please re-submit with correct details.
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="mr-1.5 inline h-4 w-4 -translate-y-0.5" />
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="onb-name">Full Name *</Label>
+          <input
+            id="onb-name"
+            className={inputCls}
+            value={form.name}
+            onChange={(e) => update("name", e.target.value)}
+            placeholder="As per PAN card"
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-mobile">Mobile *</Label>
+          <input
+            id="onb-mobile"
+            className={inputCls}
+            value={form.mobile}
+            onChange={(e) => update("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))}
+            placeholder="10-digit mobile"
+            maxLength={10}
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-email">Email *</Label>
+          <input
+            id="onb-email"
+            className={inputCls}
+            type="email"
+            value={form.email}
+            onChange={(e) => update("email", e.target.value)}
+            placeholder="you@example.com"
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-gender">Gender *</Label>
+          <select
+            id="onb-gender"
+            className={inputCls}
+            value={form.gender}
+            onChange={(e) => update("gender", e.target.value)}
+          >
+            <option value="M">Male</option>
+            <option value="F">Female</option>
+            <option value="O">Other</option>
+          </select>
+        </div>
+
+        <div>
+          <Label htmlFor="onb-pan">PAN *</Label>
+          <input
+            id="onb-pan"
+            className={inputCls}
+            value={form.pan}
+            onChange={(e) => update("pan", e.target.value.toUpperCase().slice(0, 10))}
+            placeholder="ABCDE1234F"
+            maxLength={10}
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-aadhaar">Aadhaar *</Label>
+          <input
+            id="onb-aadhaar"
+            className={inputCls}
+            value={form.aadhaar}
+            onChange={(e) => update("aadhaar", e.target.value.replace(/\D/g, "").slice(0, 12))}
+            placeholder="12-digit Aadhaar"
+            maxLength={12}
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-dob">Date of Birth *</Label>
+          <input
+            id="onb-dob"
+            className={inputCls}
+            type="date"
+            value={form.dateOfBirth}
+            onChange={(e) => update("dateOfBirth", e.target.value)}
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-bank">Bank Account No. *</Label>
+          <input
+            id="onb-bank"
+            className={inputCls}
+            value={form.bankAccountNo}
+            onChange={(e) => update("bankAccountNo", e.target.value.replace(/\D/g, "").slice(0, 20))}
+            placeholder="Account number"
+            maxLength={20}
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-ifsc">IFSC Code *</Label>
+          <input
+            id="onb-ifsc"
+            className={inputCls}
+            value={form.bankIfsc}
+            onChange={(e) => update("bankIfsc", e.target.value.toUpperCase().slice(0, 11))}
+            placeholder="SBIN0001234"
+            maxLength={11}
+            required
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <Label htmlFor="onb-address">Full Address *</Label>
+          <input
+            id="onb-address"
+            className={inputCls}
+            value={form.addressFull}
+            onChange={(e) => update("addressFull", e.target.value)}
+            placeholder="Shop / office address"
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-city">City *</Label>
+          <input
+            id="onb-city"
+            className={inputCls}
+            value={form.city}
+            onChange={(e) => update("city", e.target.value)}
+            placeholder="City"
+            required
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="onb-pincode">Pincode *</Label>
+          <input
+            id="onb-pincode"
+            className={inputCls}
+            value={form.pincode}
+            onChange={(e) => update("pincode", e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="6-digit pincode"
+            maxLength={6}
+            required
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={submitting}
+            className="w-full"
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Verifying KYC...
+              </>
+            ) : (
+              <>
+                <UserPlus className="mr-2 h-4 w-4" />
+                Complete Merchant Onboarding
+              </>
+            )}
+          </Button>
+        </div>
+      </form>
+    </div>
   );
 }
