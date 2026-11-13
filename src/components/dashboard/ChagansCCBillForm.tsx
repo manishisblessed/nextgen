@@ -201,6 +201,8 @@ export function ChagansCCBillForm({
           setBillerId(list[0].billerId);
           setBillerName(list[0].billerName);
         }
+      } else if (data.canTransact === false) {
+        // User needs to onboard — no error, the gate UI will show instead.
       } else {
         // Do not expose raw provider error messages to users.
         setError("Could not load card issuers — please tap the refresh button to try again");

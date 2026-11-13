@@ -39,12 +39,34 @@ export async function GET(req: Request) {
     merchant?.status === "ACTIVE" && merchant.providerMerchantId
   );
 
+  // If user hasn't onboarded as a merchant yet, return early with
+  // canTransact=false — no need to hit Chagans for the biller list.
+  if (!canTransact) {
+    return NextResponse.json({
+      operators: [],
+      count: 0,
+      merchant: merchant
+        ? { status: merchant.status, kycStatus: merchant.kycStatus }
+        : null,
+      canTransact: false,
+    });
+  }
+
   const refresh = new URL(req.url).searchParams.get("refresh") === "true";
   const result = await chagansCcGetBillers(refresh);
 
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.message, code: result.code },
+      {
+        error: result.message,
+        code: result.code,
+        operators: [],
+        count: 0,
+        merchant: merchant
+          ? { status: merchant.status, kycStatus: merchant.kycStatus }
+          : null,
+        canTransact,
+      },
       { status: 502 }
     );
   }
@@ -57,7 +79,9 @@ export async function GET(req: Request) {
       billerName: b.billerName,
     })),
     count: result.data.length,
-    merchant: merchant ? { status: merchant.status, kycStatus: merchant.kycStatus } : null,
+    merchant: merchant
+      ? { status: merchant.status, kycStatus: merchant.kycStatus }
+      : null,
     canTransact,
   });
 }
