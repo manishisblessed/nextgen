@@ -13,6 +13,59 @@ import { clientIp } from "@/lib/security/audit";
 export const fetchCache = "force-no-store";
 export const dynamic = "force-dynamic";
 
+/**
+ * Map raw provider error messages/codes to user-friendly text.
+ * NEVER expose internal partner names or raw provider strings to users.
+ */
+function friendlyMerchantError(
+  code: string | undefined,
+  rawMessage: string | undefined
+): string {
+  const msg = (rawMessage ?? "").toLowerCase();
+
+  // Product not yet provisioned on the provider side.
+  if (msg.includes("not enabled") || code === "403") {
+    return "CC Bill Payment is currently being set up. Please try again later or contact support.";
+  }
+
+  // PAN already registered with a different mobile — user-actionable.
+  if (msg.includes("pan") && msg.includes("already registered")) {
+    return "This PAN is already registered with a different mobile number. Please use the same mobile number that was originally linked, or try with a different PAN.";
+  }
+
+  // Aadhaar already registered.
+  if (msg.includes("aadhaar") && msg.includes("already registered")) {
+    return "This Aadhaar is already registered. Please contact support.";
+  }
+
+  // Generic "already registered/duplicate" — provide clear guidance.
+  if (msg.includes("already registered") || msg.includes("duplicate") || msg.includes("already exists")) {
+    return "These details are already registered. Please contact support if you need help.";
+  }
+
+  // KYC validation failures — surface the specific field problem.
+  if (msg.includes("aadhaar") || msg.includes("aadhar")) {
+    return "Invalid Aadhaar number. Please enter a valid 12-digit Aadhaar.";
+  }
+  if (msg.includes("pan")) {
+    return "Invalid PAN. Please enter a valid PAN (e.g. ABCDE1234F).";
+  }
+  if (msg.includes("mobile")) {
+    return "Invalid mobile number. Please enter a valid 10-digit mobile.";
+  }
+  if (msg.includes("email")) {
+    return "Invalid email address. Please check and try again.";
+  }
+  if (msg.includes("ifsc") || msg.includes("bank")) {
+    return "Invalid bank details. Please check your account number and IFSC.";
+  }
+  if (msg.includes("kyc failed") || msg.includes("kyc rejected")) {
+    return "KYC verification failed. Please check all your details are correct and try again.";
+  }
+  // Generic fallback.
+  return "Merchant onboarding could not be completed. Please check your details and try again.";
+}
+
 // Validation matching Chagans requirements
 const CreateMerchantBody = z
   .object({
@@ -176,9 +229,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json(
         {
-          error:
-            result.message ??
-            "Merchant onboarding failed — please check your details and try again",
+          error: friendlyMerchantError(result.code, result.message),
           code: result.code,
         },
         { status: 400 }

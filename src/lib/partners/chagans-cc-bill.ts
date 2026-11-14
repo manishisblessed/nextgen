@@ -224,16 +224,35 @@ export async function chagansCcCreateMerchant(
   kyc: ChagansMerchantKyc
 ): Promise<PartnerResult<ChagansMerchantResult>> {
   const r = await ccPost<{
-    data?: { merchantId?: string; kycStatus?: string };
+    data?: {
+      merchantId?: string;
+      kycStatus?: string;
+      providerResponse?: string;
+      bankPipe?: string;
+    };
   }>("/ccBillpay/createMerchant", kyc);
 
   if (!r.ok) {
-    log.warn({ code: r.code, message: r.message }, "Chagans createMerchant failed");
-    return r;
+    // Extract the providerResponse from Chagans — it contains the actual
+    // reason (e.g. "PAN already registered with another mobile").
+    const providerReason =
+      (r.raw as Record<string, unknown>)?.data &&
+      typeof ((r.raw as Record<string, unknown>).data as Record<string, unknown>)?.providerResponse === "string"
+        ? ((r.raw as Record<string, unknown>).data as Record<string, unknown>).providerResponse as string
+        : undefined;
+    const detail = providerReason || r.message;
+    log.warn({ code: r.code, message: r.message, providerResponse: providerReason }, "Chagans createMerchant failed");
+    return { ...r, message: detail };
   }
 
   const mid = r.data.data?.merchantId;
   if (!mid) {
+    // Chagans may return success:false with data.providerResponse for KYC failures
+    const providerReason = r.data.data?.providerResponse;
+    if (providerReason) {
+      log.warn({ providerResponse: providerReason }, "Chagans createMerchant KYC rejected");
+      return { ok: false, code: "KYC_REJECTED", message: providerReason };
+    }
     log.error({ raw: r.raw }, "Chagans createMerchant: no merchantId in response");
     return { ok: false, code: "NO_MERCHANT_ID", message: "Merchant created but no merchantId returned" };
   }
