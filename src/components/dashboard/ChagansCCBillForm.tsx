@@ -102,19 +102,22 @@ function extractBillDetails(br: Record<string, unknown>): {
       if (typeof v === "string" && v.trim()) return v.trim();
     }
   };
-  const num = (keys: string[]): number | undefined => {
+  // Chagans / BBPS returns monetary values in paise — divide by 100 to get ₹.
+  const numPaise = (keys: string[]): number | undefined => {
     for (const k of keys) {
       const v = br[k];
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-      if (typeof v === "string" && Number.isFinite(Number(v)) && Number(v) > 0)
-        return Number(v);
+      let raw: number | undefined;
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) raw = v;
+      else if (typeof v === "string" && Number.isFinite(Number(v)) && Number(v) > 0)
+        raw = Number(v);
+      if (raw !== undefined) return Math.round(raw) / 100;
     }
   };
   return {
     customerName: str(["customerName", "name", "accountName", "billerName"]),
     dueDate: str(["dueDate", "due_date", "billDueDate", "paymentDueDate"]),
-    minAmount: num(["minAmount", "minDueAmount", "minimumAmount", "minimumDue"]),
-    statementBalance: num(["statementBalance", "totalBalance", "totalOutstanding"]),
+    minAmount: numPaise(["minAmount", "minDueAmount", "minimumAmount", "minimumDue"]),
+    statementBalance: numPaise(["statementBalance", "totalBalance", "totalOutstanding"]),
   };
 }
 
@@ -153,6 +156,7 @@ export function ChagansCCBillForm({
   // --- Shared ---
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [processingRefId, setProcessingRefId] = useState<string | null>(null);
   const [result, setResult] = useState<TxnResult>(null);
 
   // --- Merchant onboarding ---
@@ -197,10 +201,6 @@ export function ChagansCCBillForm({
           })
         );
         setBillers(list);
-        if (list[0] && !refresh) {
-          setBillerId(list[0].billerId);
-          setBillerName(list[0].billerName);
-        }
       } else if (data.canTransact === false) {
         // User needs to onboard — no error, the gate UI will show instead.
       } else {
@@ -343,10 +343,9 @@ export function ChagansCCBillForm({
         return;
       }
       setFetchedBill(data as FetchedBill);
-      // Pre-fill amount if the API returned a due amount.
-      if (data.dueAmount && data.dueAmount > 0) {
-        setAmount(String(data.dueAmount));
-      }
+      // Do NOT auto-fill amount — let the user decide how much to pay.
+      // Quick-fill buttons ("Total due", "Min due") are shown below the
+      // amount input for convenience.
     } catch {
       setError("Network error while fetching the bill — please retry");
     } finally {
@@ -444,8 +443,9 @@ export function ChagansCCBillForm({
       // Async-pending (PROCESSING / 202).
       if (data.status === "PROCESSING" || data.status === "INITIATED") {
         setPinOpen(false);
+        setProcessingRefId(data.refId ?? null);
         setProcessing(
-          "Payment is being processed. Check your transaction history for the final status — do NOT re-submit."
+          "Payment is being processed — do NOT re-submit. Use the button below to check the final status."
         );
         resetAfterPay();
         return null;
@@ -478,7 +478,7 @@ export function ChagansCCBillForm({
         meta: {
           ...(consumerId ? { "Consumer ID": consumerId } : {}),
           ...(data.data?.transactionId
-            ? { "Chagans Txn ID": data.data.transactionId }
+            ? { "Provider Txn ID": data.data.transactionId }
             : {}),
         },
       });
@@ -526,8 +526,11 @@ export function ChagansCCBillForm({
     ? extractBillDetails(fetchedBill.billerResponse)
     : null;
   const amtNum = Number(amount);
+  const rawMax = fetchedBill?.billerResponse?.maxAmount;
   const maxAmount =
-    (fetchedBill?.billerResponse?.maxAmount as number | undefined) ?? 500000;
+    typeof rawMax === "number" && rawMax > 0
+      ? Math.round(rawMax) / 100 // paise → ₹
+      : 500000;
 
   // ---------------------------------------------------------------------------
   // Status check handler
@@ -551,6 +554,14 @@ export function ChagansCCBillForm({
           return;
         }
         setStatusResult(data.data);
+
+        // If the transaction has reached a final state, clear the
+        // processing banner so only the result card is visible.
+        const finalStatus = data.data?.status;
+        if (finalStatus === "SUCCESS" || finalStatus === "FAILED" || finalStatus === "REFUNDED") {
+          setProcessing(null);
+          setProcessingRefId(null);
+        }
       } catch {
         setStatusError("Network error while checking status");
       } finally {
@@ -866,11 +877,33 @@ export function ChagansCCBillForm({
           </div>
         )}
 
-        {/* ── Processing notice (async payment) ── */}
+        {/* ── Processing notice + inline status check for pending payment ── */}
         {processing && (
-          <div className="sm:col-span-2 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-            <span>{processing}</span>
+          <div className="sm:col-span-2 space-y-3">
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span>{processing}</span>
+            </div>
+            {processingRefId && (
+              <div className="rounded-xl border border-ink-200 bg-ink-50/50 p-4">
+                <p className="mb-2 text-xs font-medium text-ink-600">
+                  Ref ID: <span className="font-mono">{processingRefId}</span>
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  disabled={statusChecking}
+                  isLoading={statusChecking}
+                  onClick={() => {
+                    setStatusRefId(processingRefId);
+                    handleCheckStatus(processingRefId);
+                  }}
+                >
+                  Check Transaction Status
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -912,67 +945,65 @@ export function ChagansCCBillForm({
       />
       <TransactionResult result={result} onClose={() => setResult(null)} />
 
-      {/* ── Transaction Status Check ── */}
-      <div className="mt-8 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
-        <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
-          🔍 Check Transaction Status
-        </h3>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-            placeholder="Enter Transaction Ref ID"
-            value={statusRefId}
-            onChange={(e) => setStatusRefId(e.target.value)}
-          />
-          <Button
-            size="sm"
-            disabled={statusChecking || !statusRefId.trim()}
-            onClick={() => handleCheckStatus()}
-          >
-            {statusChecking ? "Checking…" : "Check Status"}
-          </Button>
-        </div>
-        {statusError && (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            {statusError}
-          </p>
-        )}
-        {statusResult && (
-          <div className="mt-3 rounded border border-gray-200 bg-white p-3 text-sm dark:border-gray-600 dark:bg-gray-700">
-            <div className="grid grid-cols-2 gap-2">
-              <span className="text-gray-500 dark:text-gray-400">Status:</span>
-              <span
-                className={`font-semibold ${
-                  statusResult.status === "SUCCESS"
-                    ? "text-green-600 dark:text-green-400"
-                    : statusResult.status === "FAILED"
-                      ? "text-red-600 dark:text-red-400"
-                      : statusResult.status === "REFUNDED"
-                        ? "text-orange-600 dark:text-orange-400"
-                        : "text-yellow-600 dark:text-yellow-400"
-                }`}
-              >
-                {statusResult.status}
-              </span>
-              <span className="text-gray-500 dark:text-gray-400">Order ID:</span>
-              <span className="font-mono text-xs">{statusResult.orderId}</span>
-              {statusResult.amount != null && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Amount:</span>
-                  <span>{formatINR(statusResult.amount)}</span>
-                </>
-              )}
-              {statusResult.message && (
-                <>
-                  <span className="text-gray-500 dark:text-gray-400">Message:</span>
-                  <span>{statusResult.message}</span>
-                </>
-              )}
-            </div>
+      {/* ── Status result card — shown after a status check returns ── */}
+      {statusResult && (
+        <div className="mt-6 rounded-xl border border-ink-200 bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-ink-700">
+              Transaction Status
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setStatusResult(null);
+                setStatusError(null);
+                setStatusRefId("");
+              }}
+              className="text-xs text-ink-400 underline underline-offset-2 hover:text-ink-600"
+            >
+              Dismiss
+            </button>
           </div>
-        )}
-      </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <span className="text-ink-500">Status:</span>
+            <span
+              className={`font-semibold ${
+                statusResult.status === "SUCCESS"
+                  ? "text-emerald-600"
+                  : statusResult.status === "FAILED"
+                    ? "text-rose-600"
+                    : statusResult.status === "REFUNDED"
+                      ? "text-orange-600"
+                      : "text-amber-600"
+              }`}
+            >
+              {statusResult.status}
+            </span>
+            <span className="text-ink-500">Order ID:</span>
+            <span className="font-mono text-xs text-ink-900">{statusResult.orderId}</span>
+            {statusResult.amount != null && (
+              <>
+                <span className="text-ink-500">Amount:</span>
+                <span className="text-ink-900">{formatINR(statusResult.amount)}</span>
+              </>
+            )}
+            {statusResult.message && (
+              <>
+                <span className="text-ink-500">Message:</span>
+                <span className="text-ink-900">{statusResult.message}</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Status error ── */}
+      {statusError && !statusResult && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{statusError}</span>
+        </div>
+      )}
     </>
   );
 }

@@ -536,6 +536,10 @@ export async function chagansCcGetBillerParams(
 /**
  * Try to extract a due amount (₹) from the raw billerResponse.
  * Chagans BBPS billerResponse shape varies by issuer; check the most common keys.
+ *
+ * IMPORTANT: Chagans / BBPS gateway returns monetary values in **paise**
+ * (e.g. 14475836 = ₹1,44,758.36).  We divide by 100 to normalise to rupees
+ * so every downstream consumer (UI, pay route) works in ₹.
  */
 function extractDueAmount(br: Record<string, unknown>): number | null {
   const candidates = [
@@ -550,9 +554,14 @@ function extractDueAmount(br: Record<string, unknown>): number | null {
   ];
   for (const k of candidates) {
     const v = br[k];
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
-    if (typeof v === "string" && v.trim() && Number.isFinite(Number(v)) && Number(v) > 0)
-      return Number(v);
+    let raw: number | undefined;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) raw = v;
+    else if (typeof v === "string" && v.trim() && Number.isFinite(Number(v)) && Number(v) > 0)
+      raw = Number(v);
+    if (raw !== undefined) {
+      // Convert paise → rupees (round to 2 decimal places)
+      return Math.round(raw) / 100;
+    }
   }
   return null;
 }
