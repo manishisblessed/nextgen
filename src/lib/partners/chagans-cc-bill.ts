@@ -413,7 +413,8 @@ let billerFetchInFlight: Promise<PartnerResult<ChagansCcBiller[]>> | null = null
  * succession).
  */
 export async function chagansCcGetBillers(
-  forceRefresh = false
+  forceRefresh = false,
+  userMerchantId?: string
 ): Promise<PartnerResult<ChagansCcBiller[]>> {
   // 1. Serve from cache if still fresh (and not a forced refresh).
   if (
@@ -440,7 +441,7 @@ export async function chagansCcGetBillers(
       };
 
       const r = await ccPost<GetBillersResp>("/ccBillPay/getBillers", {
-        merchantId: merchantId(),
+        merchantId: userMerchantId || merchantId(),
         categoryKey: CATEGORY_KEY,
       });
 

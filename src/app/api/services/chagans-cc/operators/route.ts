@@ -53,7 +53,10 @@ export async function GET(req: Request) {
   }
 
   const refresh = new URL(req.url).searchParams.get("refresh") === "true";
-  const result = await chagansCcGetBillers(refresh);
+  const result = await chagansCcGetBillers(
+    refresh,
+    merchant?.providerMerchantId ?? undefined
+  );
 
   if (!result.ok) {
     return NextResponse.json(
