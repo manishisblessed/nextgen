@@ -274,18 +274,14 @@ export async function POST(req: Request) {
       },
     });
 
-    // Second-factor selection. A master-admin can *allow* an account to sign in
-    // with its transaction PIN instead of an authenticator app. When allowed,
-    // the choice of which factor to use is the USER's:
+    // Second-factor selection. Any user can choose to sign in with their
+    // transaction PIN as an alternative to the authenticator app:
     //   - Authenticator (TOTP) is available when 2FA is set up.
-    //   - TPIN login is available when the master-admin allowed it AND a PIN is
-    //     set (the pin-login/verify route requires twoFactorExempt too).
+    //   - TPIN login is available when the user enabled it AND a PIN is set.
     // If BOTH are available we let the user pick; otherwise we route straight to
     // whichever single factor is available.
     const canAuthenticator = Boolean(user.twoFactorEnabled && user.twoFactorSecret);
-    const canPinLogin = Boolean(
-      user.twoFactorExempt && user.pinLoginEnabled && user.txnPinHash
-    );
+    const canPinLogin = Boolean(user.pinLoginEnabled && user.txnPinHash);
 
     // Both factors available — the user chooses authenticator or TPIN. If they
     // have saved a default preference we surface it so the frontend can skip
@@ -311,10 +307,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // TPIN login: a master-admin has waived mandatory 2FA for this account and
-    // allowed authentication with the transaction PIN as the second factor. The
-    // frontend collects the PIN + risk acceptance and calls
-    // /api/auth/pin-login/verify with this tempToken.
+    // TPIN login only: the user enabled PIN login and has a PIN set but no
+    // authenticator app. The frontend collects the PIN + risk acceptance and
+    // calls /api/auth/pin-login/verify with this tempToken.
     if (canPinLogin) {
       const tempToken = createTempToken(user.id);
       return NextResponse.json({

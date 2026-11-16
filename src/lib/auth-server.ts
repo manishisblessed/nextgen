@@ -156,10 +156,10 @@ export const authOptions: NextAuthOptions = {
         // The frontend must use /api/auth/login → /api/auth/2fa/verify flow instead.
         if (user.twoFactorEnabled) return null;
 
-        // 2FA-exempt accounts with PIN login enabled must authenticate through
-        // the /api/auth/login → /api/auth/pin-login/verify flow (TPIN as the
+        // Accounts with PIN login enabled must authenticate through the
+        // /api/auth/login → /api/auth/pin-login/verify flow (TPIN as the
         // second factor), never via a bare password on this provider.
-        if ((user as any).twoFactorExempt && (user as any).pinLoginEnabled) return null;
+        if ((user as any).pinLoginEnabled) return null;
 
         await recordSuccessfulLogin(identifier);
 

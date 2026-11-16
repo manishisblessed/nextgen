@@ -63,9 +63,7 @@ async function loadState(userId: string) {
 
 function summarize(user: NonNullable<Awaited<ReturnType<typeof loadState>>>) {
   const canAuthenticator = Boolean(user.twoFactorEnabled && user.twoFactorSecret);
-  const pinLoginEnabled = Boolean(
-    user.twoFactorExempt && user.pinLoginEnabled && user.txnPinHash
-  );
+  const pinLoginEnabled = Boolean(user.pinLoginEnabled && user.txnPinHash);
   return {
     // Whether this account is allowed to self-manage PIN login at all.
     selfManageable: !SELF_PIN_LOGIN_BLOCKED_ROLES.has(user.role),
@@ -128,7 +126,6 @@ export async function POST(req: Request) {
         prisma.user.update({
           where: { id: auth.id },
           data: {
-            twoFactorExempt: true,
             pinLoginEnabled: true,
             pinLoginRiskAcceptedAt: new Date(),
             pinLoginRiskAcceptedIp: ip,
@@ -166,7 +163,6 @@ export async function POST(req: Request) {
         prisma.user.update({
           where: { id: auth.id },
           data: {
-            twoFactorExempt: false,
             pinLoginEnabled: false,
             pinLoginRiskAcceptedAt: null,
             pinLoginRiskAcceptedIp: null,

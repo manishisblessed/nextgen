@@ -148,11 +148,12 @@ export default function LoginMethodSettingsPage() {
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div>
             <p className="font-semibold text-amber-900">
-              PIN login isn&apos;t available for this account
+              PIN login isn&apos;t available for this account type
             </p>
             <p className="mt-1 text-sm text-amber-800">
               For security, admin and master-admin accounts must always sign in
-              with an authenticator app.
+              with an authenticator app. All other users can enable PIN login
+              as a quick alternative.
             </p>
           </div>
         </div>

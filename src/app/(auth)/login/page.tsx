@@ -205,9 +205,9 @@ function LoginForm({ location }: { location: LocationData }) {
               Two ways to <br /> verify it&apos;s you.
             </h2>
             <p className="mt-3 text-white/85">
-              An administrator has allowed you to sign in with your transaction
-              PIN. Prefer your authenticator app? That still works too — the
-              choice is yours, every time you log in.
+              You have both an authenticator app and a transaction PIN set up.
+              Pick whichever suits you right now — the choice is yours, every
+              time you log in.
             </p>
           </div>
           <div className="space-y-3">

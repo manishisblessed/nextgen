@@ -12,10 +12,10 @@ interface LoginMethodChoiceProps {
 }
 
 /**
- * Second-factor chooser — shown when a master-admin has allowed TPIN login for
- * an account that ALSO has an authenticator app set up. The user decides, on
- * every sign-in, whether to verify with their authenticator or their
- * transaction PIN. Neither option is forced.
+ * Second-factor chooser — shown when a user has BOTH an authenticator app AND
+ * a transaction PIN set up. The user decides, on every sign-in, whether to
+ * verify with their authenticator or their transaction PIN. Neither option is
+ * forced; the choice is theirs, every time.
  */
 export function LoginMethodChoice({ userName, onChoose, onBack }: LoginMethodChoiceProps) {
   return (
@@ -25,9 +25,13 @@ export function LoginMethodChoice({ userName, onChoose, onBack }: LoginMethodCho
           <ShieldCheck className="h-5 w-5" />
         </span>
         <div>
-          <h2 className="heading-md">Choose how to verify</h2>
+          <p className="text-xs font-semibold uppercase tracking-widest text-brand-600">
+            Step 2 of 2
+          </p>
+          <h2 className="heading-md">How do you want to verify?</h2>
           <p className="text-sm text-ink-500">
-            Hi {userName}, pick the second factor you&apos;d like to use.
+            Hi {userName}, pick the second factor you&apos;d like to use
+            today. You can switch any time.
           </p>
         </div>
       </div>
@@ -42,8 +46,11 @@ export function LoginMethodChoice({ userName, onChoose, onBack }: LoginMethodCho
             <ShieldCheck className="h-5 w-5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold text-ink-900">
+            <span className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               Authenticator app
+              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                Most Secure
+              </span>
             </span>
             <span className="block text-xs text-ink-500">
               Enter the 6-digit code from Google Authenticator, Authy, etc.
@@ -61,11 +68,14 @@ export function LoginMethodChoice({ userName, onChoose, onBack }: LoginMethodCho
             <KeyRound className="h-5 w-5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold text-ink-900">
+            <span className="flex items-center gap-2 text-sm font-semibold text-ink-900">
               Transaction PIN
+              <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-700">
+                Quick
+              </span>
             </span>
             <span className="block text-xs text-ink-500">
-              Sign in with your TPIN instead of the authenticator.
+              Sign in with your 4–6 digit TPIN.
             </span>
           </span>
           <ChevronRight className="h-5 w-5 shrink-0 text-ink-400 transition group-hover:translate-x-0.5 group-hover:text-brand-600" />

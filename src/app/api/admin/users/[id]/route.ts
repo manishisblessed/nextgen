@@ -71,7 +71,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Cannot modify admin users" }, { status: 403 });
 
     if (body.action === "setPinLogin") {
-      // Only a MASTER_ADMIN may waive 2FA / grant TPIN login (not ADMIN).
+      // Only a MASTER_ADMIN may grant/revoke TPIN login for other users.
       if (admin.role !== "MASTER_ADMIN") {
         return NextResponse.json({ error: "Only a master-admin can change TPIN login." }, { status: 403 });
       }
@@ -84,9 +84,8 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
         prisma.user.update({
           where: { id: params.id },
           data: enabling
-            ? { twoFactorExempt: true, pinLoginEnabled: true }
+            ? { pinLoginEnabled: true }
             : {
-                twoFactorExempt: false,
                 pinLoginEnabled: false,
                 pinLoginRiskAcceptedAt: null,
                 pinLoginRiskAcceptedIp: null,
@@ -106,14 +105,12 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
         }),
       ]);
 
-      // Force a fresh session so twoFactorExempt propagates and the mandatory-2FA
-      // gate stops (or resumes) prompting immediately.
+      // Force a fresh session so pinLoginEnabled propagates immediately.
       await bumpTokenVersion(params.id, { swallow: true });
 
       return NextResponse.json({
         ok: true,
         pinLoginEnabled: enabling,
-        twoFactorExempt: enabling,
         warning:
           enabling && !targetUser.txnPinHash
             ? "This user has not set a transaction PIN yet. They must set one before they can log in with a PIN."
