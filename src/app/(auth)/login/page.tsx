@@ -177,9 +177,15 @@ function LoginForm({ location }: { location: LocationData }) {
         const result = await signIn("token-login", {
           grant: data.grant,
           redirect: false,
+          callbackUrl: "/dashboard/settings/security",
         });
         if (result?.error) {
-          setError("Login failed.");
+          console.error("[Login] needsSetup signIn error:", result.error, "status:", result.status);
+          setError(
+            result.error === "CredentialsSignin"
+              ? "Session creation failed. Please try again."
+              : `Login failed: ${result.error}`
+          );
           setLoading(false);
           return;
         }

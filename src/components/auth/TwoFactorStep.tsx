@@ -62,10 +62,16 @@ export function TwoFactorStep({ tempToken, userName, userEmail, onBack }: TwoFac
       const result = await signIn("token-login", {
         grant: data.grant,
         redirect: false,
+        callbackUrl: "/dashboard",
       });
 
       if (result?.error) {
-        setError("Session creation failed. Please try again.");
+        console.error("[TwoFactorStep] signIn error:", result.error, "status:", result.status);
+        setError(
+          result.error === "CredentialsSignin"
+            ? "Session grant expired or invalid. Please start over and try again."
+            : `Session creation failed: ${result.error}. Please try again.`
+        );
         setLoading(false);
         verifyingRef.current = false;
         return;

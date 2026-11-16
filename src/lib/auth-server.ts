@@ -73,11 +73,17 @@ export const authOptions: NextAuthOptions = {
         grant: { label: "Session Grant", type: "text" },
       },
       async authorize(credentials) {
-        if (!credentials?.grant) return null;
+        if (!credentials?.grant) {
+          console.error("[token-login] No grant provided");
+          return null;
+        }
 
         // Verify the HMAC-signed session grant
         const parts = credentials.grant.split(".");
-        if (parts.length !== 2) return null;
+        if (parts.length !== 2) {
+          console.error("[token-login] Malformed grant: expected 2 parts, got", parts.length);
+          return null;
+        }
 
         const [payloadB64, sig] = parts;
         const secret = process.env.NEXTAUTH_SECRET ?? "";
@@ -85,17 +91,37 @@ export const authOptions: NextAuthOptions = {
         const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
 
         // Constant-time comparison
-        if (sig.length !== expectedSig.length) return null;
-        if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
+        if (sig.length !== expectedSig.length) {
+          console.error("[token-login] HMAC signature length mismatch");
+          return null;
+        }
+        if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+          console.error("[token-login] HMAC signature verification failed");
+          return null;
+        }
 
         const [userId, expStr] = payload.split(":");
         const exp = parseInt(expStr, 10);
-        if (isNaN(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+        if (isNaN(exp) || exp < Math.floor(Date.now() / 1000)) {
+          console.error("[token-login] Grant expired or invalid exp.", {
+            exp,
+            now: Math.floor(Date.now() / 1000),
+            diff: Math.floor(Date.now() / 1000) - exp,
+          });
+          return null;
+        }
 
         const user = await prisma.user.findUnique({
           where: { id: userId },
         });
-        if (!user || !isLoginAllowed(user.status)) return null;
+        if (!user) {
+          console.error("[token-login] User not found:", userId);
+          return null;
+        }
+        if (!isLoginAllowed(user.status)) {
+          console.error("[token-login] User status not allowed:", user.status, userId);
+          return null;
+        }
 
         return {
           id: user.id,
@@ -320,12 +346,13 @@ function base64url(buf: Buffer): string {
 
 /**
  * Short-lived HMAC-signed grant for the token-login NextAuth provider.
- * Used after 2FA verification and for needsSetup (no-2FA) logins so
+ * Used after 2FA verification, PIN login, and needsSetup (no-2FA) logins so
  * the frontend can establish a session without a second password check.
+ * TTL: 120 seconds to accommodate network latency and multi-step flows.
  */
 export function createSessionGrant(userId: string): string {
   const secret = process.env.NEXTAUTH_SECRET ?? "";
-  const exp = Math.floor(Date.now() / 1000) + 30;
+  const exp = Math.floor(Date.now() / 1000) + 120;
   const payload = `${userId}:${exp}`;
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   return `${Buffer.from(payload).toString("base64")}.${sig}`;
