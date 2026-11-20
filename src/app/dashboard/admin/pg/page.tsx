@@ -54,23 +54,31 @@ type TopupRow = {
   createdAt: string;
 };
 
+type PgStats = {
+  count: number;
+  gmv: number;
+  mdrTotal: number;
+  vendorTotal: number;
+  mdrRevenue: number;
+  netSettled: number;
+  settledCount: number;
+  pendingCount: number;
+  failedCount: number;
+  successRate: number | null;
+  activeRetailers: number;
+};
+
+type PgProviderStats = PgStats & {
+  label: string;
+  scopeKey: string;
+};
+
 type PgReport = {
   period: Period;
   since: string;
   asOf: string;
-  stats: {
-    count: number;
-    gmv: number;
-    mdrTotal: number;
-    vendorTotal: number;
-    mdrRevenue: number;
-    netSettled: number;
-    settledCount: number;
-    pendingCount: number;
-    failedCount: number;
-    successRate: number | null;
-    activeRetailers: number;
-  };
+  stats: PgStats;
+  byProvider: Record<string, PgProviderStats>;
   transactions: PgTxn[];
   byRetailer: PgRetailer[];
   topups: { totalCount: number; totalAmount: number; rows: TopupRow[] };
@@ -98,6 +106,7 @@ type Tab = "settlements" | "retailers" | "topups";
 export default function AdminPgPage() {
   const [period, setPeriod] = useState<Period>("month");
   const [tab, setTab] = useState<Tab>("settlements");
+  const [providerFilter, setProviderFilter] = useState<string>("ALL");
   const [data, setData] = useState<PgReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +131,12 @@ export default function AdminPgPage() {
   }, [load]);
 
   const stats = data?.stats;
+
+  const filteredTxns = data?.transactions.filter(
+    (t) => providerFilter === "ALL" || t.provider === providerFilter,
+  ) ?? [];
+
+  const filteredRetailers = data?.byRetailer ?? [];
 
   const txnCols: Column<PgTxn>[] = [
     {
@@ -295,31 +310,125 @@ export default function AdminPgPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-ink-100">
-        {tabs.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
+      {/* Per-gateway breakdown */}
+      {data && Object.keys(data.byProvider).length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-ink-700">By gateway</h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {Object.values(data.byProvider)
+              .sort((a, b) => b.gmv - a.gmv)
+              .map((pg) => (
+                <div
+                  key={pg.scopeKey}
+                  className="rounded-2xl border border-ink-100 bg-white p-5 space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-ink-900">{pg.label}</span>
+                    <span className="rounded-full bg-ink-50 px-2.5 py-0.5 text-xs font-medium text-ink-500">
+                      {pg.scopeKey}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-ink-400">GMV</p>
+                      <p className="font-semibold text-ink-900">{formatINR(pg.gmv)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-ink-400">MDR revenue</p>
+                      <p className="font-semibold text-emerald-600">{formatINR(pg.mdrRevenue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-ink-400">Net credited</p>
+                      <p className="font-semibold text-ink-900">{formatINR(pg.netSettled)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-ink-400">Success rate</p>
+                      <p className="font-semibold text-ink-900">
+                        {pg.successRate != null ? `${pg.successRate}%` : "—"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 border-t border-ink-50 pt-3 text-xs">
+                    <span className="text-ink-500">
+                      <span className="font-semibold text-ink-800">{pg.count}</span> txns
+                    </span>
+                    <span className="text-emerald-600">
+                      <span className="font-semibold">{pg.settledCount}</span> settled
+                    </span>
+                    <span className="text-amber-600">
+                      <span className="font-semibold">{pg.pendingCount}</span> pending
+                    </span>
+                    <span className="text-rose-600">
+                      <span className="font-semibold">{pg.failedCount}</span> failed
+                    </span>
+                    <span className="ml-auto text-ink-400">
+                      <span className="font-semibold text-ink-700">{pg.activeRetailers}</span> retailers
+                    </span>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Gateway filter + Tabs */}
+      <div className="space-y-2">
+        {data && Object.keys(data.byProvider).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-ink-400">Filter:</span>
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition ${
-                active ? "border-brand-500 text-brand-700" : "border-transparent text-ink-500 hover:text-ink-800"
+              onClick={() => setProviderFilter("ALL")}
+              className={`rounded-xl border px-3 py-1 text-xs font-semibold transition ${
+                providerFilter === "ALL"
+                  ? "border-brand-400 bg-brand-50 text-brand-700"
+                  : "border-ink-100 bg-white text-ink-600 hover:border-ink-200"
               }`}
             >
-              <Icon className="h-4 w-4" /> {t.label}
+              All gateways
             </button>
-          );
-        })}
+            {Object.values(data.byProvider)
+              .sort((a, b) => b.gmv - a.gmv)
+              .map((pg) => (
+                <button
+                  key={pg.scopeKey}
+                  onClick={() => setProviderFilter(pg.scopeKey)}
+                  className={`rounded-xl border px-3 py-1 text-xs font-semibold transition ${
+                    providerFilter === pg.scopeKey
+                      ? "border-brand-400 bg-brand-50 text-brand-700"
+                      : "border-ink-100 bg-white text-ink-600 hover:border-ink-200"
+                  }`}
+                >
+                  {pg.label}
+                </button>
+              ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-ink-100">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition ${
+                  active ? "border-brand-500 text-brand-700" : "border-transparent text-ink-500 hover:text-ink-800"
+                }`}
+              >
+                <Icon className="h-4 w-4" /> {t.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {tab === "settlements" && (
         <DataTable
-          title="PG settlement feed"
+          title={`PG settlement feed${providerFilter !== "ALL" ? ` — ${data?.byProvider[providerFilter]?.label ?? providerFilter}` : ""}`}
           description="Latest PG captures — gross collected, MDR deducted (with company revenue), and net credited."
           columns={txnCols}
-          data={data?.transactions ?? []}
+          data={filteredTxns}
         />
       )}
 

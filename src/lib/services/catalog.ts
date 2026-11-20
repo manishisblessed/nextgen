@@ -59,6 +59,7 @@ export const SERVICE_KEYS = {
   RECHARGEKIT_CC: "rechargekit_cc",
   RECHARGEKIT_DIRECT: "rechargekit_direct",
   BBPS_CHAGANS: "bbps_chagan",
+  FUNDS_REQUEST: "feature_funds_request",
 } as const;
 
 export type ServiceKey = (typeof SERVICE_KEYS)[keyof typeof SERVICE_KEYS];
@@ -99,6 +100,7 @@ export const SERVICE_KEY_TO_HREF: Record<string, string> = {
   [SERVICE_KEYS.DMT]: "/dashboard/money-transfer",
   [SERVICE_KEYS.TRAVEL]: "/dashboard/travel/flight",
   [SERVICE_KEYS.VIRTUAL_ACCOUNT]: "/dashboard/virtual-account",
+  [SERVICE_KEYS.FUNDS_REQUEST]: "/dashboard/funds-request",
 };
 
 /**
@@ -129,6 +131,7 @@ const SERVICE_HREF_PREFIXES: Array<[prefix: string, key: string]> = [
   ["/dashboard/money-transfer", SERVICE_KEYS.DMT],
   ["/dashboard/travel", SERVICE_KEYS.TRAVEL],
   ["/dashboard/virtual-account", SERVICE_KEYS.VIRTUAL_ACCOUNT],
+  ["/dashboard/funds-request", SERVICE_KEYS.FUNDS_REQUEST],
 ];
 
 /**
@@ -347,6 +350,16 @@ export const KNOWN_SERVICE_ROUTES: ServiceRouteSeed[] = [
     enabled: true,
     note: "Credit card bill payment via the Chagans CC Bill API V2 (BBPS flow — getBillers → getBillerParams → fetchBill → payBill). Retailer-facing name: CC Bill Payment.",
     sortOrder: 96,
+  },
+  {
+    key: SERVICE_KEYS.FUNDS_REQUEST,
+    name: "Funds Request",
+    type: "SERVICE",
+    kind: "OTHER",
+    provider: null,
+    enabled: true,
+    note: "Workspace tab that lets a user submit a bank-deposit reference to top up their wallet. Hidden by default for all network roles (RT/DT/MD/SD) — an admin must enable it per user.",
+    sortOrder: 5,
   },
   {
     key: SERVICE_KEYS.TRAVEL,

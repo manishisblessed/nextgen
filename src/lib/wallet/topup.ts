@@ -278,7 +278,8 @@ export async function initiateTopup(input: {
  */
 export async function settleTopup(
   refId: string,
-  webhookVerified?: VerifiedPayin
+  webhookVerified?: VerifiedPayin,
+  opts?: { forceResettle?: boolean },
 ): Promise<{ refId: string; status: TopupState; amount?: number; net?: number }> {
   const txn = await prisma.transaction.findUnique({ where: { refId } });
   if (!txn || txn.service !== "WALLET_TOPUP") {
@@ -293,7 +294,20 @@ export async function settleTopup(
     const net = typeof resp?.net === "number" ? resp.net : Number(txn.amount);
     return { refId, status: "SUCCESS", amount: Number(txn.amount), net };
   }
-  if (txn.status === "FAILED") return { refId, status: "FAILED" };
+  if (txn.status === "FAILED") {
+    if (opts?.forceResettle && webhookVerified) {
+      const claimed = await prisma.transaction.updateMany({
+        where: { id: txn.id, status: "FAILED" },
+        data: { status: "PROCESSING", errorCode: null, errorMessage: null },
+      });
+      if (claimed.count === 0) {
+        throw new TopupError("Transaction is no longer FAILED — another resettle may be in progress", 409, "RACE");
+      }
+      logger.info({ action: "wallet.topup_force_resettle", refId, from: "FAILED" });
+    } else {
+      return { refId, status: "FAILED" };
+    }
+  }
 
   // Route through the EXACT provider that created this top-up.
   const upi = getUpiProviderByName(txn.partner);

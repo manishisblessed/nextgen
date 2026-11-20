@@ -3,9 +3,11 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   Monitor, IndianRupee, Loader2, CheckCircle2, Truck, PackageCheck,
   Clock, ShoppingCart, XCircle, MapPin, ShieldCheck, Wallet, ArrowRight, RefreshCw,
+  ReceiptText,
 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -90,6 +92,7 @@ export default function PosBookingPage() {
     { revalidateOnFocus: true, refreshInterval: 15000, keepPreviousData: true },
   );
 
+  const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -140,6 +143,22 @@ export default function PosBookingPage() {
         <StatCard label="Orders In Progress" value={String(activeCount)} icon={Truck} accent="accent" />
         <StatCard label="Machines Live" value={String(liveCount)} icon={PackageCheck} accent="emerald" />
       </div>
+
+      {/* ── POS-E-POS rental card ── */}
+      <button
+        type="button"
+        onClick={() => router.push("/dashboard/pos-rental")}
+        className="group flex w-full items-center gap-4 rounded-2xl border border-ink-100 bg-white p-5 shadow-sm text-left transition hover:border-brand-200 hover:shadow-md"
+      >
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 transition group-hover:bg-brand-100">
+          <ReceiptText className="h-6 w-6" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-base font-bold text-ink-900">POS-E-POS</p>
+          <p className="mt-0.5 text-sm text-ink-500">View your POS rental subscriptions, monthly charges, and billing history.</p>
+        </div>
+        <ArrowRight className="h-5 w-5 shrink-0 text-ink-400 transition group-hover:translate-x-1 group-hover:text-brand-600" />
+      </button>
 
       {/* ── Available plans ── */}
       <section className="space-y-3">

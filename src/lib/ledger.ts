@@ -36,6 +36,15 @@ export type LedgerErrorCode =
   | "INSUFFICIENT_HOLD"
   | "INVALID_AMOUNT";
 
+/** ₹ 1 000 non-spendable reserve enforced for all network roles (RT/DT/MD/SD). */
+export const MIN_WALLET_RESERVE = 1000;
+const RESERVED_BALANCE_ROLES = new Set([
+  "RETAILER",
+  "DISTRIBUTOR",
+  "MASTER_DISTRIBUTOR",
+  "SUPER_DISTRIBUTOR",
+]);
+
 export class LedgerError extends Error {
   constructor(public code: LedgerErrorCode, message?: string) {
     super(message ?? code);
@@ -62,6 +71,7 @@ async function lockUser(tx: Tx, userId: string) {
     where: { id: userId },
     select: {
       id: true,
+      role: true,
       walletBalance: true,
       heldBalance: true,
       lienBalance: true,
@@ -76,16 +86,18 @@ async function lockUser(tx: Tx, userId: string) {
 
 /**
  * Spendable balance on the PRIMARY book: total minus in-flight holds minus the
- * outstanding lien, floored at zero so a lien larger than the balance can never
- * produce a negative spendable.
+ * outstanding lien minus the mandatory ₹1 000 reserve (for RT/DT/MD/SD), floored
+ * at zero so over-committed wallets never produce a negative spendable.
  */
 function primarySpendable(user: {
   walletBalance: Money;
   heldBalance: Money;
   lienBalance?: Money | null;
+  role?: string | null;
 }): Money {
   const lien = user.lienBalance ?? dec(0);
-  const s = sub(sub(user.walletBalance, user.heldBalance), lien);
+  const reserve = user.role && RESERVED_BALANCE_ROLES.has(user.role) ? dec(MIN_WALLET_RESERVE) : dec(0);
+  const s = sub(sub(sub(user.walletBalance, user.heldBalance), lien), reserve);
   return gt(s, 0) ? s : dec(0);
 }
 
@@ -438,6 +450,7 @@ export async function getBalances(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
+      role: true,
       walletBalance: true,
       heldBalance: true,
       lienBalance: true,
@@ -455,5 +468,6 @@ export async function getBalances(userId: string) {
     revenueBalance: user.revenueBalance as Money,
     payinBalance: user.payinBalance as Money,
     spendable: primarySpendable(user),
+    minReserve: RESERVED_BALANCE_ROLES.has(user.role) ? MIN_WALLET_RESERVE : 0,
   };
 }

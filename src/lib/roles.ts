@@ -118,6 +118,13 @@ const account: NavItem[] = [
   { href: "/dashboard/disputes", label: "Support Tickets", icon: LifeBuoy, badge: "New" }
 ];
 
+const settingsGroup: NavItem = {
+  href: "/dashboard/performance",
+  label: "Settings",
+  icon: Settings,
+  children: account,
+};
+
 /**
  * Permission slug for the master-admin "Today's Business Overview" dashboard
  * section. Not a sidebar route — it gates the additive Overview section only, and
@@ -209,7 +216,7 @@ const adminMoneyOps: NavItem[] = [
  *  company earnings are owner-only and never shown to plain admins/sub-admins. */
 const masterAdminMoneyOps: NavItem[] = adminMoneyOps.flatMap((item) =>
   item.href === "/dashboard/admin/pos-settlement"
-    ? [item, { href: "/dashboard/admin/revenue", label: "Company Earnings", icon: CircleDollarSign, badge: "New" }]
+    ? [item, { href: "/dashboard/admin/topup-resettle", label: "PG Re-settle", icon: RotateCcw }, { href: "/dashboard/admin/revenue", label: "Company Earnings", icon: CircleDollarSign, badge: "New" }]
     : [item]
 );
 
@@ -274,8 +281,7 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
     },
-    { heading: "Money & Ops", items: masterAdminMoneyOps },
-    { heading: "Account", items: account }
+    { heading: "Money & Ops", items: [...masterAdminMoneyOps, settingsGroup] }
   ],
 
   retailer: [
@@ -286,14 +292,12 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/my-scheme", label: "My Scheme", icon: Layers, badge: "New" },
         { href: "/dashboard/rewards", label: "Rewards", icon: Gift, badge: "New" },
         { href: "/dashboard/pos-booking", label: "Book POS Machine", icon: PackagePlus, badge: "New" },
-        { href: "/dashboard/pos-rental", label: "POS Rental", icon: ReceiptText, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/funds-request", label: "Funds Request", icon: HandCoins },
         { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
       ]
     },
-    { heading: "Services", items: retailerServices },
-    { heading: "Account", items: account }
+    { heading: "Services", items: [...retailerServices, settingsGroup] }
   ],
 
   distributor: [
@@ -306,10 +310,11 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/my-scheme", label: "My Scheme", icon: Layers, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
-        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
+        { href: "/dashboard/funds-request", label: "Funds Request", icon: HandCoins },
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+        settingsGroup
       ]
-    },
-    { heading: "Account", items: account }
+    }
   ],
 
   "super-distributor": [
@@ -322,10 +327,11 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/my-scheme", label: "My Scheme", icon: Layers, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
-        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
+        { href: "/dashboard/funds-request", label: "Funds Request", icon: HandCoins },
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+        settingsGroup
       ]
-    },
-    { heading: "Account", items: account }
+    }
   ],
 
   "master-distributor": [
@@ -338,16 +344,16 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard/my-scheme", label: "My Scheme", icon: Layers, badge: "New" },
         { href: "/dashboard/earnings", label: "My Earnings", icon: CircleDollarSign, badge: "New" },
         { href: "/dashboard/approvals", label: "Declaration Approvals", icon: FileSignature },
-        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
+        { href: "/dashboard/funds-request", label: "Funds Request", icon: HandCoins },
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+        settingsGroup
       ]
-    },
-    { heading: "Account", items: account }
+    }
   ],
 
   admin: [
     { heading: "Workspace", items: adminWorkspace },
-    { heading: "Money & Ops", items: adminMoneyOps },
-    { heading: "Account", items: account }
+    { heading: "Money & Ops", items: [...adminMoneyOps, settingsGroup] }
   ],
 
   finance: [
@@ -357,23 +363,18 @@ export const navByRole: Record<Role, NavGroup[]> = {
         { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
         { href: "/dashboard/admin/wallet-ops", label: "Wallet Balances", icon: Wallet },
         { href: "/dashboard/admin/ledger", label: "Ledger Explorer", icon: BookOpenCheck },
-        // Read-only for finance: the queue is viewable but Approve/Reject is
-        // gated to master-admin/admin in both the UI and the API.
         { href: "/dashboard/admin/pos-slips", label: "External POS Slips", icon: ListChecks },
-        // "Company Earnings" (Revenue Wallet) is owner-only; finance uses the
-        // Commission Distributed + Per-Txn Earnings reports instead.
         { href: "/dashboard/admin/commission-report", label: "Commission Distributed", icon: HandCoins },
         { href: "/dashboard/admin/earnings", label: "Per-Txn Earnings", icon: TrendingUp },
         { href: "/dashboard/admin/analytics", label: "Business Analytics", icon: LineChart },
-        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 }
+        { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
+        settingsGroup
       ]
-    },
-    { heading: "Account", items: account }
+    }
   ],
 
   "sub-admin": [
     { heading: "Workspace", items: adminWorkspace },
-    { heading: "Money & Ops", items: adminMoneyOps },
-    { heading: "Account", items: account }
+    { heading: "Money & Ops", items: [...adminMoneyOps, settingsGroup] }
   ]
 };

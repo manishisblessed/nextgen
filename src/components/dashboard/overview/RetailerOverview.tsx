@@ -30,6 +30,7 @@ import { formatINR, cn } from "@/lib/utils";
 import { hrefToServiceKey, SERVICE_KEYS } from "@/lib/services/catalog";
 import { useEffectiveServices } from "@/hooks/useEffectiveServices";
 import type { PosMachineLimitsResponse } from "@/lib/partners/sameday-pos.types";
+import type { PosVolumeSummaryResponse } from "@/app/api/pos/volume-summary/route";
 
 /** Primary service cards shown on the retailer dashboard. */
 const SERVICE_CARDS: {
@@ -192,6 +193,72 @@ function PosMachineLimitWidget({ hasPosService }: { hasPosService: boolean }) {
   );
 }
 
+// ─── POS Volume Widget ────────────────────────────────────────────────────────
+// Shows today's and this month's POS transaction volumes side by side.
+// Rendered only when the user has POS service enabled.
+
+function PosVolumeWidget({ hasPosService }: { hasPosService: boolean }) {
+  const [data, setData] = useState<PosVolumeSummaryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!hasPosService) { setLoading(false); return; }
+    fetch("/api/pos/volume-summary")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setData(d as PosVolumeSummaryResponse); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [hasPosService]);
+
+  if (!hasPosService) return null;
+  if (loading) return null;
+  if (!data) return null;
+
+  return (
+    <div className="relative rounded-2xl border border-ink-100 bg-white shadow-sm overflow-hidden">
+      {/* Header strip */}
+      <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-blue-500 via-blue-600 to-indigo-700" />
+      <div className="relative px-5 pt-4 pb-3 flex items-center justify-between gap-2 border-b border-ink-100">
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-700 text-white shadow-sm">
+            <Monitor className="h-4 w-4" />
+          </span>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-ink-500">POS Terminals</p>
+            <p className="text-[11px] text-ink-400">{data.machineCount} machine{data.machineCount !== 1 ? "s" : ""} assigned</p>
+          </div>
+        </div>
+        <Link
+          href="/dashboard/pos"
+          className="shrink-0 inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+        >
+          View <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 divide-x divide-ink-100">
+        {/* Daily */}
+        <div className="p-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-ink-400">Today</p>
+          <p className="mt-1 font-display text-xl font-bold text-ink-900">{formatINR(data.dailyTotal)}</p>
+          <p className="mt-0.5 text-[11px] text-ink-500">
+            {data.dailyCount} txn{data.dailyCount !== 1 ? "s" : ""}
+          </p>
+        </div>
+        {/* Monthly */}
+        <div className="p-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-ink-400">This Month</p>
+          <p className="mt-1 font-display text-xl font-bold text-ink-900">{formatINR(data.monthlyTotal)}</p>
+          <p className="mt-0.5 text-[11px] text-ink-500">
+            {data.monthlyCount} txn{data.monthlyCount !== 1 ? "s" : ""}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RetailerOverview({ session }: { session: Session }) {
   const effectiveServices = useEffectiveServices();
   const quickServices = services
@@ -328,6 +395,11 @@ export function RetailerOverview({ session }: { session: Session }) {
           </>
         )}
       </div>
+
+      {/* ── POS daily / monthly volume ── */}
+      <PosVolumeWidget
+        hasPosService={(effectiveServices ?? new Set<string>()).has(SERVICE_KEYS.POS)}
+      />
 
       {/* ── POS machine transaction limit alert ── */}
       <PosMachineLimitWidget

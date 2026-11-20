@@ -66,11 +66,20 @@ export type PgRetailerRow = {
   lastAt: string | null;
 };
 
+export type PgProviderStats = PgReportStats & {
+  /** Human-readable gateway label. */
+  label: string;
+  /** Scope key identifying the provider (e.g. CHAGANS_COMET). */
+  scopeKey: string;
+};
+
 export type PgReport = {
   period: PayinPeriod;
   since: string;
   asOf: string;
   stats: PgReportStats;
+  /** Per-provider breakdown keyed by scopeKey. */
+  byProvider: Record<string, PgProviderStats>;
   transactions: PgTxnRow[];
   byRetailer: PgRetailerRow[];
 };
@@ -112,7 +121,7 @@ export async function getPgReport(period: PayinPeriod): Promise<PgReport> {
   const asOf = new Date().toISOString();
   const where = { createdAt: { gte: since } };
 
-  const [totals, byStatus, distinctRetailers, grouped, recent] = await Promise.all([
+  const [totals, byStatus, distinctRetailers, grouped, recent, providerStatus] = await Promise.all([
     prisma.pgSettlementEntry.aggregate({
       where,
       _sum: { grossAmount: true, mdrAmount: true, vendorAmount: true, netAmount: true },
@@ -142,6 +151,14 @@ export async function getPgReport(period: PayinPeriod): Promise<PgReport> {
       include: {
         user: { select: { userCode: true, name: true, shopName: true, role: true } },
       },
+    }),
+    // Per-provider stats: group by provider + status so we can compute
+    // GMV/MDR/net and status counts per gateway in one pass.
+    prisma.pgSettlementEntry.groupBy({
+      by: ["provider", "status"],
+      where,
+      _sum: { grossAmount: true, mdrAmount: true, vendorAmount: true, netAmount: true },
+      _count: { _all: true },
     }),
   ]);
 
@@ -228,5 +245,67 @@ export async function getPgReport(period: PayinPeriod): Promise<PgReport> {
     };
   });
 
-  return { period, since: since.toISOString(), asOf, stats, transactions, byRetailer };
+  // Per-provider breakdown — aggregate providerStatus rows by scopeKey.
+  const PROVIDER_LABELS: Record<string, string> = {
+    CHAGANS_COMET: "Comet PG",
+    CHAGANS_STAR: "Star PG",
+  };
+  const providerMap: Record<string, {
+    count: number; gmv: number; mdrTotal: number; vendorTotal: number;
+    netSettled: number; settled: number; pending: number; failed: number;
+    retailerSet: Set<never>;
+  }> = {};
+
+  for (const row of providerStatus) {
+    const key = row.provider ?? "UNKNOWN";
+    if (!providerMap[key]) {
+      providerMap[key] = { count: 0, gmv: 0, mdrTotal: 0, vendorTotal: 0, netSettled: 0, settled: 0, pending: 0, failed: 0, retailerSet: new Set() };
+    }
+    const p = providerMap[key];
+    const n = row._count._all;
+    p.count += n;
+    p.gmv += toNumber(dec(row._sum.grossAmount ?? 0));
+    p.mdrTotal += toNumber(dec(row._sum.mdrAmount ?? 0));
+    p.vendorTotal += toNumber(dec(row._sum.vendorAmount ?? 0));
+    p.netSettled += toNumber(dec(row._sum.netAmount ?? 0));
+    if (row.status === "SETTLED") p.settled += n;
+    else if (row.status === "PENDING") p.pending += n;
+    else if (row.status === "FAILED") p.failed += n;
+  }
+
+  // Count distinct retailers per provider separately.
+  const providerRetailers = await prisma.pgSettlementEntry.groupBy({
+    by: ["provider", "userId"],
+    where,
+    _count: { _all: true },
+  });
+  const retailersByProvider: Record<string, Set<string>> = {};
+  for (const row of providerRetailers) {
+    const key = row.provider ?? "UNKNOWN";
+    if (!retailersByProvider[key]) retailersByProvider[key] = new Set();
+    retailersByProvider[key].add(row.userId);
+  }
+
+  const byProvider: Record<string, PgProviderStats> = {};
+  for (const [key, p] of Object.entries(providerMap)) {
+    const mdrDec = dec(p.mdrTotal);
+    const vendorDec = dec(p.vendorTotal);
+    byProvider[key] = {
+      scopeKey: key,
+      label: PROVIDER_LABELS[key] ?? key,
+      count: p.count,
+      gmv: p.gmv,
+      mdrTotal: p.mdrTotal,
+      vendorTotal: p.vendorTotal,
+      mdrRevenue: toNumber(marginOf(mdrDec, vendorDec)),
+      netSettled: p.netSettled,
+      settledCount: p.settled,
+      pendingCount: p.pending,
+      failedCount: p.failed,
+      successRate: p.count > 0 ? Math.round((p.settled / p.count) * 1000) / 10 : null,
+      activeRetailers: retailersByProvider[key]?.size ?? 0,
+    };
+  }
+
+  return { period, since: since.toISOString(), asOf, stats, byProvider, transactions, byRetailer };
 }

@@ -11,6 +11,14 @@ import { toDisplayRole, type Role } from "@/lib/auth";
 import { navByRole, type NavGroup, type NavItem } from "@/lib/roles";
 import { hrefToServiceKey } from "@/lib/services/catalog";
 import { useEffectiveServices } from "@/hooks/useEffectiveServices";
+import { usePendingCounts } from "@/hooks/usePendingCounts";
+
+/** href → pending-count key mapping for the three admin review queues. */
+const PENDING_COUNT_KEYS: Record<string, "qrClaims" | "posBookings" | "posSlips"> = {
+  "/dashboard/admin/qr": "qrClaims",
+  "/dashboard/admin/pos-bookings": "posBookings",
+  "/dashboard/admin/pos-slips": "posSlips",
+};
 
 /** Recursively filter nav items by a predicate applied to leaf links. Parent
  *  items (with children) are kept only if at least one child survives, so a
@@ -57,6 +65,16 @@ export function Sidebar({
   // Effective services (globally enabled AND enabled per-user). Null while
   // loading — service links stay hidden until the allowlist is known.
   const effectiveServices = useEffectiveServices();
+
+  // Live pending-action counts for admin review queues (QR Claims, POS
+  // Bookings, External POS Slips). Only fetches for staff roles.
+  const pendingCounts = usePendingCounts(isStaff);
+
+  /** Resolve the pending count for a nav item, or 0 if none. */
+  const countForHref = (href: string): number => {
+    const key = PENDING_COUNT_KEYS[href];
+    return key ? (pendingCounts?.[key] ?? 0) : 0;
+  };
 
   const groups: NavGroup[] = useMemo(() => {
     let base = navByRole[role];
@@ -154,6 +172,7 @@ export function Sidebar({
                       pathname={pathname}
                       collapsed={collapsed}
                       onClose={onClose}
+                      countForHref={countForHref}
                     />
                   ) : (
                     <NavLeaf
@@ -162,6 +181,7 @@ export function Sidebar({
                       pathname={pathname}
                       collapsed={collapsed}
                       onClose={onClose}
+                      pendingCount={countForHref(item.href)}
                     />
                   )
                 )}
@@ -220,20 +240,25 @@ function NavLeaf({
   pathname,
   collapsed,
   onClose,
+  pendingCount = 0,
 }: {
   item: NavItem;
   pathname: string;
   collapsed: boolean;
   onClose: () => void;
+  pendingCount?: number;
 }) {
   const Icon = item.icon;
   const active = isItemActive(item, pathname);
+  const hasPending = pendingCount > 0;
+  const countLabel = pendingCount > 99 ? "99+" : String(pendingCount);
+
   return (
     <li>
       <Link
         href={item.href}
         onClick={onClose}
-        title={collapsed ? item.label : undefined}
+        title={collapsed ? `${item.label}${hasPending ? ` (${countLabel})` : ""}` : undefined}
         className={cn(
           "group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200",
           collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
@@ -243,14 +268,35 @@ function NavLeaf({
           !collapsed && !active && "hover:translate-x-0.5"
         )}
       >
-        <Icon
-          className={cn(
-            "h-4 w-4 shrink-0",
-            active ? "text-white" : "text-ink-500 group-hover:text-ink-700"
+        {/* Icon with optional red notification dot when collapsed */}
+        <span className="relative shrink-0">
+          <Icon
+            className={cn(
+              "h-4 w-4",
+              active ? "text-white" : "text-ink-500 group-hover:text-ink-700"
+            )}
+          />
+          {collapsed && hasPending && (
+            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
           )}
-        />
+        </span>
+
         {!collapsed && <span className="truncate">{item.label}</span>}
-        {!collapsed && item.badge && (
+
+        {/* Pending-count badge takes priority over the static "New" badge */}
+        {!collapsed && hasPending && (
+          <span
+            className={cn(
+              "ml-auto grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none",
+              active
+                ? "bg-white/20 text-white"
+                : "bg-rose-500 text-white"
+            )}
+          >
+            {countLabel}
+          </span>
+        )}
+        {!collapsed && !hasPending && item.badge && (
           <span
             className={cn(
               "ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold",
@@ -273,15 +319,22 @@ function CollapsibleNavItem({
   pathname,
   collapsed,
   onClose,
+  countForHref,
 }: {
   item: NavItem;
   pathname: string;
   collapsed: boolean;
   onClose: () => void;
+  countForHref: (href: string) => number;
 }) {
   const children = item.children ?? [];
   const childActive = children.some((c) => isItemActive(c, pathname));
   const [open, setOpen] = useState(childActive);
+
+  // Aggregate pending count across all children for the parent badge.
+  const totalPending = children.reduce((sum, c) => sum + countForHref(c.href), 0);
+  const hasPending = totalPending > 0;
+  const countLabel = totalPending > 99 ? "99+" : String(totalPending);
 
   // Auto-expand when navigating into one of the children.
   useEffect(() => {
@@ -300,6 +353,7 @@ function CollapsibleNavItem({
             pathname={pathname}
             collapsed={collapsed}
             onClose={onClose}
+            pendingCount={countForHref(child.href)}
           />
         ))}
       </>
@@ -327,9 +381,16 @@ function CollapsibleNavItem({
           )}
         />
         <span className="truncate">{item.label}</span>
+        {/* Aggregate pending count for children — shown when group is collapsed */}
+        {hasPending && !open && (
+          <span className="ml-auto grid min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+            {countLabel}
+          </span>
+        )}
         <ChevronDown
           className={cn(
-            "ml-auto h-4 w-4 shrink-0 text-ink-400 transition-transform duration-200",
+            "shrink-0 text-ink-400 transition-transform duration-200",
+            hasPending && !open ? "ml-1.5 h-3.5 w-3.5" : "ml-auto h-4 w-4",
             open && "rotate-180"
           )}
         />
@@ -343,6 +404,7 @@ function CollapsibleNavItem({
               pathname={pathname}
               collapsed={collapsed}
               onClose={onClose}
+              pendingCount={countForHref(child.href)}
             />
           ))}
         </ul>

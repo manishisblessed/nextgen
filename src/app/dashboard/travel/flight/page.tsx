@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plane, ArrowRightLeft } from "lucide-react";
+import { Plane, ArrowRightLeft, TrendingUp, Clock, Shield, Tag } from "lucide-react";
 import { ServicePageHeader } from "@/components/dashboard/ServicePage";
 import { Input, Label, Select } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -29,6 +29,22 @@ type Flight = {
   fare: number;
   stops: string;
 };
+
+const popularRoutes = [
+  { from: "DEL", fromCity: "Delhi", to: "BOM", toCity: "Mumbai", price: 3499, tag: "Most booked" },
+  { from: "BLR", fromCity: "Bengaluru", to: "DEL", toCity: "Delhi", price: 4199, tag: "Best value" },
+  { from: "BOM", fromCity: "Mumbai", to: "GOI", toCity: "Goa", price: 2899, tag: "Weekend getaway" },
+  { from: "DEL", fromCity: "Delhi", to: "HYD", toCity: "Hyderabad", price: 3799, tag: "Top route" },
+  { from: "CCU", fromCity: "Kolkata", to: "BLR", toCity: "Bengaluru", price: 4599, tag: "Business favourite" },
+  { from: "MAA", fromCity: "Chennai", to: "BOM", toCity: "Mumbai", price: 3999, tag: "High demand" },
+];
+
+const perks = [
+  { icon: TrendingUp, label: "Best Agent Fares", desc: "Exclusive rates not available publicly" },
+  { icon: Clock, label: "Instant Confirmation", desc: "Tickets issued in under 60 seconds" },
+  { icon: Shield, label: "Secure Payments", desc: "PCI-DSS compliant payment gateway" },
+  { icon: Tag, label: "Commission Earned", desc: "Earn on every booking you make" },
+];
 
 const sampleFlights: Flight[] = [
   {
@@ -149,6 +165,75 @@ export default function FlightPage() {
           </div>
         </div>
       </form>
+
+      {!searched && (
+        <div className="mt-8 space-y-8">
+          {/* Perks */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {perks.map((p) => (
+              <div key={p.label} className="flex items-start gap-3 rounded-2xl border border-ink-100 bg-white p-4">
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+                  <p.icon className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-xs font-semibold text-ink-900">{p.label}</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-ink-500">{p.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Popular Routes */}
+          <div>
+            <h3 className="mb-3 font-display text-sm font-semibold text-ink-900">Popular Routes</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {popularRoutes.map((r) => (
+                <button
+                  key={r.from + r.to}
+                  type="button"
+                  onClick={() => {
+                    const fromVal = cities.find((c) => c.startsWith(r.from)) ?? cities[0];
+                    const toVal = cities.find((c) => c.startsWith(r.to)) ?? cities[2];
+                    setFrom(fromVal);
+                    setTo(toVal);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className="group flex items-center justify-between rounded-2xl border border-ink-100 bg-white px-4 py-3.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-soft"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-display text-base font-bold text-ink-900">{r.from}</span>
+                      <Plane className="h-3.5 w-3.5 rotate-90 text-ink-300" />
+                      <span className="font-display text-base font-bold text-ink-900">{r.to}</span>
+                    </div>
+                    <span className="rounded-full bg-accent-100 px-2 py-0.5 text-[10px] font-semibold text-accent-700">
+                      {r.tag}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-display text-sm font-bold text-brand-600">
+                      from {formatINR(r.price)}
+                    </p>
+                    <p className="text-[10px] text-ink-400">{r.fromCity} → {r.toCity}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Hero banner */}
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 via-brand-700 to-accent-500 p-6 text-white">
+            <div className="relative z-10">
+              <p className="text-xs font-semibold uppercase tracking-widest opacity-80">Agent Exclusive</p>
+              <h3 className="mt-1 font-display text-xl font-bold">Fly smarter, earn more</h3>
+              <p className="mt-1 max-w-md text-sm opacity-80">
+                Book domestic flights for your customers and earn commission on every ticket. Best fares, instant issuance.
+              </p>
+            </div>
+            <Plane className="absolute -right-4 -top-4 h-32 w-32 rotate-12 opacity-10" />
+          </div>
+        </div>
+      )}
 
       {searched && (
         <div className="mt-6 space-y-3">

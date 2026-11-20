@@ -61,6 +61,8 @@ export type ReportConfig = {
    * in createDispute). Aggregate/ledger reports must leave this off.
    */
   raiseTicket?: boolean;
+  /** When true, every row exposes a "Print Slip" action to print a receipt. */
+  printSlip?: boolean;
 };
 
 /* ------- option helpers --------------------------------------------- */
@@ -292,6 +294,7 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
       service: { label: "Bill type", options: opts(BILL_SERVICE_CODES) },
     },
     raiseTicket: true,
+    printSlip: true,
   },
 
   "credit-card": {
@@ -322,6 +325,7 @@ export const REPORTS: Record<ReportType, ReportConfig> = {
       status: { label: "Status", options: opts(TXN_STATUS) },
     },
     raiseTicket: true,
+    printSlip: true,
   },
 
   qr: {

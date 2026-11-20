@@ -13,7 +13,6 @@ import {
   Loader2,
   FileDown,
   CheckCircle2,
-  Ban,
   ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
@@ -27,6 +26,8 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { generateRefId, formatINR } from "@/lib/utils";
 import { useAuth } from "@/lib/useAuth";
+import { GatewayCompareCards } from "@/components/dashboard/GatewayCompareCards";
+import type { GatewayPlan } from "@/app/api/wallet/topup/plans/route";
 
 type WalletTxn = {
   id: string;
@@ -72,23 +73,6 @@ type PendingTopup = {
   upiIntent?: string;
 };
 
-type PgChannel = {
-  id: string;
-  label: string;
-  route: string;
-  provider: string;
-  primary: boolean;
-  healthy: boolean;
-  detail: string;
-  checkedAt: string;
-  maxAmount?: number;
-};
-
-const PROVIDER_LABELS: Record<string, string> = {
-  VIABLE_PG: "Viable",
-  CHAGANS_PG: "Chagan",
-};
-
 type TopupQuote = {
   priceable: boolean;
   gross?: number;
@@ -103,9 +87,11 @@ export default function WalletPage() {
   const [fetching, setFetching] = useState(true);
   const [mode, setMode] = useState<"add" | "withdraw">("add");
   const [amount, setAmount] = useState("");
-  const [channels, setChannels] = useState<PgChannel[]>([]);
+  const [plans, setPlans] = useState<GatewayPlan[]>([]);
   const [channel, setChannel] = useState<string>("");
   const [channelsLoading, setChannelsLoading] = useState(false);
+  // topupStep: "select" = gateway comparison; "pay" = amount entry
+  const [topupStep, setTopupStep] = useState<"select" | "pay">("select");
   const [loading, setLoading] = useState(false);
   const [quote, setQuote] = useState<TopupQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -145,25 +131,22 @@ export default function WalletPage() {
   const fetchChannels = useCallback(async () => {
     try {
       setChannelsLoading(true);
-      // Health is served from the shared worker snapshot + short server cache;
-      // the refresh button simply re-reads it (no user-triggered probe orders).
-      const res = await fetch(`/api/wallet/topup/channels`);
+      const res = await fetch(`/api/wallet/topup/plans`);
       if (!res.ok) return;
-      const d = (await res.json()) as { channels?: PgChannel[] };
-      const list = d.channels ?? [];
-      setChannels(list);
+      const d = (await res.json()) as { plans?: GatewayPlan[] };
+      const list = d.plans ?? [];
+      setPlans(list);
       if (list.length) {
         const healthy = list.filter((c) => c.healthy);
         const preferred =
           list.find((c) => c.primary && c.healthy) || healthy[0] || list.find((c) => c.primary) || list[0];
-        // Keep the user's pick if it's still healthy; otherwise pick the best.
         setChannel((prev) => {
           const kept = list.find((c) => c.id === prev && c.healthy);
-          return kept ? prev : preferred.id;
+          return kept ? prev : (preferred?.id ?? "");
         });
       }
     } catch {
-      /* selector just won't render — top-up still works on the default gateway */
+      /* plans won't render — top-up still works on the default gateway */
     } finally {
       setChannelsLoading(false);
     }
@@ -277,7 +260,7 @@ export default function WalletPage() {
   // that can't be priced. Debounced on amount/gateway changes.
   useEffect(() => {
     const amt = Number(amount);
-    if (!canTopup || mode !== "add" || pending || !amt || amt <= 0) {
+    if (!canTopup || mode !== "add" || pending || topupStep !== "pay" || !amt || amt <= 0) {
       setQuote(null);
       setQuoteLoading(false);
       return;
@@ -305,7 +288,7 @@ export default function WalletPage() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [amount, channel, canTopup, mode, pending]);
+  }, [amount, channel, canTopup, mode, pending, topupStep]);
 
   async function submitTopup(e: React.FormEvent) {
     e.preventDefault();
@@ -488,8 +471,67 @@ export default function WalletPage() {
                 </Button>
               </div>
             </div>
+          ) : topupStep === "select" && plans.length > 1 ? (
+            /* ── Step 1: Gateway comparison cards ── */
+            <div className="mt-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-ink-900">Choose a Payment Gateway</p>
+                  <p className="text-xs text-ink-500">Compare plans and select the one that suits you best</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchChannels()}
+                  disabled={channelsLoading}
+                  className="flex items-center gap-1 text-[11px] font-medium text-ink-500 hover:text-brand-600 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3 w-3 ${channelsLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </button>
+              </div>
+              {channelsLoading ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-ink-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading gateways…
+                </div>
+              ) : (
+                <GatewayCompareCards
+                  plans={plans}
+                  selected={channel}
+                  onSelect={(id) => {
+                    setChannel(id);
+                    setTopupStep("pay");
+                  }}
+                />
+              )}
+              {plans.every((p) => !p.healthy) && (
+                <p className="text-[11px] text-rose-600">
+                  All payment gateways are currently unavailable. Please try again shortly.
+                </p>
+              )}
+            </div>
           ) : (
+            /* ── Step 2 (or single-gateway): Amount entry form ── */
             <form onSubmit={submitTopup} className="mt-5 grid gap-4 sm:grid-cols-2">
+              {/* Back to gateway selection when multiple plans exist */}
+              {plans.length > 1 && (
+                <div className="sm:col-span-2 flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/60 px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-ink-500">Selected gateway</p>
+                    <p className="text-sm font-semibold text-brand-700 truncate">
+                      {plans.find((p) => p.id === channel)?.label ?? channel}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setAmount(""); setTopupStep("select"); }}
+                    className="text-xs font-medium text-brand-600 hover:text-brand-800 whitespace-nowrap"
+                  >
+                    Change
+                  </button>
+                </div>
+              )}
+
               <div className="sm:col-span-2">
                 <Label htmlFor="amount">Amount (₹)</Label>
                 <Input
@@ -515,72 +557,6 @@ export default function WalletPage() {
                   ))}
                 </div>
               </div>
-
-              {channels.length > 0 && (
-                <div className="sm:col-span-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Payment gateway</Label>
-                    <button
-                      type="button"
-                      onClick={() => fetchChannels()}
-                      disabled={channelsLoading}
-                      className="flex items-center gap-1 text-[11px] font-medium text-ink-500 hover:text-brand-600 disabled:opacity-60"
-                      title="Refresh gateway status"
-                    >
-                      <RefreshCw className={`h-3 w-3 ${channelsLoading ? "animate-spin" : ""}`} />
-                      Refresh status
-                    </button>
-                  </div>
-                  <div className="mt-1 grid grid-cols-2 gap-2">
-                    {channels.map((c) => {
-                      const active = channel === c.id;
-                      return (
-                        <button
-                          type="button"
-                          key={c.id}
-                          disabled={!c.healthy}
-                          onClick={() => c.healthy && setChannel(c.id)}
-                          className={`flex flex-col items-start gap-0.5 rounded-xl border-2 px-3 py-2 text-left transition ${
-                            !c.healthy
-                              ? "cursor-not-allowed border-ink-100 bg-ink-50/60 opacity-70"
-                              : active
-                                ? "border-brand-500 bg-brand-50"
-                                : "border-ink-100 bg-white hover:border-ink-200"
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5 text-xs font-semibold text-ink-800">
-                            {c.healthy ? (
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                            ) : (
-                              <Ban className="h-3.5 w-3.5 text-rose-500" />
-                            )}
-                            {c.label}
-                            {c.primary && (
-                              <Badge variant="brand" className="ml-1">
-                                Primary
-                              </Badge>
-                            )}
-                          </span>
-                          <span className={`text-[11px] ${c.healthy ? "text-emerald-600" : "text-rose-500"}`}>
-                            {PROVIDER_LABELS[c.provider] ?? c.provider}
-                            {" · "}
-                            {c.healthy
-                              ? c.maxAmount
-                                ? `up to ${formatINR(c.maxAmount)}`
-                                : "Available"
-                              : c.detail || "Unavailable"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {channels.every((c) => !c.healthy) && (
-                    <p className="mt-1.5 text-[11px] text-rose-600">
-                      All payment gateways are currently unavailable. Please try again shortly.
-                    </p>
-                  )}
-                </div>
-              )}
 
               {/* Live pricing — gateway charge + exact amount credited, or the
                   "not enabled" state when the retailer has no PG scheme slab. */}

@@ -31,10 +31,10 @@ const Body = z
   .object({
     qrId: z.string().min(8),
     amount: z.number().positive(),
-    // RuPay credit-card collections: card last 4 is required, UPI UTR and the
-    // paid-on time are optional.
+    // RuPay credit-card collections: card last 4 is required; UTR is now also
+    // required for all QR settlement claims as a mandatory reconciliation reference.
     cardLast4: z.string().regex(/^\d{4}$/, "Enter the last 4 digits of the RuPay card"),
-    utr: z.string().min(12).max(20).optional(),
+    utr: z.string().min(12).max(20, "UTR must be 12–20 digits"),
     paidAt: z.string().datetime().optional(),
     screenshotDataUrl: z
       .string()
@@ -116,7 +116,7 @@ export async function POST(req: Request) {
       qrId: parsed.data.qrId,
       amount: parsed.data.amount,
       cardLast4: parsed.data.cardLast4,
-      utr: parsed.data.utr ?? null,
+      utr: parsed.data.utr,
       paidAt: parsed.data.paidAt ? new Date(parsed.data.paidAt) : null,
       screenshotHash,
     };

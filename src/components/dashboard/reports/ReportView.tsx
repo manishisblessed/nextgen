@@ -13,12 +13,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  Printer,
 } from "lucide-react";
 import { LifeBuoy } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Sparkline } from "@/components/dashboard/Sparkline";
 import { ReportActions } from "@/components/dashboard/ReportActions";
 import { RaiseTicketModal, type RaiseTicketPayload } from "@/components/dashboard/reports/RaiseTicketModal";
+import { BillSlipModal } from "@/components/dashboard/reports/BillSlipModal";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Label } from "@/components/ui/Input";
@@ -281,7 +283,9 @@ export function ReportView({ type }: { type: ReportType }) {
 
   // Raise-ticket modal (reports are the only place users open a support ticket).
   const canRaiseTicket = !!config.raiseTicket;
+  const canPrintSlip = !!config.printSlip;
   const [ticket, setTicket] = useState<RaiseTicketPayload | null>(null);
+  const [slipRow, setSlipRow] = useState<Row | null>(null);
   const openTicket = useCallback(
     (row: Row) => {
       setTicket({
@@ -536,7 +540,7 @@ export function ReportView({ type }: { type: ReportType }) {
                     {c.header}
                   </th>
                 ))}
-                {canRaiseTicket && (
+                {(canRaiseTicket || canPrintSlip) && (
                   <th className="whitespace-nowrap px-5 py-3 text-right font-semibold">Action</th>
                 )}
               </tr>
@@ -550,7 +554,7 @@ export function ReportView({ type }: { type: ReportType }) {
                         <div className="h-3 w-20 animate-pulse rounded bg-ink-100" />
                       </td>
                     ))}
-                    {canRaiseTicket && (
+                    {(canRaiseTicket || canPrintSlip) && (
                       <td className="px-5 py-3.5">
                         <div className="ml-auto h-3 w-16 animate-pulse rounded bg-ink-100" />
                       </td>
@@ -559,7 +563,7 @@ export function ReportView({ type }: { type: ReportType }) {
                 ))
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={config.columns.length + (canRaiseTicket ? 1 : 0)} className="px-5 py-14 text-center text-sm text-ink-500">
+                  <td colSpan={config.columns.length + (canRaiseTicket || canPrintSlip ? 1 : 0)} className="px-5 py-14 text-center text-sm text-ink-500">
                     No records match your filters.
                   </td>
                 </tr>
@@ -571,19 +575,31 @@ export function ReportView({ type }: { type: ReportType }) {
                         {displayCell(row[c.key], c.format)}
                       </td>
                     ))}
-                    {canRaiseTicket && (
+                    {(canRaiseTicket || canPrintSlip) && (
                       <td className="whitespace-nowrap px-5 py-3 text-right">
-                        {isTicketable(row) ? (
-                          <button
-                            type="button"
-                            onClick={() => openTicket(row)}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-100"
-                          >
-                            <LifeBuoy className="h-3.5 w-3.5" /> Raise ticket
-                          </button>
-                        ) : (
-                          <span className="text-ink-300">—</span>
-                        )}
+                        <div className="inline-flex items-center gap-2">
+                          {canPrintSlip && (
+                            <button
+                              type="button"
+                              onClick={() => setSlipRow(row)}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-ink-50 px-3 py-1.5 text-xs font-semibold text-ink-700 transition hover:border-ink-300 hover:bg-ink-100"
+                            >
+                              <Printer className="h-3.5 w-3.5" /> Print Slip
+                            </button>
+                          )}
+                          {canRaiseTicket && isTicketable(row) && (
+                            <button
+                              type="button"
+                              onClick={() => openTicket(row)}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-100"
+                            >
+                              <LifeBuoy className="h-3.5 w-3.5" /> Raise ticket
+                            </button>
+                          )}
+                          {!canPrintSlip && canRaiseTicket && !isTicketable(row) && (
+                            <span className="text-ink-300">—</span>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -607,7 +623,7 @@ export function ReportView({ type }: { type: ReportType }) {
                       </td>
                     );
                   })}
-                  {canRaiseTicket && <td className="px-5 py-3" />}
+                  {(canRaiseTicket || canPrintSlip) && <td className="px-5 py-3" />}
                 </tr>
               </tfoot>
             )}
@@ -632,6 +648,7 @@ export function ReportView({ type }: { type: ReportType }) {
       </div>
 
       {canRaiseTicket && <RaiseTicketModal payload={ticket} onClose={() => setTicket(null)} />}
+      {canPrintSlip && <BillSlipModal row={slipRow} onClose={() => setSlipRow(null)} />}
     </div>
   );
 }

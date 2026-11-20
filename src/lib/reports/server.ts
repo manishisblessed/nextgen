@@ -898,12 +898,17 @@ async function reportBillPayment(user: SessionUser, params: ReportParams): Promi
       gst: toNumber(gst),
       totalDebit: toNumber(add(r.amount, r.fee)),
       status: r.status,
-      mobile:
-        pickField(
+      mobile: (() => {
+        const v = pickField(
           bag,
           ["mobileno", "mobile", "customermobile", "customernumber", "registeredmobile", "contactnumber", "phone", "msisdn"],
           ["mobile"]
-        ) ?? "—",
+        );
+        if (v) return v;
+        // Fall back to r.customer when it looks like a phone number (10–13 digits).
+        if (r.customer && /^\d{10,13}$/.test(r.customer.replace(/\s/g, ""))) return r.customer;
+        return "—";
+      })(),
       card:
         maskCard(pickField(bag, ["cardlast4", "cardnumber", "card", "accountno", "number"], ["card"])) ?? "—",
       referenceNo: providerReference(r.response) ?? r.partnerTxnId ?? "—",

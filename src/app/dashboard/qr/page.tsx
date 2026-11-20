@@ -580,6 +580,11 @@ export default function QrCollectionsPage() {
       toast.error("Enter the last 4 digits of the RuPay card");
       return;
     }
+    const trimmedUtr = utr.trim();
+    if (!trimmedUtr || trimmedUtr.length < 12) {
+      toast.error("UTR / reference number is required (minimum 12 digits)");
+      return;
+    }
     const remaining = collectQr.headroom?.remainingAmount;
     const claimAmount = Number(amount);
     if (remaining != null && Number.isFinite(claimAmount) && claimAmount > remaining) {
@@ -592,7 +597,6 @@ export default function QrCollectionsPage() {
     }
     setBusy(true);
     try {
-      const trimmedUtr = utr.trim();
       const res = await fetch("/api/qr/claims", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -600,8 +604,7 @@ export default function QrCollectionsPage() {
           qrId: collectQr.id,
           amount: Number(amount),
           cardLast4: cardLast4.trim(),
-          // UPI UTR and the paid-on time are optional (card collections omit them).
-          ...(trimmedUtr ? { utr: trimmedUtr } : {}),
+          utr: trimmedUtr,
           ...(paidAt ? { paidAt: new Date(paidAt).toISOString() } : {}),
           screenshotDataUrl: screenshot.dataUrl,
         }),
@@ -971,18 +974,19 @@ export default function QrCollectionsPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label htmlFor="claim-utr">UPI UTR / reference number (12 digits)</Label>
+              <Label htmlFor="claim-utr">UTR / Reference number <span className="text-rose-500">*</span></Label>
               <Input
                 id="claim-utr"
+                required
                 inputMode="numeric"
                 minLength={12}
-                maxLength={14}
+                maxLength={20}
                 value={utr}
                 onChange={(e) => setUtr(e.target.value)}
                 placeholder="e.g. 415023987654"
               />
               <p className="mt-1 text-xs text-ink-500">
-                Optional — shown in the customer&apos;s UPI app under &quot;UTR&quot; or &quot;UPI Ref No&quot;.
+                Required — shown in the customer&apos;s UPI app under &quot;UTR&quot; or &quot;UPI Ref No&quot; (12–20 digits).
               </p>
             </div>
             <div>
@@ -1050,7 +1054,7 @@ export default function QrCollectionsPage() {
             type="submit"
             size="lg"
             className="w-full"
-            disabled={busy || !collectQr || !screenshot || cardLast4.trim().length !== 4}
+            disabled={busy || !collectQr || !screenshot || cardLast4.trim().length !== 4 || utr.trim().length < 12}
             isLoading={busy}
           >
             Submit claim{amount ? ` for ${formatINR(Number(amount) || 0)}` : ""}
