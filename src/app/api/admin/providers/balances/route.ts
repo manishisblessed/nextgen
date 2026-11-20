@@ -177,7 +177,8 @@ async function probeChagans(): Promise<ProviderBalance> {
         : r.data.mainBalance !== r.data.balance
         ? `Main: ₹${r.data.mainBalance.toFixed(2)}`
         : null;
-    return { ...base, balance: r.data.balance, detail };
+    const usable = r.data.balance || r.data.mainBalance || 0;
+    return { ...base, balance: usable, detail };
   } catch (e) {
     return { ...base, error: e instanceof Error ? e.message : "probe failed" };
   }

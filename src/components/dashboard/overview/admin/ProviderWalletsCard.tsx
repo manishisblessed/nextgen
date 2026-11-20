@@ -55,7 +55,7 @@ const PROVIDER_META: Record<
     icon: ShieldCheck,
   },
   chagans: {
-    subtitle: "CC Bill Pay float · Chagans",
+    subtitle: "Chagan Wallet",
     tint: "amber",
     icon: Banknote,
   },
